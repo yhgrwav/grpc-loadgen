@@ -30,3 +30,29 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# --- grpc-loadgen ---
+
+# Local task tracker, not shared
+TASK.md
+
+# Build output
+/bin/
+/dist/
+grpc-loadgen
+grpc-loadgen.exe
+
+# Run artifacts: reports, raw samples, profiles
+/reports/
+*.report.json
+*.hdr
+
+# Local configs (commit examples under examples/ instead)
+*.local.yaml
+*.local.yml
+config.local.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
