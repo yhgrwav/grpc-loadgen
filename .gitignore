@@ -56,3 +56,6 @@ config.local.*
 .idea/
 .vscode/
 *.swp
+
+# Local Claude context
+CLAUDE.md
