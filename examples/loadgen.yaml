@@ -1,0 +1,16 @@
+app:
+  target:
+    ip: localhost
+    port: 50051
+  tls: false
+
+load:
+  warmup: 5s
+  calls:
+    - method: wallet.v1.WalletService/GetBalance
+      rps: 800
+      duration: 1m
+
+    - method: wallet.v1.WalletService/Transfer
+      rps: 50
+      duration: 1m
