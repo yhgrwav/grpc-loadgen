@@ -31,6 +31,8 @@ type MasterConfig struct {
 type App struct {
 	Target  ConnectionStringTarget `yaml:"target"`
 	Address ConnectionString       `yaml:"-"`
+	TLS     *bool                  `yaml:"tls"`
+	UseTLS  bool                   `yaml:"-"`
 }
 
 type ConnectionStringTarget struct {
@@ -48,4 +50,12 @@ func (c ConnectionStringTarget) CreateConnectionString() (ConnectionString, erro
 		return "", fmt.Errorf("%w: %d", ErrInvalidPort, c.Port)
 	}
 	return ConnectionString(fmt.Sprintf("%s:%d", c.IP, c.Port)), nil
+}
+
+func (a *App) ResolveTLS() {
+	if a.TLS == nil {
+		a.UseTLS = true
+		return
+	}
+	a.UseTLS = *a.TLS
 }

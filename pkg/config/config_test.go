@@ -76,3 +76,29 @@ func TestCreateConnectionString(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveTLS(t *testing.T) {
+	enabled, disabled := true, false
+
+	tests := []struct {
+		name string
+		tls  *bool
+		want bool
+	}{
+		{name: "unset defaults to TLS", tls: nil, want: true},
+		{name: "explicitly enabled", tls: &enabled, want: true},
+		{name: "explicitly disabled", tls: &disabled, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := App{TLS: tt.tls}
+
+			app.ResolveTLS()
+
+			if app.UseTLS != tt.want {
+				t.Errorf("UseTLS = %v, want %v", app.UseTLS, tt.want)
+			}
+		})
+	}
+}
