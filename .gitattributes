@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.go       text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.sh       text eol=lf
+go.mod     text eol=lf
+go.sum     text eol=lf
+
+*.png      binary
+*.jpg      binary
+*.gif      binary
+*.ico      binary
+*.pdf      binary
+*.golden   -text
