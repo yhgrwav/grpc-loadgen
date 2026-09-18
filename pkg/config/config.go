@@ -17,15 +17,23 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 )
 
 var (
-	ErrInvalidIP   = errors.New("got empty IP")
-	ErrInvalidPort = errors.New("got invalid port")
+	ErrInvalidIP       = errors.New("got empty IP")
+	ErrInvalidPort     = errors.New("got invalid port")
+	ErrNoCalls         = errors.New("no calls configured")
+	ErrInvalidMethod   = errors.New("method must look like package.Service/Method")
+	ErrInvalidRPS      = errors.New("rps must be positive")
+	ErrInvalidDuration = errors.New("duration must be positive")
+	ErrInvalidWarmup   = errors.New("warmup must not be negative")
 )
 
 type MasterConfig struct {
-	App App `yaml:"app"`
+	App  App  `yaml:"app"`
+	Load Load `yaml:"load"`
 }
 
 type App struct {
@@ -41,6 +49,17 @@ type ConnectionStringTarget struct {
 }
 
 type ConnectionString string
+
+type Load struct {
+	Warmup time.Duration `yaml:"warmup"`
+	Calls  []Call        `yaml:"calls"`
+}
+
+type Call struct {
+	Method   string        `yaml:"method"`
+	RPS      int           `yaml:"rps"`
+	Duration time.Duration `yaml:"duration"`
+}
 
 func (c ConnectionStringTarget) CreateConnectionString() (ConnectionString, error) {
 	if c.IP == "" {
@@ -58,4 +77,48 @@ func (a *App) ResolveTLS() {
 		return
 	}
 	a.UseTLS = *a.TLS
+}
+
+func (l Load) Validate() error {
+	var errs []error
+
+	if l.Warmup < 0 {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidWarmup, l.Warmup))
+	}
+	if len(l.Calls) == 0 {
+		errs = append(errs, ErrNoCalls)
+	}
+	for i, call := range l.Calls {
+		if err := call.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("call %d: %w", i, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (c Call) Validate() error {
+	var errs []error
+
+	if !isMethodName(c.Method) {
+		errs = append(errs, fmt.Errorf("%w: %q", ErrInvalidMethod, c.Method))
+	}
+	if c.RPS < 1 {
+		errs = append(errs, fmt.Errorf("%w: %d", ErrInvalidRPS, c.RPS))
+	}
+	if c.Duration <= 0 {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidDuration, c.Duration))
+	}
+
+	return errors.Join(errs...)
+}
+
+func isMethodName(method string) bool {
+	service, name, found := strings.Cut(method, "/")
+
+	return found &&
+		name != "" &&
+		strings.Contains(service, ".") &&
+		!strings.HasPrefix(service, ".") &&
+		!strings.HasSuffix(service, ".")
 }

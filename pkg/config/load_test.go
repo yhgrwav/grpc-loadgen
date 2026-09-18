@@ -1,0 +1,138 @@
+// Copyright 2026 yhgrwav
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package config_test
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/goccy/go-yaml"
+
+	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+)
+
+func TestLoadParsesDurations(t *testing.T) {
+	const raw = `
+app:
+  target:
+    ip: localhost
+    port: 50051
+  tls: false
+load:
+  warmup: 10s
+  calls:
+    - method: wallet.v1.WalletService/GetBalance
+      rps: 800
+      duration: 1m
+`
+
+	var cfg config.MasterConfig
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if cfg.Load.Warmup != 10*time.Second {
+		t.Errorf("warmup = %s, want 10s", cfg.Load.Warmup)
+	}
+	if len(cfg.Load.Calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(cfg.Load.Calls))
+	}
+	if got := cfg.Load.Calls[0].Duration; got != time.Minute {
+		t.Errorf("duration = %s, want 1m", got)
+	}
+	if got := cfg.Load.Calls[0].RPS; got != 800 {
+		t.Errorf("rps = %d, want 800", got)
+	}
+}
+
+func TestCallValidate(t *testing.T) {
+	valid := config.Call{
+		Method:   "wallet.v1.WalletService/GetBalance",
+		RPS:      800,
+		Duration: time.Minute,
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*config.Call)
+		wantErr error
+	}{
+		{name: "valid", mutate: func(*config.Call) {}},
+		{name: "empty method", mutate: func(c *config.Call) { c.Method = "" }, wantErr: config.ErrInvalidMethod},
+		{name: "method without service", mutate: func(c *config.Call) { c.Method = "GetBalance" }, wantErr: config.ErrInvalidMethod},
+		{name: "method without package", mutate: func(c *config.Call) { c.Method = "WalletService/GetBalance" }, wantErr: config.ErrInvalidMethod},
+		{name: "method without name", mutate: func(c *config.Call) { c.Method = "wallet.v1.WalletService/" }, wantErr: config.ErrInvalidMethod},
+		{name: "zero rps", mutate: func(c *config.Call) { c.RPS = 0 }, wantErr: config.ErrInvalidRPS},
+		{name: "negative rps", mutate: func(c *config.Call) { c.RPS = -1 }, wantErr: config.ErrInvalidRPS},
+		{name: "zero duration", mutate: func(c *config.Call) { c.Duration = 0 }, wantErr: config.ErrInvalidDuration},
+		{name: "negative duration", mutate: func(c *config.Call) { c.Duration = -time.Second }, wantErr: config.ErrInvalidDuration},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := valid
+			tt.mutate(&call)
+
+			err := call.Validate()
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCallValidateReportsEveryProblem(t *testing.T) {
+	call := config.Call{}
+
+	err := call.Validate()
+
+	for _, want := range []error{config.ErrInvalidMethod, config.ErrInvalidRPS, config.ErrInvalidDuration} {
+		if !errors.Is(err, want) {
+			t.Errorf("error %v does not report %v", err, want)
+		}
+	}
+}
+
+func TestLoadValidate(t *testing.T) {
+	call := config.Call{
+		Method:   "wallet.v1.WalletService/GetBalance",
+		RPS:      800,
+		Duration: time.Minute,
+	}
+
+	tests := []struct {
+		name    string
+		load    config.Load
+		wantErr error
+	}{
+		{name: "valid", load: config.Load{Calls: []config.Call{call}}},
+		{name: "warmup is optional", load: config.Load{Warmup: 0, Calls: []config.Call{call}}},
+		{name: "no calls", load: config.Load{}, wantErr: config.ErrNoCalls},
+		{name: "negative warmup", load: config.Load{Warmup: -time.Second, Calls: []config.Call{call}}, wantErr: config.ErrInvalidWarmup},
+		{name: "broken call", load: config.Load{Calls: []config.Call{{}}}, wantErr: config.ErrInvalidMethod},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.load.Validate()
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
