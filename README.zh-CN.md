@@ -108,8 +108,11 @@ internal/           私有辅助代码
 
 ## 参与贡献
 
-**欢迎提 issue 和参与讨论。暂不接受 pull request**——CLA 机器人尚未配置，
-而未经 CLA 合入的代码日后无法重新授权。请改为创建 issue。
+欢迎提 issue 和参与讨论。作者签署 [CLA](CLA.md) 后即可合入 pull request——
+只需在 PR 中留一条评论，由机器人自动校验。上手方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+CLA 是一份许可，而非权利转让：贡献的著作权仍归你所有。它授予项目所有者再许可与变更许可证的权利，
+使日后变更许可证时无需再逐一征得每位历史贡献者的同意。
 
 依赖只允许使用宽松许可证（Apache-2.0 / MIT / BSD / ISC）。出现 copyleft 依赖时 CI 会失败。
 

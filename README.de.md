@@ -115,9 +115,14 @@ Auslieferungswege hängen vom Kern ab; der Kern von keinem von ihnen.
 
 ## Mitwirken
 
-**Issues und Diskussionen sind willkommen. Pull Requests werden noch nicht angenommen** — es gibt
-keinen CLA-Bot, und ohne CLA übernommener Code lässt sich später nicht umlizenzieren. Bitte
-stattdessen ein Issue eröffnen.
+Issues und Diskussionen sind willkommen. Pull Requests werden angenommen, sobald die Autorin
+oder der Autor das [CLA](CLA.md) unterzeichnet hat — ein Kommentar am Pull Request, automatisch
+geprüft. Einstieg: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Das CLA ist eine Lizenz, keine Rechteübertragung: das Urheberrecht am Beitrag bleibt bei der
+beitragenden Person. Es räumt der Projektleitung das Recht ein, das Projekt zu unterlizenzieren
+und umzulizenzieren, damit ein späterer Lizenzwechsel nicht die Zustimmung aller früheren
+Beitragenden erfordert.
 
 Abhängigkeiten nur unter permissiven Lizenzen (Apache-2.0 / MIT / BSD / ISC). Bei Copyleft
 schlägt die CI fehl.

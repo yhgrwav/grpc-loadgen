@@ -112,8 +112,13 @@ mechanisms depend on the core; the core depends on none of them.
 
 ## Contributing
 
-**Issues and discussions are welcome. Pull requests are not accepted yet** — a CLA bot is not in
-place, and code merged without one cannot be relicensed later. Please open an issue instead.
+Issues and discussions are welcome. Pull requests are accepted once the author has signed the
+[CLA](CLA.md) — one comment on the pull request, checked automatically. See
+[CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+The CLA is a license, not a transfer of ownership: you keep the copyright in your contribution.
+It grants the project owner the right to sublicense and relicense the project, so a future
+license change does not require tracking down every past contributor.
 
 Dependencies must be permissively licensed (Apache-2.0 / MIT / BSD / ISC). CI fails on copyleft.
 
