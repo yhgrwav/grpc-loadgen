@@ -39,8 +39,8 @@ TASK.md
 # Build output
 /bin/
 /dist/
-grpc-loadgen
-grpc-loadgen.exe
+/grpc-loadgen
+/grpc-loadgen.exe
 
 # Run artifacts: reports, raw samples, profiles
 /reports/
