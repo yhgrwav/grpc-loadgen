@@ -1,0 +1,26 @@
+# Vendored dependencies: large, not authored here.
+vendor/
+
+# Build output and binaries.
+bin/
+dist/
+*.exe
+*.test
+
+# Run artifacts and profiles: large, generated, no signal.
+reports/
+*.report.json
+*.hdr
+*.out
+*.pprof
+coverage.*
+
+# Generated protobuf code and large fixtures.
+**/*.pb.go
+**/*_grpc.pb.go
+**/testdata/
+
+# Full license text; the constraint lives in README/CI.
+LICENSE
+
+go.sum
