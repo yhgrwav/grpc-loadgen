@@ -1,0 +1,55 @@
+- name: bug
+  color: d73a4a
+  description: Что-то работает не так, как заявлено
+
+- name: feature
+  color: 0e8a16
+  description: Новая возможность
+
+- name: ci
+  color: 1d76db
+  description: Сборка, пайплайны, релизы
+
+- name: test
+  color: 5319e7
+  description: Тесты и эталонный стенд
+
+- name: docs
+  color: 0075ca
+  description: Документация
+
+- name: chore
+  color: cfd3d7
+  description: Обслуживание, зависимости, мелочи
+
+- name: area/core
+  color: fbca04
+  description: Ядро и CLI — pkg/, cmd/, internal/
+
+- name: area/testing
+  color: fbca04
+  description: Корректность измерений, эталонный стенд
+
+- name: area/release
+  color: fbca04
+  description: Сборка, контейнеры, выпуск версий
+
+- name: stage/0-mvp
+  color: c5def5
+  description: Этап 0 — работающий движок нагрузки
+
+- name: stage/1-deps
+  color: c5def5
+  description: Этап 1 — связывание вызовов по данным
+
+- name: stage/2-usability
+  color: c5def5
+  description: Этап 2 — .proto, streaming, контейнеризация
+
+- name: good first issue
+  color: 7057ff
+  description: Подходит для первого вклада
+
+- name: blocked
+  color: b60205
+  description: Ждёт другого изменения или ответа

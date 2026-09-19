@@ -1,0 +1,27 @@
+name: Предложение
+description: Не хватает возможности.
+labels: ["feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу вы решали
+      description: |
+        Опишите задачу, а не только желаемое решение: часто она решается иначе
+        и дешевле.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое решение
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Что пробовали вместо этого
+    validations:
+      required: false

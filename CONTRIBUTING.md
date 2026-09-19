@@ -59,3 +59,74 @@ cannot be merged.
   identifiers are required; comments that narrate what the code does are not.
 - Commit messages are written in English, in the imperative mood, explaining
   what changes and why.
+
+## For the team
+
+The repository is worked on by three people in parallel, in different areas. The split exists to
+keep two people out of the same files, not as bureaucracy.
+
+| Area | Paths | Owner |
+|---|---|---|
+| Engine and CLI | `pkg/`, `cmd/`, `internal/` | project owner |
+| Reference stand and measurement tests | `test/` | QA/AQA |
+| Build, releases, infrastructure | `.github/`, `.goreleaser.yaml`, `Dockerfile` | DevOps |
+
+**Do not change another area without agreeing it first.** If your change needs an edit outside
+your own, say so in the pull request and get the owner of that area to look at it. `CODEOWNERS`
+requests their review automatically; the rule is there so the request is expected rather than a
+surprise.
+
+### Branches
+
+Trunk-based with short-lived branches. There is no `develop` branch and there are no release
+branches: the project has one version at a time, and an extra long-lived branch would add a
+synchronization step without solving anything.
+
+```
+main                    always green and releasable; direct pushes are rejected
+feat/scheduler-drift    a few days of work, then squashed into main
+fix/rps-accuracy
+ci/goreleaser
+test/stub-server
+docs/config-reference
+```
+
+A release is a `vX.Y.Z` tag on `main`; the pipeline does the rest.
+
+### Commits and pull request titles
+
+[Conventional Commits](https://www.conventionalcommits.org/) are mandatory: the release changelog
+is generated from them.
+
+```
+feat: add an explicit in-flight cap
+fix: count scheduled time instead of send time
+ci: publish binaries with goreleaser
+test: add a stand that freezes on demand
+docs: describe the threshold syntax
+chore: bump goccy/go-yaml
+```
+
+The pull request title follows the same format and is checked in CI, because a squash merge turns
+that title into the commit message in `main`.
+
+### Review and merge
+
+One approval is required, and the lint, test and CLA checks must be green. Merging is squash-only,
+so one task becomes one commit; the branch is deleted automatically afterwards.
+
+### Locally before a pull request
+
+```console
+$ go test ./...
+$ golangci-lint run ./...
+```
+
+Both run in CI on Go 1.24 and on the latest release. Run them before pushing — it is faster than
+waiting for the pipeline.
+
+### The CLA comes first
+
+Sign the [CLA](CLA.md) before your first pull request is merged: one comment on the pull request,
+checked automatically. Nothing can be merged without it, so signing early avoids a finished
+review waiting on paperwork.

@@ -1,0 +1,67 @@
+name: Корректность измерений
+description: Числа в отчёте не соответствуют тому, что происходило в реальности.
+labels: ["bug", "area/testing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Этот шаблон — для случаев, когда инструмент врёт: показывает не ту латенси,
+        не ту интенсивность, теряет ошибки. Такие баги важнее функциональных:
+        измерительный прибор, который врёт, хуже отсутствующего.
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+    validations:
+      required: true
+
+  - type: textarea
+    id: stand
+    attributes:
+      label: Стенд
+      description: |
+        Что стояло на другом конце и как было настроено: задержка ответа, её
+        распределение, искусственные зависания, лимиты.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Конфиг прогона
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_numbers
+    attributes:
+      label: Ожидаемые числа
+      description: |
+        Что должно было получиться и из какого расчёта. Например: стенд зависает
+        на 1с при цели 1000 RPS, значит p99 должен быть около 1000ms.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_numbers
+    attributes:
+      label: Фактические числа
+      description: Отчёт целиком.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Что искажено
+      options:
+        - Латенси (percentiles)
+        - Фактическая интенсивность (RPS)
+        - Учёт ошибок
+        - Количество отправленных запросов
+        - Поведение при упоре в лимит in-flight
+        - Другое
+    validations:
+      required: true

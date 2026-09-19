@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопрос по использованию
+    url: https://github.com/yhgrwav/grpc-loadgen/discussions
+    about: Вопросы без конкретного бага — в Discussions.
+  - name: Документация
+    url: https://github.com/yhgrwav/grpc-loadgen/tree/main/docs/ru
+    about: Возможно, ответ уже есть здесь.

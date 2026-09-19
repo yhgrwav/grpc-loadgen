@@ -1,0 +1,30 @@
+area/core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - pkg/**
+          - cmd/**
+          - internal/**
+          - go.mod
+          - go.sum
+
+area/testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - test/**
+          - "**/*_test.go"
+
+area/release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**
+          - .goreleaser.yaml
+          - Dockerfile
+          - .github/dependabot.yml
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - README.md
+          - CONTRIBUTING.md
+          - "**/*.md"
