@@ -1,0 +1,28 @@
+# Каждая строка: путь -> кто обязан отревьюить изменения в нём.
+# Последнее совпадение выигрывает, поэтому общее правило стоит первым.
+
+*                       @yhgrwav
+
+# Ядро и CLI — владелец проекта.
+/pkg/                   @yhgrwav
+/cmd/                   @yhgrwav
+/internal/              @yhgrwav
+/go.mod                 @yhgrwav
+/go.sum                 @yhgrwav
+
+# Эталонный стенд и тесты корректности измерений — QA/AQA.
+# TODO: заменить на GitHub-логин QA.
+/test/                  @yhgrwav
+
+# Сборка, релизы, инфраструктура — DevOps.
+# TODO: заменить на GitHub-логин DevOps.
+/.github/workflows/     @yhgrwav
+/.goreleaser.yaml       @yhgrwav
+/Dockerfile             @yhgrwav
+
+# Лицензирование и юридическая часть — только владелец проекта.
+/LICENSE                @yhgrwav
+/NOTICE                 @yhgrwav
+/CLA.md                 @yhgrwav
+/CONTRIBUTING.md        @yhgrwav
+/.github/workflows/cla.yml @yhgrwav
