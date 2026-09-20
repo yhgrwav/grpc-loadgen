@@ -16,15 +16,16 @@ package metrics
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
 
 const (
-	lowestTrackableMicros  = 1
-	highestTrackableMicros = int64(time.Hour / time.Microsecond)
-	significantFigures     = 3
+	lowestTrackableNanos  = 1
+	highestTrackableNanos = int64(time.Hour)
+	significantFigures    = 3
 )
 
 // Latencies is the latency distribution of one method: measured values plus
@@ -35,6 +36,7 @@ type Latencies struct {
 	mu       sync.Mutex
 	measured *hdrhistogram.Histogram
 	censored *hdrhistogram.Histogram
+	invalid  atomic.Int64
 }
 
 func NewLatencies() *Latencies {
@@ -45,17 +47,22 @@ func NewLatencies() *Latencies {
 }
 
 func newHistogram() *hdrhistogram.Histogram {
-	return hdrhistogram.New(lowestTrackableMicros, highestTrackableMicros, significantFigures)
+	return hdrhistogram.New(lowestTrackableNanos, highestTrackableNanos, significantFigures)
 }
 
+// Record stores a measured latency. A negative duration is a caller bug, not
+// data: it is counted separately rather than silently folded into zero.
 func (l *Latencies) Record(d time.Duration) {
-	micros := microsOf(d)
+	if d < 0 {
+		l.invalid.Add(1)
+		return
+	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if err := l.measured.RecordValue(micros); err != nil {
-		l.recordCensoredLocked(highestTrackableMicros)
+	if err := l.measured.RecordValue(d.Nanoseconds()); err != nil {
+		l.recordCensoredLocked(highestTrackableNanos)
 	}
 }
 
@@ -63,25 +70,23 @@ func (l *Latencies) Record(d time.Duration) {
 // a request cut short by its timeout or by the run ending. Its true latency is
 // larger by an unknown amount, so it is never stored as a measured value.
 func (l *Latencies) RecordCensored(threshold time.Duration) {
+	if threshold < 0 {
+		l.invalid.Add(1)
+		return
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	l.recordCensoredLocked(microsOf(threshold))
+	l.recordCensoredLocked(threshold.Nanoseconds())
 }
 
-// recordCensoredLocked clamps micros into the histogram's range before
-// recording it: a value above highestTrackableMicros cannot itself overflow,
+// recordCensoredLocked clamps nanos into the histogram's range before
+// recording it: a value above highestTrackableNanos cannot itself overflow,
 // since the true reading is unknown beyond "at least this much" anyway.
-func (l *Latencies) recordCensoredLocked(micros int64) {
-	if micros > highestTrackableMicros {
-		micros = highestTrackableMicros
+func (l *Latencies) recordCensoredLocked(nanos int64) {
+	if nanos > highestTrackableNanos {
+		nanos = highestTrackableNanos
 	}
-	_ = l.censored.RecordValue(micros)
-}
-
-func microsOf(d time.Duration) int64 {
-	if d < 0 {
-		return 0
-	}
-	return d.Microseconds()
+	_ = l.censored.RecordValue(nanos)
 }

@@ -23,6 +23,28 @@ import (
 	"time"
 )
 
+// fraction is a percentile given as an exact ratio, so the reference rank can
+// be computed with integer arithmetic instead of float64, which is the very
+// thing under test.
+type fraction struct {
+	num, den int64
+}
+
+func (f fraction) float() float64 { return float64(f.num) / float64(f.den) }
+
+func exactRank(n int64, f fraction) int64 {
+	rank := (f.num*n + f.den - 1) / f.den
+	if rank < 1 {
+		rank = 1
+	}
+	if rank > n {
+		rank = n
+	}
+	return rank
+}
+
+var referenceFractions = []fraction{{50, 100}, {90, 100}, {99, 100}, {999, 1000}}
+
 // TestPercentileAgainstReference is the main defense against a histogram that
 // lies quietly: it computes p50/p90/p99/p999 two ways — through the
 // histogram and by sorting the raw sample — on a random, seeded dataset, and
@@ -37,8 +59,8 @@ func TestPercentileAgainstReference(t *testing.T) {
 	samples := make([]time.Duration, n)
 	l := NewLatencies()
 	for i := range samples {
-		micros := 20 + rng.Int64N(5_000_000)
-		d := time.Duration(micros) * time.Microsecond
+		nanos := 20_000 + rng.Int64N(5_000_000_000)
+		d := time.Duration(nanos)
 		samples[i] = d
 		l.Record(d)
 	}
@@ -46,34 +68,107 @@ func TestPercentileAgainstReference(t *testing.T) {
 	slices.Sort(samples)
 	snap := l.Snapshot()
 
-	for _, p := range []float64{0.5, 0.9, 0.99, 0.999} {
-		want := referencePercentile(samples, p)
-		got := snap.Percentile(p)
+	for _, f := range referenceFractions {
+		rank := exactRank(n, f)
+		want := samples[rank-1]
+		got := snap.Percentile(f.float())
 		if !got.Exact {
-			t.Fatalf("p%v: expected exact result, got lower bound", p*100)
+			t.Fatalf("p%v/%v: expected exact result, got lower bound", f.num, f.den)
 		}
-
-		diff := got.Value - want
-		if diff < 0 {
-			diff = -diff
-		}
-		tolerance := time.Duration(float64(want)*0.005) + time.Microsecond
-		if diff > tolerance {
-			t.Errorf("p%v: histogram=%v reference=%v diff=%v exceeds tolerance %v",
-				p*100, got.Value, want, diff, tolerance)
-		}
+		assertUpperBound(t, f, got.Value, want)
 	}
 }
 
-func referencePercentile(sorted []time.Duration, p float64) time.Duration {
-	rank := int(math.Ceil(float64(len(sorted)) * p))
-	if rank < 1 {
-		rank = 1
+// assertUpperBound checks the one-sided tolerance a bucketed histogram
+// actually gives: it always rounds a rank up to its bucket's upper edge, so
+// the reported value can only be >= the true one, by at most the bucket
+// width at three significant figures.
+func assertUpperBound(t *testing.T, f fraction, got, want time.Duration) {
+	t.Helper()
+	tolerance := want/1024 + time.Nanosecond
+	if got < want || got > want+tolerance {
+		t.Errorf("p%v/%v: histogram=%v reference=%v, want in [%v, %v]",
+			f.num, f.den, got, want, want, want+tolerance)
 	}
-	if rank > len(sorted) {
-		rank = len(sorted)
+}
+
+// TestPercentileAgainstReferenceWithCensoredMix runs the same cross-check as
+// TestPercentileAgainstReference over a mix of measured and censored
+// observations, so the exactness criterion is verified against a reference
+// and not just against hand-picked numbers.
+func TestPercentileAgainstReferenceWithCensoredMix(t *testing.T) {
+	const n = 5000
+	rng := rand.New(rand.NewPCG(7, 11))
+
+	l := NewLatencies()
+	var measured, combined []int64
+	var thresholds []int64
+
+	for i := 0; i < n; i++ {
+		nanos := 1_000 + rng.Int64N(500_000_000)
+		if rng.Int64N(5) == 0 {
+			l.RecordCensored(time.Duration(nanos))
+			thresholds = append(thresholds, nanos)
+		} else {
+			l.Record(time.Duration(nanos))
+			measured = append(measured, nanos)
+		}
+		combined = append(combined, nanos)
 	}
-	return sorted[rank-1]
+	slices.Sort(measured)
+	slices.Sort(combined)
+
+	censoredMin := int64(math.MaxInt64)
+	if len(thresholds) > 0 {
+		censoredMin = slices.Min(thresholds)
+	}
+
+	snap := l.Snapshot()
+
+	for _, f := range referenceFractions {
+		rank := exactRank(n, f)
+		wantExact := rank <= int64(len(measured)) && measured[rank-1] < censoredMin
+
+		var want time.Duration
+		if wantExact {
+			want = time.Duration(measured[rank-1])
+		} else {
+			want = time.Duration(combined[rank-1])
+		}
+
+		got := snap.Percentile(f.float())
+		if got.Exact != wantExact {
+			t.Fatalf("p%v/%v: Exact = %v, want %v", f.num, f.den, got.Exact, wantExact)
+		}
+		assertUpperBound(t, f, got.Value, want)
+	}
+}
+
+// TestPercentileExactnessBoundary constructs a rank that lands exactly on the
+// number of measured observations below the smallest censored threshold, and
+// one rank above it, to pin down that the criterion is "<=", not "<".
+func TestPercentileExactnessBoundary(t *testing.T) {
+	l := NewLatencies()
+	for i := 1; i <= 100; i++ {
+		l.Record(time.Duration(i) * time.Millisecond)
+	}
+	l.RecordCensored(50*time.Millisecond + 500*time.Microsecond)
+
+	snap := l.Snapshot()
+
+	// n = 101, p = 50/101 gives rank 50: the 50th measured value (50ms) is
+	// the last one strictly below the censored threshold — last exact rank.
+	last := snap.Percentile(fraction{50, 101}.float())
+	if !last.Exact {
+		t.Errorf("rank at the boundary: Exact = false, want true")
+	}
+
+	// p = 51/101 gives rank 51: the censored observation could take this
+	// rank — first inexact rank.
+	first := snap.Percentile(fraction{51, 101}.float())
+	if first.Exact {
+		t.Errorf("rank past the boundary: Exact = true, want false")
+	}
 }
 
 func TestPercentileExactWithoutCensored(t *testing.T) {
@@ -172,8 +267,35 @@ func TestRecordAboveRangeBecomesCensored(t *testing.T) {
 	if q.Exact {
 		t.Fatalf("expected lower bound for an out-of-range observation, got exact %v", q.Value)
 	}
-	if q.Value < time.Hour || q.Value > time.Hour+time.Second {
+	if q.Value < time.Hour || q.Value > time.Hour+time.Hour/1024 {
 		t.Errorf("lower bound = %v, want ~1h (the histogram ceiling, within bucket precision)", q.Value)
+	}
+}
+
+func TestRecordNegativeDurationCountsAsInvalid(t *testing.T) {
+	l := NewLatencies()
+	l.Record(-time.Millisecond)
+	l.Record(time.Millisecond)
+
+	snap := l.Snapshot()
+	if snap.InvalidCount() != 1 {
+		t.Errorf("InvalidCount() = %d, want 1", snap.InvalidCount())
+	}
+	if snap.Count() != 1 {
+		t.Errorf("Count() = %d, want 1 (the negative duration must not be recorded)", snap.Count())
+	}
+}
+
+func TestRecordCensoredNegativeThresholdCountsAsInvalid(t *testing.T) {
+	l := NewLatencies()
+	l.RecordCensored(-time.Second)
+
+	snap := l.Snapshot()
+	if snap.InvalidCount() != 1 {
+		t.Errorf("InvalidCount() = %d, want 1", snap.InvalidCount())
+	}
+	if snap.Count() != 0 {
+		t.Errorf("Count() = %d, want 0", snap.Count())
 	}
 }
 
@@ -211,8 +333,8 @@ func TestPercentileEmptySnapshot(t *testing.T) {
 		t.Fatalf("Count() = %d, want 0", snap.Count())
 	}
 	q := snap.Percentile(0.5)
-	if !q.Exact || q.Value != 0 {
-		t.Errorf("Percentile(0.5) on empty snapshot = %+v, want {0 true}", q)
+	if q.Defined {
+		t.Errorf("Percentile(0.5) on empty snapshot: Defined = true, want false")
 	}
 }
 
@@ -223,24 +345,88 @@ func TestPercentileBoundaryFractions(t *testing.T) {
 	}
 	snap := l.Snapshot()
 
-	tests := []struct {
-		name string
-		p    float64
-	}{
-		{"p=0", 0},
-		{"p=1", 1},
-		{"p<0", -0.5},
-		{"p>1", 1.5},
+	for _, p := range []float64{0, 1} {
+		q := snap.Percentile(p)
+		if !q.Defined || !q.Exact {
+			t.Errorf("Percentile(%v) = %+v, want defined and exact", p, q)
+		}
+		if q.Value <= 0 || q.Value > 101*time.Millisecond {
+			t.Errorf("Percentile(%v) = %v, want in (0, ~100ms]", p, q.Value)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			q := snap.Percentile(tt.p)
-			if !q.Exact {
-				t.Errorf("Percentile(%v).Exact = false, want true", tt.p)
+
+	for _, p := range []float64{-0.5, 1.5, 99} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("Percentile(%v) did not panic, want a panic for a p outside [0, 1]", p)
+				}
+			}()
+			snap.Percentile(p)
+		}()
+	}
+}
+
+func TestRankForMatchesIntegerArithmetic(t *testing.T) {
+	for _, n := range []int64{10, 50, 100, 1000, 10000, 12345} {
+		for num := int64(1); num < 1000; num++ {
+			const den = int64(1000)
+			want := (num*n + den - 1) / den
+			if want < 1 {
+				want = 1
 			}
-			if q.Value <= 0 || q.Value > 101*time.Millisecond {
-				t.Errorf("Percentile(%v) = %v, want in (0, ~100ms]", tt.p, q.Value)
+			if want > n {
+				want = n
 			}
-		})
+			if got := rankFor(float64(num)/float64(den), n); got != want {
+				t.Fatalf("rankFor(%d/%d, %d) = %d, want %d", num, den, n, got, want)
+			}
+		}
+	}
+}
+
+func TestMergeMatchesSingleDistribution(t *testing.T) {
+	a := NewLatencies()
+	b := NewLatencies()
+	combined := NewLatencies()
+
+	rng := rand.New(rand.NewPCG(3, 4))
+	for i := 0; i < 2000; i++ {
+		d := time.Duration(1+rng.Int64N(2_000_000)) * time.Microsecond
+		a.Record(d)
+		combined.Record(d)
+	}
+	for i := 0; i < 500; i++ {
+		d := time.Duration(1+rng.Int64N(2_000_000)) * time.Microsecond
+		b.RecordCensored(d)
+		combined.RecordCensored(d)
+	}
+
+	merged := Merge(a.Snapshot(), b.Snapshot())
+	want := combined.Snapshot()
+
+	if merged.Count() != want.Count() {
+		t.Fatalf("Count() = %d, want %d", merged.Count(), want.Count())
+	}
+	if merged.CensoredCount() != want.CensoredCount() {
+		t.Fatalf("CensoredCount() = %d, want %d", merged.CensoredCount(), want.CensoredCount())
+	}
+
+	for _, f := range referenceFractions {
+		got := merged.Percentile(f.float())
+		wantQ := want.Percentile(f.float())
+		if got != wantQ {
+			t.Errorf("p%v/%v: merged=%+v, want %+v", f.num, f.den, got, wantQ)
+		}
+	}
+}
+
+func TestMergeOfNoSnapshotsIsEmpty(t *testing.T) {
+	merged := Merge()
+	if merged.Count() != 0 {
+		t.Fatalf("Count() = %d, want 0", merged.Count())
+	}
+	if q := merged.Percentile(0.5); q.Defined {
+		t.Errorf("Percentile(0.5) = %+v, want Defined = false", q)
 	}
 }
