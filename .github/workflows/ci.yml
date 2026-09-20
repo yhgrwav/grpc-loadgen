@@ -21,7 +21,7 @@ jobs:
       matrix:
         # The lower bound is the version declared in go.mod: if it stops
         # compiling there, the module's compatibility claim is wrong.
-        go: ["1.24", "1.27.1"]
+        go: ["1.25", "1.27.1"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

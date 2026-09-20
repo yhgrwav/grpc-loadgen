@@ -27,7 +27,6 @@ linters:
         - shadow
     revive:
       rules:
-        - name: exported
         - name: package-comments
         - name: context-as-argument
         - name: error-return
