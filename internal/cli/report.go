@@ -17,15 +17,10 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
-
-func stderr() io.Writer {
-	return os.Stderr
-}
 
 // PrintReport writes the finished run to w as plain text.
 func PrintReport(w io.Writer, target string, report engine.Report) {
@@ -36,9 +31,9 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		"method", "sent", "failed", "rps", "p50", "p95", "p99")
 
 	for _, m := range report.Methods {
-		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s\n",
+		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
 			m.Method, m.Sent, m.Failed, m.RPS,
-			formatDuration(m.P50), formatDuration(m.P95), formatDuration(m.P99))
+			formatDuration(m.P50), formatDuration(m.P90), formatDuration(m.P95), formatDuration(m.P99))
 	}
 }
 

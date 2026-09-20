@@ -16,6 +16,7 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,7 +28,21 @@ type Snapshot struct {
 	Failed   int
 	InFlight int
 	RPS      float64
+	P50      time.Duration
+	P90      time.Duration
 	P99      time.Duration
+	Methods  []MethodSnapshot
+}
+
+type MethodSnapshot struct {
+	Method    string
+	Sent      int
+	Failed    int
+	RPS       float64
+	TargetRPS int
+	P50       time.Duration
+	P90       time.Duration
+	P99       time.Duration
 }
 
 type MethodReport struct {
@@ -37,6 +52,7 @@ type MethodReport struct {
 	RPS       float64
 	Min       time.Duration
 	P50       time.Duration
+	P90       time.Duration
 	P95       time.Duration
 	P99       time.Duration
 	Max       time.Duration
@@ -129,10 +145,36 @@ func (s *Stats) Snapshot() Snapshot {
 	}
 
 	all := make([]time.Duration, 0, s.sent)
-	for _, method := range s.byMethod {
+
+	for name, method := range s.byMethod {
 		all = append(all, method.latencies...)
+
+		sorted := slices.Clone(method.latencies)
+		slices.Sort(sorted)
+
+		entry := MethodSnapshot{
+			Method: name,
+			Sent:   method.sent,
+			Failed: method.failed,
+			P50:    percentileSorted(sorted, 50),
+			P90:    percentileSorted(sorted, 90),
+			P99:    percentileSorted(sorted, 99),
+		}
+		if elapsed > 0 {
+			entry.RPS = float64(method.sent) / elapsed.Seconds()
+		}
+
+		snapshot.Methods = append(snapshot.Methods, entry)
 	}
-	snapshot.P99 = percentile(all, 99)
+
+	slices.SortFunc(snapshot.Methods, func(a, b MethodSnapshot) int {
+		return strings.Compare(a.Method, b.Method)
+	})
+
+	slices.Sort(all)
+	snapshot.P50 = percentileSorted(all, 50)
+	snapshot.P90 = percentileSorted(all, 90)
+	snapshot.P99 = percentileSorted(all, 99)
 
 	return snapshot
 }
@@ -159,6 +201,7 @@ func (s *Stats) Report() Report {
 			Failed:    method.failed,
 			Latencies: len(sorted),
 			P50:       percentileSorted(sorted, 50),
+			P90:       percentileSorted(sorted, 90),
 			P95:       percentileSorted(sorted, 95),
 			P99:       percentileSorted(sorted, 99),
 		}
@@ -175,14 +218,7 @@ func (s *Stats) Report() Report {
 	}
 
 	slices.SortFunc(report.Methods, func(a, b MethodReport) int {
-		switch {
-		case a.Method < b.Method:
-			return -1
-		case a.Method > b.Method:
-			return 1
-		default:
-			return 0
-		}
+		return strings.Compare(a.Method, b.Method)
 	})
 
 	return report
@@ -197,13 +233,6 @@ func (s *Stats) elapsed() time.Duration {
 	}
 
 	return s.endedAt.Sub(s.startedAt)
-}
-
-func percentile(values []time.Duration, p int) time.Duration {
-	sorted := slices.Clone(values)
-	slices.Sort(sorted)
-
-	return percentileSorted(sorted, p)
 }
 
 func percentileSorted(sorted []time.Duration, p int) time.Duration {
