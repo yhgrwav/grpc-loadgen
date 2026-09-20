@@ -15,6 +15,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -41,7 +42,7 @@ func collect(ctx context.Context, t *testing.T, s *Scheduler) ([]Request, error)
 }
 
 func TestRunEmitsOneRequestPerInterval(t *testing.T) {
-	s := NewScheduler("a.B/C", []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}})
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -61,10 +62,10 @@ func TestRunEmitsOneRequestPerInterval(t *testing.T) {
 }
 
 func TestRunWalksEveryStage(t *testing.T) {
-	s := NewScheduler("a.B/C", []Stage{
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
 		{StartRPS: 200, TargetRPS: 200, Duration: 50 * time.Millisecond},
-	})
+	}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -77,10 +78,10 @@ func TestRunWalksEveryStage(t *testing.T) {
 }
 
 func TestStagesDoNotDriftApart(t *testing.T) {
-	s := NewScheduler("a.B/C", []Stage{
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
-	})
+	}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -96,7 +97,7 @@ func TestStagesDoNotDriftApart(t *testing.T) {
 func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 	const rps = 3000
 
-	s := NewScheduler("a.B/C", []Stage{{StartRPS: rps, TargetRPS: rps, Duration: 100 * time.Millisecond}})
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: rps, TargetRPS: rps, Duration: 100 * time.Millisecond}}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -112,7 +113,7 @@ func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 }
 
 func TestRunStopsOnCancel(t *testing.T) {
-	s := NewScheduler("a.B/C", []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}})
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
@@ -127,6 +128,84 @@ func TestRunStopsOnCancel(t *testing.T) {
 	}
 	if len(got) > 20 {
 		t.Errorf("emitted %d requests, want the run to stop early", len(got))
+	}
+}
+
+func TestRequestsCarryCallFields(t *testing.T) {
+	call := Call{
+		Method:       "a.B/C",
+		Payload:      []byte("payload"),
+		KeepResponse: true,
+		Stages:       []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 20 * time.Millisecond}},
+	}
+	s := NewScheduler(call)
+
+	got, err := collect(context.Background(), t, s)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no requests emitted")
+	}
+
+	for i, req := range got {
+		if req.Method != call.Method {
+			t.Errorf("request %d method = %q, want %q", i, req.Method, call.Method)
+		}
+		if !bytes.Equal(req.Payload, call.Payload) {
+			t.Errorf("request %d payload = %q, want %q", i, req.Payload, call.Payload)
+		}
+		if req.KeepResponse != call.KeepResponse {
+			t.Errorf("request %d KeepResponse = %v, want %v", i, req.KeepResponse, call.KeepResponse)
+		}
+	}
+}
+
+func TestRequestDeadlineFollowsTimeout(t *testing.T) {
+	const timeout = 25 * time.Millisecond
+
+	call := Call{
+		Method:  "a.B/C",
+		Timeout: timeout,
+		Stages:  []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 20 * time.Millisecond}},
+	}
+	s := NewScheduler(call)
+
+	got, err := collect(context.Background(), t, s)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no requests emitted")
+	}
+
+	for i, req := range got {
+		want := req.ScheduledAt.Add(timeout)
+		if !req.Deadline.Equal(want) {
+			t.Errorf("request %d deadline = %s, want %s", i, req.Deadline, want)
+		}
+	}
+}
+
+func TestRequestDeadlineIsZeroWithoutTimeout(t *testing.T) {
+	call := Call{
+		Method: "a.B/C",
+		Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 20 * time.Millisecond}},
+	}
+	s := NewScheduler(call)
+
+	got, err := collect(context.Background(), t, s)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no requests emitted")
+	}
+
+	for i, req := range got {
+		if !req.Deadline.IsZero() {
+			t.Errorf("request %d deadline = %s, want zero", i, req.Deadline)
+		}
 	}
 }
 
@@ -160,7 +239,7 @@ func TestRunRejectsBadStages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScheduler("a.B/C", tt.stages)
+			s := NewScheduler(Call{Method: "a.B/C", Stages: tt.stages})
 
 			_, err := collect(context.Background(), t, s)
 

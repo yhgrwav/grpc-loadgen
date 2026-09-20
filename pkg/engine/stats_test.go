@@ -53,9 +53,9 @@ func TestStatsSplitsMethods(t *testing.T) {
 	start := time.Now()
 	stats.Start(start, 0)
 
-	stats.Record(Result{Method: "a", ScheduledAt: start, DoneAt: start.Add(10 * time.Millisecond)})
-	stats.Record(Result{Method: "a", ScheduledAt: start, DoneAt: start.Add(20 * time.Millisecond)})
-	stats.Record(Result{Method: "b", ScheduledAt: start, DoneAt: start.Add(30 * time.Millisecond), Err: ErrFakeFailure})
+	stats.Record(Result{Method: "a", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(10 * time.Millisecond), Category: CategorySuccess}})
+	stats.Record(Result{Method: "a", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(20 * time.Millisecond), Category: CategorySuccess}})
+	stats.Record(Result{Method: "b", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(30 * time.Millisecond), Category: CategoryServerFault, Err: ErrFakeFailure}})
 
 	stats.Finish(start.Add(time.Second))
 
@@ -72,5 +72,19 @@ func TestStatsSplitsMethods(t *testing.T) {
 	}
 	if report.Methods[0].Max != 20*time.Millisecond {
 		t.Errorf("max = %s, want 20ms", report.Methods[0].Max)
+	}
+}
+
+func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	stats.Record(Result{Method: "a", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(time.Millisecond)}})
+
+	report := stats.Report()
+
+	if report.Sent != 1 || report.Failed != 1 {
+		t.Fatalf("sent %d failed %d, want a sender that forgot Category to count as failed", report.Sent, report.Failed)
 	}
 }

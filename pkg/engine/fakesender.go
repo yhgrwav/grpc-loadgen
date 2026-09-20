@@ -27,21 +27,36 @@ type FakeSender struct {
 	FailRatio float64
 }
 
-func (f FakeSender) Send(ctx context.Context, _ Request) error {
+func (f FakeSender) Send(ctx context.Context, req Request) (Outcome, error) {
+	sendCtx := ctx
+	if !req.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		sendCtx, cancel = context.WithDeadline(ctx, req.Deadline)
+		defer cancel()
+	}
+
 	delay := f.Delay
 	if f.Jitter > 0 {
 		delay += time.Duration(rand.Int64N(int64(f.Jitter)))
 	}
 
+	sentAt := time.Now()
+
 	select {
 	case <-time.After(delay):
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-sendCtx.Done():
+		if ctx.Err() != nil {
+			return Outcome{}, ctx.Err()
+		}
+
+		return Outcome{Category: CategoryTimeout, Err: sendCtx.Err(), SentAt: sentAt, DoneAt: time.Now()}, nil
 	}
+
+	doneAt := time.Now()
 
 	if f.FailRatio > 0 && rand.Float64() < f.FailRatio {
-		return ErrFakeFailure
+		return Outcome{Category: CategoryServerFault, Err: ErrFakeFailure, SentAt: sentAt, DoneAt: doneAt}, nil
 	}
 
-	return nil
+	return Outcome{Category: CategorySuccess, SentAt: sentAt, DoneAt: doneAt}, nil
 }

@@ -106,7 +106,7 @@ func (s *Stats) Record(r Result) {
 	defer s.mu.Unlock()
 
 	s.sent++
-	if r.Err != nil {
+	if r.Category != CategorySuccess {
 		s.failed++
 	}
 
@@ -117,7 +117,7 @@ func (s *Stats) Record(r Result) {
 	}
 
 	method.sent++
-	if r.Err != nil {
+	if r.Category != CategorySuccess {
 		method.failed++
 	}
 

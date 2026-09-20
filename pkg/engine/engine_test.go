@@ -17,6 +17,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -118,6 +119,38 @@ func TestEngineStopsOnCancel(t *testing.T) {
 	}
 	if eng.Report().Sent == 0 {
 		t.Error("no requests recorded before cancel")
+	}
+}
+
+func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	sender := senderFunc(func(context.Context, Request) (Outcome, error) {
+		return Outcome{}, errors.New("sender unusable")
+	})
+
+	eng, err := New(Options{
+		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Hour}}}},
+		Sender:      sender,
+		MaxInFlight: 4,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := eng.Run(ctx); err == nil {
+		t.Fatal("run: want an error from the unusable sender")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d, want back to %d", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

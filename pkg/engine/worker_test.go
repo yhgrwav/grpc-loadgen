@@ -17,25 +17,27 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-type senderFunc func(ctx context.Context, req Request) error
+type senderFunc func(ctx context.Context, req Request) (Outcome, error)
 
-func (f senderFunc) Send(ctx context.Context, req Request) error {
+func (f senderFunc) Send(ctx context.Context, req Request) (Outcome, error) {
 	return f(ctx, req)
 }
 
 func slowSender(d time.Duration) senderFunc {
-	return func(ctx context.Context, _ Request) error {
+	return func(ctx context.Context, _ Request) (Outcome, error) {
 		select {
 		case <-time.After(d):
-			return nil
+			return Outcome{Category: CategorySuccess}, nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return Outcome{}, ctx.Err()
 		}
 	}
 }
@@ -77,8 +79,8 @@ func TestPoolReportsEveryRequest(t *testing.T) {
 		t.Fatalf("got %d results, want 5", len(*got))
 	}
 	for _, r := range *got {
-		if r.Err != nil {
-			t.Errorf("unexpected error: %v", r.Err)
+		if r.Category != CategorySuccess {
+			t.Errorf("unexpected category: %v", r.Category)
 		}
 		if r.Latency() <= 0 {
 			t.Errorf("latency = %s, want a positive value", r.Latency())
@@ -116,7 +118,7 @@ func TestPoolSendsConcurrently(t *testing.T) {
 
 	var inFlight, peak atomic.Int64
 
-	sender := senderFunc(func(_ context.Context, _ Request) error {
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
 		current := inFlight.Add(1)
 		for {
 			old := peak.Load()
@@ -127,7 +129,7 @@ func TestPoolSendsConcurrently(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		inFlight.Add(-1)
 
-		return nil
+		return Outcome{Category: CategorySuccess}, nil
 	})
 
 	in := make(chan Request, requests)
@@ -211,6 +213,226 @@ func TestPoolRejectsBadSetup(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestPoolPropagatesSenderError(t *testing.T) {
+	wantErr := errors.New("sender unusable")
+
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		return Outcome{}, wantErr
+	})
+
+	in := make(chan Request, 1)
+	in <- Request{ScheduledAt: time.Now()}
+	close(in)
+
+	out := make(chan Result, 1)
+
+	pool := NewWorkerPool(sender, 4)
+	err := pool.Run(context.Background(), in, out)
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+
+	select {
+	case r := <-out:
+		t.Fatalf("got unexpected result %+v, want none", r)
+	default:
+	}
+}
+
+func TestPoolReportsFailedCallWithoutFailingRun(t *testing.T) {
+	callErr := errors.New("call failed")
+
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		return Outcome{Category: CategoryServerFault, Err: callErr}, nil
+	})
+
+	in := make(chan Request, 1)
+	in <- Request{ScheduledAt: time.Now()}
+	close(in)
+
+	out := make(chan Result, 1)
+
+	pool := NewWorkerPool(sender, 4)
+	if err := pool.Run(context.Background(), in, out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	close(out)
+
+	got := <-out
+	if got.Category != CategoryServerFault {
+		t.Errorf("category = %v, want %v", got.Category, CategoryServerFault)
+	}
+	if !errors.Is(got.Err, callErr) {
+		t.Errorf("err = %v, want %v", got.Err, callErr)
+	}
+}
+
+func TestPoolFillsInZeroTimestamps(t *testing.T) {
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		return Outcome{Category: CategorySuccess}, nil
+	})
+
+	in := make(chan Request, 1)
+	in <- Request{ScheduledAt: time.Now()}
+	close(in)
+
+	out := make(chan Result, 1)
+
+	pool := NewWorkerPool(sender, 4)
+	if err := pool.Run(context.Background(), in, out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	close(out)
+
+	got := <-out
+	if got.SentAt.IsZero() {
+		t.Error("SentAt is zero, want the pool to fill it in")
+	}
+	if got.DoneAt.IsZero() {
+		t.Error("DoneAt is zero, want the pool to fill it in")
+	}
+	if got.Latency() < 0 {
+		t.Errorf("Latency() = %s, want non-negative", got.Latency())
+	}
+	if got.QueueTime() < 0 {
+		t.Errorf("QueueTime() = %s, want non-negative", got.QueueTime())
+	}
+	if got.TransportWait() < 0 {
+		t.Errorf("TransportWait() = %s, want non-negative", got.TransportWait())
+	}
+	if got.ServiceTime() < 0 {
+		t.Errorf("ServiceTime() = %s, want non-negative", got.ServiceTime())
+	}
+}
+
+func TestResultLatencyComponentsSumToTotal(t *testing.T) {
+	scheduledAt := time.Now().Add(-100 * time.Millisecond)
+	sentAt := scheduledAt.Add(30 * time.Millisecond)
+	doneAt := sentAt.Add(50 * time.Millisecond)
+
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		return Outcome{Category: CategorySuccess, SentAt: sentAt, DoneAt: doneAt}, nil
+	})
+
+	in := make(chan Request, 1)
+	in <- Request{ScheduledAt: scheduledAt}
+	close(in)
+
+	out := make(chan Result, 1)
+
+	pool := NewWorkerPool(sender, 4)
+	if err := pool.Run(context.Background(), in, out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	close(out)
+
+	got := <-out
+	if sum := got.QueueTime() + got.TransportWait() + got.ServiceTime(); sum != got.Latency() {
+		t.Errorf("QueueTime + TransportWait + ServiceTime = %s, want Latency %s", sum, got.Latency())
+	}
+}
+
+func TestPoolFreesSlotBeforeResultIsDelivered(t *testing.T) {
+	sent := make(chan struct{}, 2)
+
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		sent <- struct{}{}
+
+		return Outcome{Category: CategorySuccess}, nil
+	})
+
+	in := make(chan Request)
+	out := make(chan Result)
+
+	pool := NewWorkerPool(sender, 1)
+
+	done := make(chan error, 1)
+	go func() { done <- pool.Run(context.Background(), in, out) }()
+
+	in <- Request{ScheduledAt: time.Now()}
+	<-sent
+
+	// Nobody reads out, so the first result is still queued. The slot it used
+	// must already be free: in-flight means "in flight", not "waiting to be
+	// recorded".
+	waitForNoneInFlight(t, pool)
+
+	// With the slot free, a second request must launch even though the
+	// collector has read nothing.
+	in <- Request{ScheduledAt: time.Now()}
+	<-sent
+
+	<-out
+	<-out
+	close(in)
+
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v, want nil: a busy result consumer must not hold in-flight slots", err)
+	}
+}
+
+func waitForNoneInFlight(t *testing.T, pool *WorkerPool) {
+	t.Helper()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		if pool.inFlightCount() == 0 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("in-flight slot stays held while the result waits for the collector")
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+func TestPoolDoesNotBlameSenderForOwnCancellation(t *testing.T) {
+	const requests = 4
+
+	sentinel := errors.New("sender reports cancel")
+	started := make(chan struct{}, requests)
+
+	sender := senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return Outcome{}, fmt.Errorf("%w: %w", sentinel, ctx.Err())
+	})
+
+	in := make(chan Request, requests)
+	for range requests {
+		in <- Request{ScheduledAt: time.Now()}
+	}
+	close(in)
+
+	out := make(chan Result, requests)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pool := NewWorkerPool(sender, requests)
+
+	done := make(chan error, 1)
+	go func() { done <- pool.Run(ctx, in, out) }()
+
+	for range requests {
+		<-started
+	}
+	cancel()
+
+	err := <-done
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want %v", err, context.Canceled)
+	}
+	if errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want cancellation not attributed to the sender", err)
 	}
 }
 
