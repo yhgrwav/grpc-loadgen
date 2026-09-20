@@ -270,9 +270,14 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 		{codes.Internal, engine.CategoryServerFault},
 		{codes.Unknown, engine.CategoryServerFault},
 		{codes.DataLoss, engine.CategoryServerFault},
+		// A server that cancels the call on its own side broke off the work.
+		{codes.Canceled, engine.CategoryServerFault},
 		{codes.ResourceExhausted, engine.CategoryOverload},
 		// A served UNAVAILABLE is a reply, unlike a refused connection.
 		{codes.Unavailable, engine.CategoryOverload},
+		// ABORTED means a concurrency conflict, which is what load produces:
+		// blaming the caller for it would turn a load signal into a config error.
+		{codes.Aborted, engine.CategoryOverload},
 	}
 
 	for _, tt := range tests {
@@ -290,6 +295,51 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 				t.Error("Err is nil although the call failed")
 			}
 		})
+	}
+}
+
+func TestSend_SameCodeFromTwoSourcesGetsDifferentCategories(t *testing.T) {
+	// The whole point of watching InTrailer: UNAVAILABLE from a server that
+	// answered is a measurement, UNAVAILABLE from a connection that was never
+	// established is not. The status code alone cannot tell them apart.
+	answered := dialTarget(t, &target{code: codes.Unavailable})
+
+	served, err := answered.Send(t.Context(), request(time.Now()))
+	if err != nil {
+		t.Fatalf("send to answering target: %v", err)
+	}
+	if served.Category != engine.CategoryOverload {
+		t.Errorf("served UNAVAILABLE = %v, want overload: the target did reply", served.Category)
+	}
+	if served.SentAt.IsZero() || served.DoneAt.IsZero() {
+		t.Error("a served rejection must carry timestamps: it is a measurement")
+	}
+
+	refused := New(Options{Target: "127.0.0.1:1"})
+	if err := refused.Connect(t.Context()); err == nil {
+		t.Cleanup(func() { _ = refused.Close() })
+
+		out, sendErr := refused.Send(t.Context(), request(time.Now()))
+		if sendErr != nil {
+			t.Fatalf("send to refused target: %v", sendErr)
+		}
+		if out.Category != engine.CategoryUnreachable {
+			t.Errorf("refused UNAVAILABLE = %v, want unreachable: nothing replied", out.Category)
+		}
+	}
+}
+
+func TestSend_ReportsTheRawTransportCode(t *testing.T) {
+	// The category is a guess where UNAVAILABLE is concerned; the raw code is a
+	// fact, and the report shows both.
+	sender := dialTarget(t, &target{code: codes.Unavailable})
+
+	out, err := sender.Send(t.Context(), request(time.Now()))
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if out.Code != codes.Unavailable.String() {
+		t.Errorf("code = %q, want %q", out.Code, codes.Unavailable.String())
 	}
 }
 
