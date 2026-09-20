@@ -16,9 +16,16 @@
 Ein Lauf. Beliebig viele Methoden, jede mit eigener Rate. Kein `.proto`, kein Codegen, keine
 Skripte.
 
-Das Projekt ruht auf drei Prioritäten, in dieser Reihenfolge: **Korrektheit der Messung** — die
-Zahlen entsprechen dem, was tatsächlich geschah, auch während der Dienst schwächelt;
-**Bedienbarkeit** — Konfiguration, Fehlermeldungen und Bericht sind für Menschen gemacht;
+Das Projekt ruht auf drei Prioritäten, in dieser Reihenfolge.
+
+**Korrektheit der Messung** — die Zahlen entsprechen dem, was tatsächlich geschah, auch während
+der Dienst schwächelt.
+
+**Bedienbarkeit.** In dieser Kategorie gilt es als selbstverständlich, dass ein Werkzeug für
+Ingenieure unbequem sein darf. Ich sehe das anders: die Bedienoberfläche ist einer der
+wichtigsten Vorzüge dieses Produkts, und eine unklare Fehlermeldung ist ebenso ein Defekt wie
+eine falsche Zahl.
+
 **Geschwindigkeit** — der Generator wird nie zum Engpass.
 
 ## Installation
