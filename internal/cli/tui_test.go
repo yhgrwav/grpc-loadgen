@@ -102,11 +102,14 @@ func TestEveryLanguageTranslatesTheBasics(t *testing.T) {
 		text := NewText(option.Lang)
 
 		for name, got := range map[string]string{
-			"summary":  text.Summary(),
-			"running":  text.Running(),
-			"sent":     text.Sent(),
-			"errors":   text.Errors(),
-			"inflight": text.InFlight(),
+			"summary":   text.Summary(),
+			"running":   text.Running(),
+			"sent":      text.Sent(),
+			"errors":    text.Errors(),
+			"inflight":  text.InFlight(),
+			"helptabs":  text.HelpTabs(),
+			"helpquit":  text.HelpQuit(),
+			"quitagain": text.HelpQuitAgain(),
 		} {
 			if got == "" {
 				t.Errorf("%s is empty in %s", name, option.Lang)
@@ -504,5 +507,16 @@ func TestSetupQuitKeys(t *testing.T) {
 				t.Fatalf("%q did not leave the setup wizard", name)
 			}
 		})
+	}
+}
+
+func TestHelpListsTabAndSecondQuit(t *testing.T) {
+	m := testModel(t)
+	help := m.help()
+
+	for _, want := range []string{"tab", m.text.HelpQuitAgain()} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help does not mention %q", want)
+		}
 	}
 }

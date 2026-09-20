@@ -191,7 +191,21 @@ func (t Text) HelpHelp() string {
 }
 
 func (t Text) HelpQuit() string {
-	return t.get(phrase{LangRU: "остановить прогон и напечатать отчёт", LangEN: "stop the run and print the report", LangDE: "Lauf stoppen und Bericht ausgeben", LangZH: "停止运行并输出报告"})
+	return t.get(phrase{
+		LangRU: "остановить прогон и напечатать отчёт",
+		LangEN: "stop the run and print the report",
+		LangDE: "Lauf stoppen und Bericht ausgeben",
+		LangZH: "停止运行并输出报告",
+	})
+}
+
+func (t Text) HelpQuitAgain() string {
+	return t.get(phrase{
+		LangRU: "нажать ещё раз — выйти, не дожидаясь отчёта",
+		LangEN: "press again to leave without waiting for the report",
+		LangDE: "erneut drücken, um ohne Bericht zu beenden",
+		LangZH: "再按一次，不等报告直接退出",
+	})
 }
 
 func (t Text) HelpSettings() string {
