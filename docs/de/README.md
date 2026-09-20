@@ -13,8 +13,13 @@
 > **Früher WIP.** Die Engine entsteht gerade, es gibt noch nichts auszuführen. Alles Folgende ist
 > die Schnittstelle, auf die wir hinarbeiten.
 
-Ein Lauf. Beliebig viele Methoden, jede mit eigener Rate. Latenzwerte, denen man glauben kann.
-Kein `.proto`, kein Codegen, keine Skripte.
+Ein Lauf. Beliebig viele Methoden, jede mit eigener Rate. Kein `.proto`, kein Codegen, keine
+Skripte.
+
+Das Projekt ruht auf drei Prioritäten, in dieser Reihenfolge: **Korrektheit der Messung** — die
+Zahlen entsprechen dem, was tatsächlich geschah, auch während der Dienst schwächelt;
+**Bedienbarkeit** — Konfiguration, Fehlermeldungen und Bericht sind für Menschen gemacht;
+**Geschwindigkeit** — der Generator wird nie zum Engpass.
 
 ## Installation
 

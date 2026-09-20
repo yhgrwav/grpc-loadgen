@@ -13,8 +13,12 @@
 > **Early WIP.** The engine is under construction, there is nothing to run yet. Everything below
 > is the interface we are building toward.
 
-One run. As many methods as you like, each at its own RPS. Latency you can trust. No `.proto`,
-no codegen, no scripts.
+One run. As many methods as you like, each at its own RPS. No `.proto`, no codegen, no scripts.
+
+The project rests on three priorities, in this order: **measurement correctness** — the numbers
+match what actually happened, including while the service degrades; **usability** — the config,
+the errors and the report are built for a person; **speed** — the generator never becomes the
+bottleneck.
 
 ## Install
 
