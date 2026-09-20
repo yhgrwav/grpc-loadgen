@@ -138,6 +138,11 @@ func (m *model) summary(width int) string {
 		[2]string{"rps", fmt.Sprintf("%.0f", s.RPS)},
 		[2]string{m.text.InFlight(), formatCount(s.InFlight)},
 		[2]string{m.text.Errors(), m.errorShare(s.Sent, s.Failed)},
+	))
+	b.WriteString("\n")
+	b.WriteString(statLine(m.styles,
+		[2]string{"p50", formatDuration(s.P50)},
+		[2]string{"p90", formatDuration(s.P90)},
 		[2]string{"p99", formatDuration(s.P99)},
 	))
 	b.WriteString("\n\n")
@@ -147,9 +152,12 @@ func (m *model) summary(width int) string {
 	b.WriteString(m.gaugeRow(m.text.InFlight(), float64(s.InFlight), float64(max(s.InFlight, 1)*2), formatCount(s.InFlight)))
 	b.WriteString("\n\n")
 
-	b.WriteString(m.styles.label.Render(m.text.Rate()+"  ") + sparkline(m.styles, m.overall.rps, sparkWidth))
+	b.WriteString(m.sparkRow(m.text.Rate(), m.overall.rps, "", func(v float64) string {
+		return fmt.Sprintf("%.0f", v)
+	}))
 	b.WriteString("\n")
-	b.WriteString(m.styles.label.Render(m.text.Latency()+"  ") + sparkline(m.styles, m.overall.p99, sparkWidth))
+	b.WriteString("\n")
+	b.WriteString(m.latencyChart(m.overall.points))
 
 	if note := m.note(); note != "" {
 		b.WriteString("\n\n")
@@ -175,7 +183,11 @@ func (m *model) method(width, index int) string {
 		[2]string{m.text.Sent(), formatCount(method.Sent)},
 		[2]string{"rps", fmt.Sprintf("%.0f", method.RPS)},
 		[2]string{m.text.Errors(), m.errorShare(method.Sent, method.Failed)},
+	))
+	b.WriteString("\n")
+	b.WriteString(statLine(m.styles,
 		[2]string{"p50", formatDuration(method.P50)},
+		[2]string{"p90", formatDuration(method.P90)},
 		[2]string{"p99", formatDuration(method.P99)},
 	))
 	b.WriteString("\n\n")
@@ -188,11 +200,45 @@ func (m *model) method(width, index int) string {
 		h = &history{}
 	}
 
-	b.WriteString(m.styles.label.Render(m.text.Rate()+"  ") + sparkline(m.styles, h.rps, sparkWidth))
+	b.WriteString(m.sparkRow(m.text.Rate(), h.rps, "", func(v float64) string {
+		return fmt.Sprintf("%.0f", v)
+	}))
 	b.WriteString("\n")
-	b.WriteString(m.styles.label.Render(m.text.Latency()+"  ") + sparkline(m.styles, h.p99, sparkWidth))
+	b.WriteString("\n")
+	b.WriteString(m.latencyChart(h.points))
 
 	return b.String()
+}
+
+func (m *model) latencyChart(points []point) string {
+	const height = 7
+
+	rows := chart(m.styles, points, sparkWidth, height)
+	scale := chartScale(m.styles, points, height)
+
+	var b strings.Builder
+
+	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-10s", m.text.Latency())))
+	b.WriteString(m.styles.faint.Render("p50 ") + m.styles.spark.Render("●") +
+		m.styles.faint.Render("   p90/p99 ·"))
+	b.WriteString("\n")
+
+	for i, row := range rows {
+		b.WriteString(scale[i] + m.styles.pad(2) + row)
+
+		if i < len(rows)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func (m *model) sparkRow(label string, values []float64, unit string, format func(float64) string) string {
+	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
+		sparkline(m.styles, values, sparkWidth) +
+		m.styles.pad(2) +
+		sparkRange(m.styles, values, unit, format)
 }
 
 func (m *model) gaugeRow(label string, value, limit float64, text string) string {
@@ -352,7 +398,7 @@ func (m *model) finalReport(width int) string {
 	b.WriteString("\n" + "\n")
 
 	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-32s %8s %8s %9s %9s %9s",
-		m.text.ColumnMethod(), m.text.Sent(), m.text.Errors(), "p50", "p95", "p99")))
+		m.text.ColumnMethod(), m.text.Sent(), m.text.Errors(), "p50", "p90", "p99")))
 	b.WriteString("\n")
 
 	for _, method := range report.Methods {
@@ -366,7 +412,7 @@ func (m *model) finalReport(width int) string {
 		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-32s", name)))
 		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %8s", formatCount(method.Sent))))
 		b.WriteString(errors.Render(fmt.Sprintf(" %8s", m.errorShare(method.Sent, method.Failed))))
-		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatDuration(method.P50), formatDuration(method.P95))))
+		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatDuration(method.P50), formatDuration(method.P90))))
 		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatDuration(method.P99))))
 		b.WriteString("\n")
 	}

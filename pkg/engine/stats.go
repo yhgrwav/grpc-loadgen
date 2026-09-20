@@ -28,6 +28,8 @@ type Snapshot struct {
 	Failed   int
 	InFlight int
 	RPS      float64
+	P50      time.Duration
+	P90      time.Duration
 	P99      time.Duration
 	Methods  []MethodSnapshot
 }
@@ -39,6 +41,7 @@ type MethodSnapshot struct {
 	RPS       float64
 	TargetRPS int
 	P50       time.Duration
+	P90       time.Duration
 	P99       time.Duration
 }
 
@@ -49,6 +52,7 @@ type MethodReport struct {
 	RPS       float64
 	Min       time.Duration
 	P50       time.Duration
+	P90       time.Duration
 	P95       time.Duration
 	P99       time.Duration
 	Max       time.Duration
@@ -145,12 +149,16 @@ func (s *Stats) Snapshot() Snapshot {
 	for name, method := range s.byMethod {
 		all = append(all, method.latencies...)
 
+		sorted := slices.Clone(method.latencies)
+		slices.Sort(sorted)
+
 		entry := MethodSnapshot{
 			Method: name,
 			Sent:   method.sent,
 			Failed: method.failed,
-			P50:    percentile(method.latencies, 50),
-			P99:    percentile(method.latencies, 99),
+			P50:    percentileSorted(sorted, 50),
+			P90:    percentileSorted(sorted, 90),
+			P99:    percentileSorted(sorted, 99),
 		}
 		if elapsed > 0 {
 			entry.RPS = float64(method.sent) / elapsed.Seconds()
@@ -163,7 +171,10 @@ func (s *Stats) Snapshot() Snapshot {
 		return strings.Compare(a.Method, b.Method)
 	})
 
-	snapshot.P99 = percentile(all, 99)
+	slices.Sort(all)
+	snapshot.P50 = percentileSorted(all, 50)
+	snapshot.P90 = percentileSorted(all, 90)
+	snapshot.P99 = percentileSorted(all, 99)
 
 	return snapshot
 }
@@ -190,6 +201,7 @@ func (s *Stats) Report() Report {
 			Failed:    method.failed,
 			Latencies: len(sorted),
 			P50:       percentileSorted(sorted, 50),
+			P90:       percentileSorted(sorted, 90),
 			P95:       percentileSorted(sorted, 95),
 			P99:       percentileSorted(sorted, 99),
 		}
@@ -221,13 +233,6 @@ func (s *Stats) elapsed() time.Duration {
 	}
 
 	return s.endedAt.Sub(s.startedAt)
-}
-
-func percentile(values []time.Duration, p int) time.Duration {
-	sorted := slices.Clone(values)
-	slices.Sort(sorted)
-
-	return percentileSorted(sorted, p)
 }
 
 func percentileSorted(sorted []time.Duration, p int) time.Duration {

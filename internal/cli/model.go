@@ -35,13 +35,22 @@ type tickMsg time.Time
 type doneMsg struct{ err error }
 
 type history struct {
-	rps []float64
-	p99 []float64
+	rps    []float64
+	points []point
 }
 
-func (h *history) push(rps float64, p99 time.Duration) {
+func (h *history) push(rps float64, p50, p90, p99 time.Duration) {
 	h.rps = appendCapped(h.rps, rps)
-	h.p99 = appendCapped(h.p99, float64(p99.Milliseconds()))
+
+	h.points = append(h.points, point{
+		p50: float64(p50.Microseconds()) / 1000,
+		p90: float64(p90.Microseconds()) / 1000,
+		p99: float64(p99.Microseconds()) / 1000,
+	})
+
+	if len(h.points) > historyLimit {
+		h.points = h.points[len(h.points)-historyLimit:]
+	}
 }
 
 func appendCapped(values []float64, v float64) []float64 {
@@ -147,7 +156,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if !m.done {
 			m.snapshot = m.engine.Snapshot()
-			m.overall.push(m.snapshot.RPS, m.snapshot.P99)
+			m.overall.push(m.snapshot.RPS, m.snapshot.P50, m.snapshot.P90, m.snapshot.P99)
 
 			for _, method := range m.snapshot.Methods {
 				h, ok := m.perMethod[method.Method]
@@ -155,7 +164,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					h = &history{}
 					m.perMethod[method.Method] = h
 				}
-				h.push(method.RPS, method.P99)
+				h.push(method.RPS, method.P50, method.P90, method.P99)
 			}
 		}
 

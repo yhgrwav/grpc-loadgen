@@ -17,6 +17,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -200,6 +201,70 @@ func TestFormatCount(t *testing.T) {
 	for in, want := range tests {
 		if got := formatCount(in); got != want {
 			t.Errorf("formatCount(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSparklineUsesTheValueRange(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	flat := make([]float64, 20)
+	for i := range flat {
+		flat[i] = 848
+	}
+
+	full := sparkline(s, flat, 20)
+	if strings.Count(full, "█") > 0 {
+		t.Error("a flat series is drawn as a full bar instead of a middle line")
+	}
+
+	rising := []float64{10, 20, 30, 40, 50}
+	if got := lipglossWidth(sparkline(s, rising, 20)); got != 20 {
+		t.Errorf("sparkline width = %d, want 20", got)
+	}
+}
+
+func TestChartPlotsMedianAndSpread(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	points := []point{
+		{p50: 10, p90: 20, p99: 30},
+		{p50: 12, p90: 25, p99: 60},
+		{p50: 11, p90: 22, p99: 45},
+	}
+
+	rows := chart(s, points, 12, 7)
+
+	if len(rows) != 7 {
+		t.Fatalf("rows = %d, want 7", len(rows))
+	}
+
+	joined := strings.Join(rows, "")
+	if !strings.Contains(joined, "●") {
+		t.Error("the chart does not plot the median")
+	}
+	if !strings.Contains(joined, "·") {
+		t.Error("the chart does not plot the spread")
+	}
+
+	for i, row := range rows {
+		if got := lipglossWidth(row); got != 12 {
+			t.Errorf("row %d width = %d, want 12", i, got)
+		}
+	}
+}
+
+func TestChartOfNothingIsBlank(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	rows := chart(s, nil, 10, 5)
+
+	if len(rows) != 5 {
+		t.Fatalf("rows = %d, want 5", len(rows))
+	}
+	for _, row := range rows {
+		if got := lipglossWidth(row); got != 10 {
+			t.Errorf("row width = %d, want 10", got)
 		}
 	}
 }

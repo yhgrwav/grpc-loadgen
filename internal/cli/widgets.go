@@ -64,27 +64,47 @@ func sparkline(s styles, values []float64, width int) string {
 		values = values[len(values)-width:]
 	}
 
-	peak := 0.0
+	low, high := values[0], values[0]
 	for _, v := range values {
-		peak = max(peak, v)
+		low = min(low, v)
+		high = max(high, v)
 	}
+
+	span := high - low
+	flat := span < high/50 || span == 0
 
 	var b strings.Builder
 
-	if pad := width - len(values); pad > 0 {
-		b.WriteString(s.faint.Render(strings.Repeat("·", pad)))
-	}
-
 	for _, v := range values {
-		level := 0
-		if peak > 0 {
-			level = int(v / peak * float64(len(sparkLevels)-1))
+		level := len(sparkLevels) / 2
+		if !flat {
+			level = int((v - low) / span * float64(len(sparkLevels)-1))
 		}
 		level = min(max(level, 0), len(sparkLevels)-1)
 		b.WriteRune(sparkLevels[level])
 	}
 
-	return s.spark.Render(b.String())
+	line := s.spark.Render(b.String())
+
+	if pad := width - len(values); pad > 0 {
+		line = s.faint.Render(strings.Repeat("·", pad)) + line
+	}
+
+	return line
+}
+
+func sparkRange(s styles, values []float64, unit string, format func(float64) string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	low, high := values[0], values[0]
+	for _, v := range values {
+		low = min(low, v)
+		high = max(high, v)
+	}
+
+	return s.faint.Render(format(low) + unit + " … " + format(high) + unit)
 }
 
 func statLine(s styles, pairs ...[2]string) string {
