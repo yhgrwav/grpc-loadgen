@@ -425,3 +425,84 @@ func TestEscFromAMethodTabGoesToTheSummary(t *testing.T) {
 		t.Errorf("active = %d, want the summary", m.active)
 	}
 }
+
+func TestTabKeyWalksTabs(t *testing.T) {
+	m := testModel(t)
+
+	pressKey(m, tea.KeyTab)
+	if m.active != 1 {
+		t.Fatalf("tab left the cursor on %d, want 1", m.active)
+	}
+
+	pressKey(m, tea.KeyShiftTab)
+	if m.active != 0 {
+		t.Fatalf("shift+tab left the cursor on %d, want 0", m.active)
+	}
+}
+
+func TestTabsStillWalkAfterTheRun(t *testing.T) {
+	m := testModel(t)
+	m.done = true
+
+	pressKey(m, tea.KeyRight)
+	if m.active != 1 {
+		t.Fatalf("right on the report left the cursor on %d, want 1", m.active)
+	}
+
+	pressKey(m, tea.KeyLeft)
+	if m.active != 0 {
+		t.Fatalf("left on the report left the cursor on %d, want 0", m.active)
+	}
+}
+
+func TestQuitKeysStillLeaveTheReport(t *testing.T) {
+	for _, key := range []string{"q", "enter", " "} {
+		t.Run(key, func(t *testing.T) {
+			m := testModel(t)
+			m.done = true
+
+			_, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune(key)}))
+			if cmd == nil {
+				t.Fatalf("%q on the report did not quit", key)
+			}
+		})
+	}
+}
+
+func TestSecondQuitLeavesWhileStopping(t *testing.T) {
+	m := testModel(t)
+
+	if _, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("q")})); cmd != nil {
+		t.Fatal("first q quit outright, want a graceful stop")
+	}
+
+	if !m.stopping {
+		t.Fatal("first q did not start the stop")
+	}
+
+	if _, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("q")})); cmd == nil {
+		t.Fatal("second q did nothing while stopping")
+	}
+}
+
+func TestSetupQuitKeys(t *testing.T) {
+	keys := map[string]tea.Key{
+		"q":      {Type: tea.KeyRunes, Runes: []rune("q")},
+		"esc":    {Type: tea.KeyEsc},
+		"ctrl+c": {Type: tea.KeyCtrlC},
+	}
+
+	for name, key := range keys {
+		t.Run(name, func(t *testing.T) {
+			settings := &Settings{Mode: string(ModeDark), Palette: Palettes()[0].Name}
+
+			m := &setupModel{settings: settings, text: NewText(LangEN)}
+			m.restyle()
+
+			_, cmd := m.Update(tea.KeyMsg(key))
+			if cmd == nil {
+				t.Fatalf("%q did not leave the setup wizard", name)
+			}
+		})
+	}
+}
