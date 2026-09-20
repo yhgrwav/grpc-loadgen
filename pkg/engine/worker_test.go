@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -336,53 +337,61 @@ func TestResultLatencyComponentsSumToTotal(t *testing.T) {
 }
 
 func TestPoolFreesSlotBeforeResultIsDelivered(t *testing.T) {
-	const limit = 2
-	const requests = 6
+	sent := make(chan struct{}, 2)
 
 	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		sent <- struct{}{}
+
 		return Outcome{Category: CategorySuccess}, nil
 	})
 
 	in := make(chan Request)
 	out := make(chan Result)
 
-	pool := NewWorkerPool(sender, limit)
+	pool := NewWorkerPool(sender, 1)
 
 	done := make(chan error, 1)
 	go func() { done <- pool.Run(context.Background(), in, out) }()
 
-	go func() {
-		for i := range requests {
-			in <- Request{ScheduledAt: time.Now()}
-			if i >= limit {
-				time.Sleep(2 * time.Millisecond)
-			}
-		}
-		close(in)
-	}()
+	in <- Request{ScheduledAt: time.Now()}
+	<-sent
 
-	var collected sync.WaitGroup
-	collected.Add(1)
-	go func() {
-		defer collected.Done()
-		// The consumer stays away far longer than any Send takes, so a slot
-		// held open until its result is read would starve later launches.
-		time.Sleep(50 * time.Millisecond)
-		for range requests {
-			<-out
-		}
-	}()
+	// Nobody reads out, so the first result is still queued. The slot it used
+	// must already be free: in-flight means "in flight", not "waiting to be
+	// recorded".
+	waitForNoneInFlight(t, pool)
 
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("run: %v, want nil: a busy result consumer must not hold in-flight slots", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("run did not return: slots appear to be held until the result is delivered")
+	// With the slot free, a second request must launch even though the
+	// collector has read nothing.
+	in <- Request{ScheduledAt: time.Now()}
+	<-sent
+
+	<-out
+	<-out
+	close(in)
+
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v, want nil: a busy result consumer must not hold in-flight slots", err)
 	}
+}
 
-	collected.Wait()
+func waitForNoneInFlight(t *testing.T, pool *WorkerPool) {
+	t.Helper()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		if pool.InFlight() == 0 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("in-flight slot stays held while the result waits for the collector")
+		default:
+			runtime.Gosched()
+		}
+	}
 }
 
 func TestPoolDoesNotBlameSenderForOwnCancellation(t *testing.T) {
