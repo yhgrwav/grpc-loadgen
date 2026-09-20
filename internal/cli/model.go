@@ -209,7 +209,13 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "esc":
-		m.showHelp = false
+		if m.showHelp {
+			m.showHelp = false
+
+			return m, nil
+		}
+
+		m.active = 0
 
 		return m, nil
 	}

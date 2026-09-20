@@ -231,30 +231,34 @@ func (m *model) footer() string {
 		return m.styles.faint.Render(m.text.SettingsHint())
 	}
 
-	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
+	if m.showHelp {
+		return keyHint(m.styles, m.text.HintBack(), m.text.HintQuit())
+	}
+
+	return keyHint(m.styles, m.text.HintTabs(), m.text.HintSettings(), m.text.HintHelp(), m.text.HintQuit())
 }
 
 func (m *model) settingsView() string {
-	rows := [][2]string{
-		{m.text.LanguageRow(), m.langTitle()},
-		{m.text.ModeRow(), m.modeTitle()},
-		{m.text.PaletteRow(), m.settings.Palette + "   " + swatch(m.styles.theme)},
+	rows := []struct {
+		label   string
+		options []string
+	}{
+		{label: m.text.LanguageRow(), options: m.langOptions()},
+		{label: m.text.ModeRow(), options: m.modeOptions()},
+		{label: m.text.PaletteRow(), options: m.paletteOptions()},
 	}
 
 	var b strings.Builder
 
 	for i, row := range rows {
 		marker := "   "
-		style := m.styles.pick
-
 		if settingsRow(i) == m.row {
 			marker = " ▸ "
-			style = m.styles.pickOn
 		}
 
 		b.WriteString(m.styles.pickOn.Render(marker))
-		b.WriteString(m.styles.label.Render(fmt.Sprintf("%-12s", row[0])))
-		b.WriteString(style.Render(row[1]))
+		b.WriteString(m.styles.label.Render(fmt.Sprintf("%-12s", row.label)))
+		b.WriteString(strings.Join(row.options, m.styles.faint.Render("  ")))
 		b.WriteString("\n")
 	}
 
@@ -264,22 +268,48 @@ func (m *model) settingsView() string {
 	return b.String()
 }
 
-func (m *model) langTitle() string {
-	for _, option := range Languages() {
-		if string(option.Lang) == m.settings.Lang {
-			return option.Title
-		}
+func (m *model) option(text string, selected bool) string {
+	if selected {
+		return m.styles.pickOn.Render("[" + text + "]")
 	}
 
-	return m.settings.Lang
+	return m.styles.pick.Render(" " + text + " ")
 }
 
-func (m *model) modeTitle() string {
-	if Mode(m.settings.Mode) == ModeLight {
-		return m.text.ModeLight()
+func (m *model) langOptions() []string {
+	options := make([]string, 0, len(Languages()))
+
+	for _, lang := range Languages() {
+		options = append(options, m.option(lang.Title, string(lang.Lang) == m.settings.Lang))
 	}
 
-	return m.text.ModeDark()
+	return options
+}
+
+func (m *model) modeOptions() []string {
+	light := Mode(m.settings.Mode) == ModeLight
+
+	return []string{
+		m.option(m.text.ModeDark(), !light),
+		m.option(m.text.ModeLight(), light),
+	}
+}
+
+func (m *model) paletteOptions() []string {
+	palettes := Palettes()
+	options := make([]string, 0, len(palettes))
+
+	for i := range palettes {
+		theme := palettes[i].Dark
+		if Mode(m.settings.Mode) == ModeLight {
+			theme = palettes[i].Light
+		}
+
+		label := palettes[i].Name + " " + swatch(theme)
+		options = append(options, m.option(label, palettes[i].Name == m.settings.Palette))
+	}
+
+	return options
 }
 
 func (m *model) finalReport(width int) string {

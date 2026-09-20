@@ -224,11 +224,15 @@ func (t Text) ModeLight() string {
 
 func (t Text) SettingsHint() string {
 	return t.get(phrase{
-		LangRU: "↑↓ строка   ←→ значение   изменения сохраняются сразу",
-		LangEN: "↑↓ row   ←→ value   changes are saved immediately",
-		LangDE: "↑↓ Zeile   ←→ Wert   Änderungen werden sofort gespeichert",
-		LangZH: "↑↓ 选择行   ←→ 切换值   更改会立即保存",
+		LangRU: "↑↓ строка   ←→ значение   esc назад   сохраняется сразу",
+		LangEN: "↑↓ row   ←→ value   esc back   saved immediately",
+		LangDE: "↑↓ Zeile   ←→ Wert   esc zurück   sofort gespeichert",
+		LangZH: "↑↓ 选择行   ←→ 切换值   esc 返回   立即保存",
 	})
+}
+
+func (t Text) HintBack() string {
+	return t.get(phrase{LangRU: "esc назад", LangEN: "esc back", LangDE: "esc zurück", LangZH: "esc 返回"})
 }
 
 func (t Text) ReportTitle() string {
@@ -262,7 +266,7 @@ func (t Text) PressToExit() string {
 }
 
 func (t Text) HintSettings() string {
-	return t.get(phrase{LangRU: "настройки на последней вкладке", LangEN: "settings in the last tab", LangDE: "Einstellungen im letzten Reiter", LangZH: "设置在最后一个标签页"})
+	return t.get(phrase{LangRU: "tab настройки", LangEN: "tab settings", LangDE: "tab Einstellungen", LangZH: "tab 设置"})
 }
 
 func (t Text) PickTheme() string {
