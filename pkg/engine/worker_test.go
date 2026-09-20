@@ -162,8 +162,8 @@ func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
 	pool := NewWorkerPool(slowSender(time.Second), limit)
 	err := pool.Run(context.Background(), in, out)
 
-	if !errors.Is(err, ErrNoInFlightRoom) {
-		t.Fatalf("error = %v, want %v", err, ErrNoInFlightRoom)
+	if !errors.Is(err, ErrInFlightCapExceeded) {
+		t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
 	}
 }
 
@@ -196,7 +196,7 @@ func TestPoolRejectsBadSetup(t *testing.T) {
 		{
 			name:    "zero in-flight limit",
 			pool:    NewWorkerPool(slowSender(time.Millisecond), 0),
-			wantErr: ErrNoInFlightRoom,
+			wantErr: ErrInvalidInFlightCap,
 		},
 	}
 
@@ -211,5 +211,31 @@ func TestPoolRejectsBadSetup(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
+	in := make(chan Request, 8)
+	for range 8 {
+		in <- Request{ScheduledAt: time.Now()}
+	}
+	close(in)
+
+	out := make(chan Result)
+
+	pool := NewWorkerPool(slowSender(10*time.Millisecond), 1)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pool.Run(context.Background(), in, out)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrInFlightCapExceeded) {
+			t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return while results were left unread")
 	}
 }

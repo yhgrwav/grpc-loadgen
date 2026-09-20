@@ -41,7 +41,7 @@ func collect(ctx context.Context, t *testing.T, s *Scheduler) ([]Request, error)
 }
 
 func TestRunEmitsOneRequestPerInterval(t *testing.T) {
-	s := NewScheduler([]Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}})
+	s := NewScheduler("a.B/C", []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestRunEmitsOneRequestPerInterval(t *testing.T) {
 }
 
 func TestRunWalksEveryStage(t *testing.T) {
-	s := NewScheduler([]Stage{
+	s := NewScheduler("a.B/C", []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
 		{StartRPS: 200, TargetRPS: 200, Duration: 50 * time.Millisecond},
 	})
@@ -77,7 +77,7 @@ func TestRunWalksEveryStage(t *testing.T) {
 }
 
 func TestStagesDoNotDriftApart(t *testing.T) {
-	s := NewScheduler([]Stage{
+	s := NewScheduler("a.B/C", []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
 	})
@@ -96,7 +96,7 @@ func TestStagesDoNotDriftApart(t *testing.T) {
 func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 	const rps = 3000
 
-	s := NewScheduler([]Stage{{StartRPS: rps, TargetRPS: rps, Duration: 100 * time.Millisecond}})
+	s := NewScheduler("a.B/C", []Stage{{StartRPS: rps, TargetRPS: rps, Duration: 100 * time.Millisecond}})
 
 	got, err := collect(context.Background(), t, s)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 }
 
 func TestRunStopsOnCancel(t *testing.T) {
-	s := NewScheduler([]Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}})
+	s := NewScheduler("a.B/C", []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
@@ -144,12 +144,12 @@ func TestRunRejectsBadStages(t *testing.T) {
 		{
 			name:    "zero rps",
 			stages:  []Stage{{StartRPS: 0, TargetRPS: 0, Duration: time.Second}},
-			wantErr: ErrInvalidRPS,
+			wantErr: ErrStageRPS,
 		},
 		{
 			name:    "negative rps",
 			stages:  []Stage{{StartRPS: -1, TargetRPS: -1, Duration: time.Second}},
-			wantErr: ErrInvalidRPS,
+			wantErr: ErrStageRPS,
 		},
 		{
 			name:    "ramp is not supported yet",
@@ -160,7 +160,7 @@ func TestRunRejectsBadStages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScheduler(tt.stages)
+			s := NewScheduler("a.B/C", tt.stages)
 
 			_, err := collect(context.Background(), t, s)
 

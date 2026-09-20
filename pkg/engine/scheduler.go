@@ -22,28 +22,32 @@ import (
 )
 
 var (
-	ErrNoStages   = errors.New("scheduler has no stages")
-	ErrInvalidRPS = errors.New("stage rps must be positive")
-	ErrRampNotYet = errors.New("gradual ramp is not implemented yet")
+	ErrNoStages      = errors.New("scheduler has no stages")
+	ErrStageRPS      = errors.New("stage rps must be positive")
+	ErrStageDuration = errors.New("stage duration must be positive")
+	ErrRampNotYet    = errors.New("gradual ramp is not implemented yet")
 )
 
 type Request struct {
+	Method      string
 	ScheduledAt time.Time
 }
 
 type Scheduler struct {
+	Method string
 	Stages []Stage
 }
 
-func NewScheduler(stages []Stage) *Scheduler {
+func NewScheduler(method string, stages []Stage) *Scheduler {
 	return &Scheduler{
+		Method: method,
 		Stages: stages,
 	}
 }
 
 func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
-	if len(s.Stages) == 0 {
-		return ErrNoStages
+	if err := s.validate(); err != nil {
+		return err
 	}
 
 	stageStart := time.Now()
@@ -58,14 +62,27 @@ func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
 	return nil
 }
 
-func (s *Scheduler) runStage(ctx context.Context, out chan<- Request, stage Stage, stageStart time.Time) error {
-	if stage.StartRPS != stage.TargetRPS {
-		return ErrRampNotYet
-	}
-	if stage.TargetRPS < 1 {
-		return fmt.Errorf("%w: %d", ErrInvalidRPS, stage.TargetRPS)
+func (s *Scheduler) validate() error {
+	if len(s.Stages) == 0 {
+		return ErrNoStages
 	}
 
+	for i, stage := range s.Stages {
+		if stage.StartRPS != stage.TargetRPS {
+			return fmt.Errorf("stage %d: %w", i, ErrRampNotYet)
+		}
+		if stage.TargetRPS < 1 {
+			return fmt.Errorf("stage %d: %w: %d", i, ErrStageRPS, stage.TargetRPS)
+		}
+		if stage.Duration <= 0 {
+			return fmt.Errorf("stage %d: %w: %s", i, ErrStageDuration, stage.Duration)
+		}
+	}
+
+	return nil
+}
+
+func (s *Scheduler) runStage(ctx context.Context, out chan<- Request, stage Stage, stageStart time.Time) error {
 	for i := 0; ; i++ {
 		offset := time.Duration(i) * time.Second / time.Duration(stage.TargetRPS)
 		if offset >= stage.Duration {
@@ -85,7 +102,7 @@ func (s *Scheduler) runStage(ctx context.Context, out chan<- Request, stage Stag
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case out <- Request{ScheduledAt: scheduledAt}:
+		case out <- Request{Method: s.Method, ScheduledAt: scheduledAt}:
 		}
 	}
 }
