@@ -17,10 +17,7 @@ package engine
 import "time"
 
 type Stage struct {
+	StartRPS  int
 	TargetRPS int
 	Duration  time.Duration
-}
-
-type RampUpParams struct {
-	Stages []Stage
 }

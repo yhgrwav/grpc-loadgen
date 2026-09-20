@@ -16,7 +16,15 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
+)
+
+var (
+	ErrNoStages   = errors.New("scheduler has no stages")
+	ErrInvalidRPS = errors.New("stage rps must be positive")
+	ErrRampNotYet = errors.New("gradual ramp is not implemented yet")
 )
 
 type Request struct {
@@ -24,37 +32,59 @@ type Request struct {
 }
 
 type Scheduler struct {
-	RPS          int
-	LoadDuration time.Duration
-	RampUp       RampUpParams
-	Warmup       WarmupParams
+	Stages []Stage
 }
 
-type WarmupParams struct {
-	WarmupTill time.Time
-}
-
-func NewScheduler(rps int) *Scheduler {
+func NewScheduler(stages []Stage) *Scheduler {
 	return &Scheduler{
-		RPS: rps,
+		Stages: stages,
 	}
 }
 
-func (s *Scheduler) Run(ctx context.Context, out chan<- Request) {
-	start := time.Now()
+func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
+	if len(s.Stages) == 0 {
+		return ErrNoStages
+	}
+
+	stageStart := time.Now()
+
+	for i, stage := range s.Stages {
+		if err := s.runStage(ctx, out, stage, stageStart); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
+		stageStart = stageStart.Add(stage.Duration)
+	}
+
+	return nil
+}
+
+func (s *Scheduler) runStage(ctx context.Context, out chan<- Request, stage Stage, stageStart time.Time) error {
+	if stage.StartRPS != stage.TargetRPS {
+		return ErrRampNotYet
+	}
+	if stage.TargetRPS < 1 {
+		return fmt.Errorf("%w: %d", ErrInvalidRPS, stage.TargetRPS)
+	}
 
 	for i := 0; ; i++ {
-		scheduledAt := start.Add(time.Duration(i) * time.Second / time.Duration(s.RPS))
+		offset := time.Duration(i) * time.Second / time.Duration(stage.TargetRPS)
+		if offset >= stage.Duration {
+			return nil
+		}
 
+		scheduledAt := stageStart.Add(offset)
+
+		timer := time.NewTimer(time.Until(scheduledAt))
 		select {
 		case <-ctx.Done():
-			return
-		case <-time.After(time.Until(scheduledAt)):
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
 		}
 
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case out <- Request{ScheduledAt: scheduledAt}:
 		}
 	}
