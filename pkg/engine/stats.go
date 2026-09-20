@@ -59,9 +59,11 @@ type MethodReport struct {
 	P99    metrics.Quantile
 	Max    metrics.Quantile
 	// Latencies counts the observations behind the percentiles, Censored how
-	// many of them only have a lower bound.
+	// many of them only have a lower bound, and Invalid how many were rejected
+	// as impossible — a negative latency means the time arithmetic is wrong.
 	Latencies int
 	Censored  int
+	Invalid   int
 }
 
 type Report struct {
@@ -236,6 +238,7 @@ func (s *Stats) Report() Report {
 			Failed:    v.failed,
 			Latencies: int(v.dist.Count()),
 			Censored:  int(v.dist.CensoredCount()),
+			Invalid:   int(v.dist.InvalidCount()),
 			Min:       v.dist.Percentile(0),
 			P50:       v.dist.Percentile(0.50),
 			P90:       v.dist.Percentile(0.90),
