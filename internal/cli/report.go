@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
 // PrintReport writes the finished run to w as plain text.
@@ -27,14 +28,39 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "run finished: %s in %s\n", target, formatDuration(report.Duration))
 	fmt.Fprintf(w, "sent %d, failed %d\n\n", report.Sent, report.Failed)
 
-	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s\n",
-		"method", "sent", "failed", "rps", "p50", "p95", "p99")
+	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
+		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
 
-	for _, m := range report.Methods {
+	censored := 0
+
+	for i := range report.Methods {
+		m := &report.Methods[i]
+		censored += m.Censored
+
 		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
 			m.Method, m.Sent, m.Failed, m.RPS,
-			formatDuration(m.P50), formatDuration(m.P90), formatDuration(m.P95), formatDuration(m.P99))
+			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 	}
+
+	if censored > 0 {
+		fmt.Fprintf(w, "\n%d requests were abandoned before answering. A percentile shown as "+
+			"\"> value\"\nis a lower bound: the real tail lies above it. Raise the timeout to see it.\n",
+			censored)
+	}
+}
+
+// formatQuantile prints a percentile the way it is known: an exact value, a
+// lower bound when the tail ran past the timeout, or a dash when nothing was
+// measured at all.
+func formatQuantile(q metrics.Quantile) string {
+	if !q.Defined {
+		return "-"
+	}
+	if !q.Exact {
+		return ">" + formatDuration(q.Value)
+	}
+
+	return formatDuration(q.Value)
 }
 
 func formatDuration(d time.Duration) string {

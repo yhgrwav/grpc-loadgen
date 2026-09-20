@@ -156,7 +156,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if !m.done {
 			m.snapshot = m.engine.Snapshot()
-			m.overall.push(m.snapshot.RPS, m.snapshot.P50, m.snapshot.P90, m.snapshot.P99)
+			m.overall.push(m.snapshot.RPS, m.snapshot.P50.Value, m.snapshot.P90.Value, m.snapshot.P99.Value)
 
 			for _, method := range m.snapshot.Methods {
 				h, ok := m.perMethod[method.Method]
@@ -164,7 +164,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					h = &history{}
 					m.perMethod[method.Method] = h
 				}
-				h.push(method.RPS, method.P50, method.P90, method.P99)
+				h.push(method.RPS, method.P50.Value, method.P90.Value, method.P99.Value)
 			}
 		}
 

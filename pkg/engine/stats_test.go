@@ -17,34 +17,107 @@ package engine
 import (
 	"testing"
 	"time"
+
+	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
-func TestPercentileSorted(t *testing.T) {
-	values := make([]time.Duration, 0, 100)
+func TestStatsReportsPercentiles(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
 	for i := 1; i <= 100; i++ {
-		values = append(values, time.Duration(i)*time.Millisecond)
+		stats.Record(Result{
+			Method:      "a",
+			ScheduledAt: start,
+			Outcome:     Outcome{DoneAt: start.Add(time.Duration(i) * time.Millisecond), Category: CategorySuccess},
+		})
 	}
 
-	tests := []struct {
-		p    int
+	report := stats.Report()
+	if len(report.Methods) != 1 {
+		t.Fatalf("methods = %d, want 1", len(report.Methods))
+	}
+
+	// The histogram answers within its relative accuracy, so the check is a
+	// bound rather than equality.
+	for _, tt := range []struct {
+		name string
+		got  metrics.Quantile
 		want time.Duration
 	}{
-		{p: 50, want: 50 * time.Millisecond},
-		{p: 95, want: 95 * time.Millisecond},
-		{p: 99, want: 99 * time.Millisecond},
-		{p: 100, want: 100 * time.Millisecond},
-	}
-
-	for _, tt := range tests {
-		if got := percentileSorted(values, tt.p); got != tt.want {
-			t.Errorf("p%d = %s, want %s", tt.p, got, tt.want)
+		{"p50", report.Methods[0].P50, 50 * time.Millisecond},
+		{"p95", report.Methods[0].P95, 95 * time.Millisecond},
+		{"p99", report.Methods[0].P99, 99 * time.Millisecond},
+		{"max", report.Methods[0].Max, 100 * time.Millisecond},
+	} {
+		if !tt.got.Defined || !tt.got.Exact {
+			t.Errorf("%s = %+v, want an exact defined value", tt.name, tt.got)
+			continue
+		}
+		if tt.got.Value < tt.want || tt.got.Value > tt.want+tt.want/1024+time.Microsecond {
+			t.Errorf("%s = %s, want %s", tt.name, tt.got.Value, tt.want)
 		}
 	}
 }
 
-func TestPercentileOfEmptySetIsZero(t *testing.T) {
-	if got := percentileSorted(nil, 99); got != 0 {
-		t.Errorf("p99 of nothing = %s, want 0", got)
+func TestStatsReportsTimeoutAsLowerBound(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	// p99 of 100 observations is the 99th; with three of them abandoned it can
+	// no longer be pinned down, while p50 still can.
+	for range 97 {
+		stats.Record(Result{
+			Method:      "a",
+			ScheduledAt: start,
+			Outcome:     Outcome{DoneAt: start.Add(10 * time.Millisecond), Category: CategorySuccess},
+		})
+	}
+	for range 3 {
+		stats.Record(Result{
+			Method:      "a",
+			ScheduledAt: start,
+			Outcome:     Outcome{DoneAt: start.Add(time.Second), Category: CategoryTimeout},
+		})
+	}
+
+	report := stats.Report()
+
+	if got := report.Methods[0].P99; got.Exact {
+		t.Errorf("p99 = %+v, want a lower bound: the tail ran past the deadline", got)
+	}
+	if got := report.Methods[0].P99; !got.Defined || got.Value < time.Second {
+		t.Errorf("p99 = %+v, want a bound of at least the deadline", got)
+	}
+	if got := report.Methods[0].Censored; got != 3 {
+		t.Errorf("censored = %d, want 3", got)
+	}
+	if got := report.Methods[0].P50; !got.Exact {
+		t.Errorf("p50 = %+v, want an exact value: the timeout sits above it", got)
+	}
+}
+
+func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, time.Minute)
+
+	// Inside the warmup window, so it is counted but not measured.
+	stats.Record(Result{
+		Method:      "a",
+		ScheduledAt: start,
+		Outcome:     Outcome{DoneAt: start.Add(time.Millisecond), Category: CategorySuccess},
+	})
+
+	report := stats.Report()
+
+	if got := report.Methods[0].P99; got.Defined {
+		t.Errorf("p99 = %+v, want undefined: nothing was measured", got)
+	}
+	if got := report.Methods[0].Sent; got != 1 {
+		t.Errorf("sent = %d, want the warmup request still counted", got)
 	}
 }
 
@@ -70,8 +143,8 @@ func TestStatsSplitsMethods(t *testing.T) {
 	if report.Methods[0].Method != "a" || report.Methods[0].Sent != 2 {
 		t.Errorf("first method = %q with %d requests, want a with 2", report.Methods[0].Method, report.Methods[0].Sent)
 	}
-	if report.Methods[0].Max != 20*time.Millisecond {
-		t.Errorf("max = %s, want 20ms", report.Methods[0].Max)
+	if got := report.Methods[0].Max; !got.Defined || got.Value < 20*time.Millisecond {
+		t.Errorf("max = %+v, want at least 20ms", got)
 	}
 }
 
