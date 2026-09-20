@@ -231,6 +231,15 @@ func (t Text) SettingsHint() string {
 	})
 }
 
+func (t Text) SettingsLocked() string {
+	return t.get(phrase{
+		LangRU: "enter изменить настройки   esc назад",
+		LangEN: "enter to edit the settings   esc back",
+		LangDE: "enter zum Ändern   esc zurück",
+		LangZH: "enter 编辑设置   esc 返回",
+	})
+}
+
 func (t Text) HintBack() string {
 	return t.get(phrase{LangRU: "esc назад", LangEN: "esc back", LangDE: "esc zurück", LangZH: "esc 返回"})
 }

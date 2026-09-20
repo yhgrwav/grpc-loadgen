@@ -84,6 +84,7 @@ type model struct {
 	width    int
 	height   int
 	showHelp bool
+	editing  bool
 	notice   string
 	stopping bool
 	done     bool
@@ -195,11 +196,13 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "tab":
 		m.active = (m.active + 1) % len(m.tabs)
+		m.editing = false
 
 		return m, nil
 
 	case "shift+tab":
 		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
+		m.editing = false
 
 		return m, nil
 
@@ -209,18 +212,28 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "esc":
-		if m.showHelp {
+		switch {
+		case m.showHelp:
 			m.showHelp = false
-
-			return m, nil
+		case m.editing:
+			m.editing = false
+			m.notice = ""
+		default:
+			m.active = 0
 		}
-
-		m.active = 0
 
 		return m, nil
 	}
 
 	if m.active == m.settingsTab() {
+		if !m.editing {
+			if key == "enter" || key == " " {
+				m.editing = true
+			}
+
+			return m, nil
+		}
+
 		return m.onSettingsKey(key)
 	}
 

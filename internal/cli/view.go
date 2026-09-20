@@ -72,7 +72,12 @@ func (m *model) View() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.footer())
 
-	return m.styles.frame.Width(width - 2).Render(b.String())
+	frame := m.styles.frame.Width(width - 4)
+	if m.height > 6 {
+		frame = frame.Height(m.height - 4)
+	}
+
+	return frame.Render(b.String())
 }
 
 func (m *model) header(width int) string {
@@ -228,6 +233,10 @@ func (m *model) footer() string {
 	}
 
 	if m.active == m.settingsTab() {
+		if !m.editing {
+			return m.styles.faint.Render(m.text.SettingsLocked())
+		}
+
 		return m.styles.faint.Render(m.text.SettingsHint())
 	}
 
@@ -252,7 +261,7 @@ func (m *model) settingsView() string {
 
 	for i, row := range rows {
 		marker := "   "
-		if settingsRow(i) == m.row {
+		if m.editing && settingsRow(i) == m.row {
 			marker = " ▸ "
 		}
 
