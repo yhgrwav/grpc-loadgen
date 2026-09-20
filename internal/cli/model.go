@@ -15,12 +15,14 @@
 package cli
 
 import (
+	"math"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
 const (
@@ -39,18 +41,28 @@ type history struct {
 	points []point
 }
 
-func (h *history) push(rps float64, p50, p90, p99 time.Duration) {
+func (h *history) push(rps float64, p50, p90, p99 metrics.Quantile) {
 	h.rps = appendCapped(h.rps, rps)
 
 	h.points = append(h.points, point{
-		p50: float64(p50.Microseconds()) / 1000,
-		p90: float64(p90.Microseconds()) / 1000,
-		p99: float64(p99.Microseconds()) / 1000,
+		p50: plotted(p50),
+		p90: plotted(p90),
+		p99: plotted(p99),
 	})
 
 	if len(h.points) > historyLimit {
 		h.points = h.points[len(h.points)-historyLimit:]
 	}
+}
+
+// plotted turns a quantile into a plottable value, or NaN when nothing was
+// measured, so the chart shows a gap instead of a drop to zero.
+func plotted(q metrics.Quantile) float64 {
+	if !q.Defined {
+		return math.NaN()
+	}
+
+	return float64(q.Value.Microseconds()) / 1000
 }
 
 func appendCapped(values []float64, v float64) []float64 {

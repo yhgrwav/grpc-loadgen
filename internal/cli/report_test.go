@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -48,7 +49,11 @@ func TestPrintReport(t *testing.T) {
 		Sent:     1000,
 		Failed:   22,
 		Methods: []engine.MethodReport{
-			{Method: "a.B/One", Sent: 800, Failed: 20, RPS: 200, P50: 31 * time.Millisecond, P99: 36 * time.Millisecond},
+			{
+				Method: "a.B/One", Sent: 800, Failed: 20, RPS: 200,
+				P50: metrics.Quantile{Value: 31 * time.Millisecond, Exact: true, Defined: true},
+				P99: metrics.Quantile{Value: 36 * time.Millisecond, Exact: true, Defined: true},
+			},
 		},
 	}
 
@@ -61,5 +66,45 @@ func TestPrintReport(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("report does not mention %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestPrintReportMarksPercentilesThatRanPastTheTimeout(t *testing.T) {
+	report := engine.Report{
+		Duration: time.Second,
+		Sent:     100,
+		Methods: []engine.MethodReport{
+			{
+				Method: "a.B/One", Sent: 100, Censored: 3,
+				P50: metrics.Quantile{Value: 10 * time.Millisecond, Exact: true, Defined: true},
+				P99: metrics.Quantile{Value: time.Second, Defined: true},
+			},
+		},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	text := out.String()
+
+	if !strings.Contains(text, ">1.0s") {
+		t.Errorf("a percentile that ran past the deadline must be printed as a bound:\n%s", text)
+	}
+	if !strings.Contains(text, "3 requests were abandoned") {
+		t.Errorf("the report must say how many requests were abandoned:\n%s", text)
+	}
+}
+
+func TestPrintReportShowsUnmeasuredPercentileAsDash(t *testing.T) {
+	report := engine.Report{
+		Duration: time.Second,
+		Methods:  []engine.MethodReport{{Method: "a.B/One"}},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	if !strings.Contains(out.String(), "-") {
+		t.Errorf("a method with no measurements must not print a zero percentile:\n%s", out.String())
 	}
 }

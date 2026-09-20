@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
 type Snapshot struct {
@@ -28,9 +30,9 @@ type Snapshot struct {
 	Failed   int
 	InFlight int
 	RPS      float64
-	P50      time.Duration
-	P90      time.Duration
-	P99      time.Duration
+	P50      metrics.Quantile
+	P90      metrics.Quantile
+	P99      metrics.Quantile
 	Methods  []MethodSnapshot
 }
 
@@ -40,23 +42,31 @@ type MethodSnapshot struct {
 	Failed    int
 	RPS       float64
 	TargetRPS int
-	P50       time.Duration
-	P90       time.Duration
-	P99       time.Duration
+	P50       metrics.Quantile
+	P90       metrics.Quantile
+	P99       metrics.Quantile
 }
 
 type MethodReport struct {
-	Method    string
-	Sent      int
-	Failed    int
-	RPS       float64
-	Min       time.Duration
-	P50       time.Duration
-	P90       time.Duration
-	P95       time.Duration
-	P99       time.Duration
-	Max       time.Duration
+	Method string
+	Sent   int
+	Failed int
+	RPS    float64
+	Min    metrics.Quantile
+	P50    metrics.Quantile
+	P90    metrics.Quantile
+	P95    metrics.Quantile
+	P99    metrics.Quantile
+	Max    metrics.Quantile
+	// Latencies counts the observations behind the percentiles, Censored how
+	// many of them only have a lower bound, and Invalid how many were rejected
+	// as impossible — a negative latency means the time arithmetic is wrong.
 	Latencies int
+	Censored  int
+	Invalid   int
+	// Unanswered counts calls that never reached the target, so they are absent
+	// from the distribution rather than recorded as very fast replies.
+	Unanswered int
 }
 
 type Report struct {
@@ -77,9 +87,10 @@ type Stats struct {
 }
 
 type methodStats struct {
-	sent      int
-	failed    int
-	latencies []time.Duration
+	sent       int
+	failed     int
+	unanswered int
+	latency    *metrics.Latencies
 }
 
 func NewStats() *Stats {
@@ -101,9 +112,18 @@ func (s *Stats) Finish(at time.Time) {
 	s.endedAt = at
 }
 
+// Record files one finished call. Requests inside the warmup window are left
+// out entirely — of the counters as much as of the distribution — because the
+// report describes the measured part of the run, and counting them would skew
+// the reported rate and hide the cold-start failures warmup exists to absorb.
 func (s *Stats) Record(r Result) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
+		s.mu.Unlock()
+
+		return
+	}
 
 	s.sent++
 	if r.Category != CategorySuccess {
@@ -112,7 +132,7 @@ func (s *Stats) Record(r Result) {
 
 	method, ok := s.byMethod[r.Method]
 	if !ok {
-		method = &methodStats{}
+		method = &methodStats{latency: metrics.NewLatencies()}
 		s.byMethod[r.Method] = method
 	}
 
@@ -121,105 +141,150 @@ func (s *Stats) Record(r Result) {
 		method.failed++
 	}
 
-	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
+	// A call that never reached the target has no latency to record: a refused
+	// connection comes back in microseconds and would pull both the median and
+	// the tail down while the target is in fact unreachable.
+	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable
+	if unanswered {
+		method.unanswered++
+	}
+
+	s.mu.Unlock()
+
+	if unanswered {
 		return
 	}
 
-	method.latencies = append(method.latencies, r.Latency())
+	// An abandoned call is known only to have lasted at least as long as its
+	// deadline, so it is recorded as a bound rather than as a measurement.
+	if r.Category == CategoryTimeout {
+		method.latency.RecordCensored(r.CensorThreshold())
+		return
+	}
+
+	method.latency.Record(r.Latency())
+}
+
+// methodView is one method's counters taken under the lock together with a
+// snapshot of its distribution, so percentiles can be computed without holding
+// anything.
+type methodView struct {
+	name       string
+	sent       int
+	failed     int
+	unanswered int
+	dist       *metrics.Snapshot
+}
+
+// views copies the counters under the lock and takes each distribution's
+// snapshot outside it: every snapshot briefly locks its own distribution, and
+// nesting those under the Stats lock would stall recording for as long as all
+// methods together take to copy.
+func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out []methodView) {
+	s.mu.Lock()
+	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
+
+	// Rates divide by the measured window, not by the whole run: the counters
+	// exclude warmup, so dividing by elapsed would report a rate lower than the
+	// one actually driven.
+	measured = elapsed - s.warmup
+	if measured < 0 {
+		measured = 0
+	}
+
+	out = make([]methodView, 0, len(s.byMethod))
+	sources := make([]*metrics.Latencies, 0, len(s.byMethod))
+
+	for name, method := range s.byMethod {
+		out = append(out, methodView{
+			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
+		})
+		sources = append(sources, method.latency)
+	}
+	s.mu.Unlock()
+
+	for i, src := range sources {
+		out[i].dist = src.Snapshot()
+	}
+
+	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
+
+	return elapsed, measured, sent, failed, out
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	elapsed := s.elapsed()
+	elapsed, measured, sent, failed, views := s.views()
 
 	snapshot := Snapshot{
 		Elapsed: elapsed,
-		Sent:    s.sent,
-		Failed:  s.failed,
+		Sent:    sent,
+		Failed:  failed,
+	}
+	if measured > 0 {
+		snapshot.RPS = float64(sent) / measured.Seconds()
 	}
 
-	if elapsed > 0 {
-		snapshot.RPS = float64(s.sent) / elapsed.Seconds()
-	}
+	dists := make([]*metrics.Snapshot, 0, len(views))
 
-	all := make([]time.Duration, 0, s.sent)
-
-	for name, method := range s.byMethod {
-		all = append(all, method.latencies...)
-
-		sorted := slices.Clone(method.latencies)
-		slices.Sort(sorted)
+	for _, v := range views {
+		dists = append(dists, v.dist)
 
 		entry := MethodSnapshot{
-			Method: name,
-			Sent:   method.sent,
-			Failed: method.failed,
-			P50:    percentileSorted(sorted, 50),
-			P90:    percentileSorted(sorted, 90),
-			P99:    percentileSorted(sorted, 99),
+			Method: v.name,
+			Sent:   v.sent,
+			Failed: v.failed,
+			P50:    v.dist.Percentile(0.50),
+			P90:    v.dist.Percentile(0.90),
+			P99:    v.dist.Percentile(0.99),
 		}
-		if elapsed > 0 {
-			entry.RPS = float64(method.sent) / elapsed.Seconds()
+		if measured > 0 {
+			entry.RPS = float64(v.sent) / measured.Seconds()
 		}
 
 		snapshot.Methods = append(snapshot.Methods, entry)
 	}
 
-	slices.SortFunc(snapshot.Methods, func(a, b MethodSnapshot) int {
-		return strings.Compare(a.Method, b.Method)
-	})
-
-	slices.Sort(all)
-	snapshot.P50 = percentileSorted(all, 50)
-	snapshot.P90 = percentileSorted(all, 90)
-	snapshot.P99 = percentileSorted(all, 99)
+	// Distributions are merged rather than their percentiles averaged: the mean
+	// of two p99s is not the p99 of anything.
+	overall := metrics.Merge(dists...)
+	snapshot.P50 = overall.Percentile(0.50)
+	snapshot.P90 = overall.Percentile(0.90)
+	snapshot.P99 = overall.Percentile(0.99)
 
 	return snapshot
 }
 
 func (s *Stats) Report() Report {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	elapsed := s.elapsed()
+	elapsed, measured, sent, failed, views := s.views()
 
 	report := Report{
 		Duration: elapsed,
-		Sent:     s.sent,
-		Failed:   s.failed,
+		Sent:     sent,
+		Failed:   failed,
 	}
 
-	for name, method := range s.byMethod {
-		sorted := slices.Clone(method.latencies)
-		slices.Sort(sorted)
-
+	for _, v := range views {
 		entry := MethodReport{
-			Method:    name,
-			Sent:      method.sent,
-			Failed:    method.failed,
-			Latencies: len(sorted),
-			P50:       percentileSorted(sorted, 50),
-			P90:       percentileSorted(sorted, 90),
-			P95:       percentileSorted(sorted, 95),
-			P99:       percentileSorted(sorted, 99),
+			Method:     v.name,
+			Sent:       v.sent,
+			Failed:     v.failed,
+			Latencies:  int(v.dist.Count()),
+			Censored:   int(v.dist.CensoredCount()),
+			Invalid:    int(v.dist.InvalidCount()),
+			Unanswered: v.unanswered,
+			Min:        v.dist.Percentile(0),
+			P50:        v.dist.Percentile(0.50),
+			P90:        v.dist.Percentile(0.90),
+			P95:        v.dist.Percentile(0.95),
+			P99:        v.dist.Percentile(0.99),
+			Max:        v.dist.Percentile(1),
 		}
-
-		if len(sorted) > 0 {
-			entry.Min = sorted[0]
-			entry.Max = sorted[len(sorted)-1]
-		}
-		if elapsed > 0 {
-			entry.RPS = float64(method.sent) / elapsed.Seconds()
+		if measured > 0 {
+			entry.RPS = float64(v.sent) / measured.Seconds()
 		}
 
 		report.Methods = append(report.Methods, entry)
 	}
-
-	slices.SortFunc(report.Methods, func(a, b MethodReport) int {
-		return strings.Compare(a.Method, b.Method)
-	})
 
 	return report
 }
@@ -233,17 +298,4 @@ func (s *Stats) elapsed() time.Duration {
 	}
 
 	return s.endedAt.Sub(s.startedAt)
-}
-
-func percentileSorted(sorted []time.Duration, p int) time.Duration {
-	if len(sorted) == 0 {
-		return 0
-	}
-
-	index := (len(sorted)*p + 99) / 100
-	if index > 0 {
-		index--
-	}
-
-	return sorted[index]
 }

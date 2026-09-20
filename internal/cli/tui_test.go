@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -518,5 +519,27 @@ func TestHelpListsTabAndSecondQuit(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Errorf("help does not mention %q", want)
 		}
+	}
+}
+
+func TestSparklineGapsInsteadOfZeroes(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	withGap := sparkline(s, []float64{10, math.NaN(), 12}, 3)
+	if !strings.Contains(withGap, "·") {
+		t.Errorf("a tick with no measurement must be a gap, got %q", withGap)
+	}
+
+	// The gap must stay out of the scale: otherwise a NaN read as zero would
+	// stretch the range and flatten the real values.
+	scaled := sparkline(s, []float64{10, math.NaN(), 11}, 3)
+	flat := sparkline(s, []float64{10, 11}, 2)
+
+	if !strings.ContainsAny(scaled, string(sparkLevels)) || !strings.ContainsAny(flat, string(sparkLevels)) {
+		t.Errorf("both lines must still draw levels: %q and %q", scaled, flat)
+	}
+
+	if got := lipglossWidth(sparkline(s, []float64{math.NaN(), math.NaN()}, 20)); got != 20 {
+		t.Errorf("all-gap sparkline width = %d, want 20", got)
 	}
 }

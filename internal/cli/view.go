@@ -141,9 +141,9 @@ func (m *model) summary(width int) string {
 	))
 	b.WriteString("\n")
 	b.WriteString(statLine(m.styles,
-		[2]string{"p50", formatDuration(s.P50)},
-		[2]string{"p90", formatDuration(s.P90)},
-		[2]string{"p99", formatDuration(s.P99)},
+		[2]string{"p50", formatQuantile(s.P50)},
+		[2]string{"p90", formatQuantile(s.P90)},
+		[2]string{"p99", formatQuantile(s.P99)},
 	))
 	b.WriteString("\n\n")
 
@@ -186,9 +186,9 @@ func (m *model) method(width, index int) string {
 	))
 	b.WriteString("\n")
 	b.WriteString(statLine(m.styles,
-		[2]string{"p50", formatDuration(method.P50)},
-		[2]string{"p90", formatDuration(method.P90)},
-		[2]string{"p99", formatDuration(method.P99)},
+		[2]string{"p50", formatQuantile(method.P50)},
+		[2]string{"p90", formatQuantile(method.P90)},
+		[2]string{"p99", formatQuantile(method.P99)},
 	))
 	b.WriteString("\n\n")
 
@@ -403,7 +403,8 @@ func (m *model) finalReport(width int) string {
 		m.text.ColumnMethod(), m.text.Sent(), m.text.Errors(), "p50", "p90", "p99")))
 	b.WriteString("\n")
 
-	for _, method := range report.Methods {
+	for i := range report.Methods {
+		method := &report.Methods[i]
 		name := shortMethod(method.Method)
 
 		errors := m.styles.value
@@ -414,8 +415,8 @@ func (m *model) finalReport(width int) string {
 		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-32s", name)))
 		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %8s", formatCount(method.Sent))))
 		b.WriteString(errors.Render(fmt.Sprintf(" %8s", m.errorShare(method.Sent, method.Failed))))
-		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatDuration(method.P50), formatDuration(method.P90))))
-		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatDuration(method.P99))))
+		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatQuantile(method.P50), formatQuantile(method.P90))))
+		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatQuantile(method.P99))))
 		b.WriteString("\n")
 	}
 
