@@ -35,7 +35,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 
 	settings.Lang = string(LangRU)
-	settings.Theme = "ember"
+	settings.Mode = string(ModeLight)
+	settings.Palette = "ember"
 
 	if saveErr := settings.Save(); saveErr != nil {
 		t.Fatalf("save: %v", saveErr)
@@ -49,8 +50,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if !again.Configured() {
 		t.Error("saved settings do not report themselves as configured")
 	}
-	if again.Lang != string(LangRU) || again.Theme != "ember" {
-		t.Errorf("reloaded %q/%q, want ru/ember", again.Lang, again.Theme)
+	if again.Lang != string(LangRU) || again.Palette != "ember" || again.Mode != string(ModeLight) {
+		t.Errorf("reloaded %q/%q/%q, want ru/light/ember", again.Lang, again.Mode, again.Palette)
 	}
 	if filepath.Dir(again.Path()) == "" {
 		t.Error("settings path is empty")
@@ -109,17 +110,48 @@ func TestEveryLanguageTranslatesTheBasics(t *testing.T) {
 	}
 }
 
-func TestThemeByNameFallsBack(t *testing.T) {
-	if got := ThemeByName("nope").Name; got != Themes()[0].Name {
-		t.Errorf("unknown theme resolved to %q, want the first one", got)
+func TestPaletteByNameFallsBack(t *testing.T) {
+	if got := PaletteByName("nope").Name; got != Palettes()[0].Name {
+		t.Errorf("unknown palette resolved to %q, want the first one", got)
 	}
-	if got := ThemeByName("ember").Name; got != "ember" {
-		t.Errorf("ThemeByName(ember) = %q", got)
+	if got := PaletteByName("ember").Name; got != "ember" {
+		t.Errorf("PaletteByName(ember) = %q", got)
+	}
+}
+
+func TestEveryPaletteDefinesBothModes(t *testing.T) {
+	palettes := Palettes()
+
+	if len(palettes) != 5 {
+		t.Fatalf("palettes = %d, want 5", len(palettes))
+	}
+
+	for i := range palettes {
+		for mode, theme := range map[Mode]Theme{ModeDark: palettes[i].Dark, ModeLight: palettes[i].Light} {
+			if theme.Accent == "" || theme.Text == "" || theme.Border == "" {
+				t.Errorf("palette %s is incomplete in %s mode", palettes[i].Name, mode)
+			}
+			if len(theme.Shimmer) == 0 {
+				t.Errorf("palette %s has no shimmer colours in %s mode", palettes[i].Name, mode)
+			}
+		}
+	}
+}
+
+func TestThemeForPicksMode(t *testing.T) {
+	dark := ThemeFor("aurora", ModeDark)
+	light := ThemeFor("aurora", ModeLight)
+
+	if dark.Accent == light.Accent {
+		t.Error("dark and light modes share the same accent colour")
+	}
+	if got := ThemeFor("aurora", "whatever"); got.Accent != dark.Accent {
+		t.Error("an unknown mode does not fall back to dark")
 	}
 }
 
 func TestSparklineFitsWidth(t *testing.T) {
-	s := newStyles(ThemeByName("mono"))
+	s := newStyles(ThemeFor("mono", ModeDark))
 
 	values := make([]float64, 0, 100)
 	for i := range 100 {
@@ -135,7 +167,7 @@ func TestSparklineFitsWidth(t *testing.T) {
 }
 
 func TestGaugeClampsToWidth(t *testing.T) {
-	s := newStyles(ThemeByName("mono"))
+	s := newStyles(ThemeFor("mono", ModeDark))
 
 	if got := lipglossWidth(gauge(s, 500, 100, 10)); got != 10 {
 		t.Errorf("gauge width with an over-limit value = %d, want 10", got)
@@ -146,7 +178,7 @@ func TestGaugeClampsToWidth(t *testing.T) {
 }
 
 func TestProgressAtEdges(t *testing.T) {
-	s := newStyles(ThemeByName("mono"))
+	s := newStyles(ThemeFor("mono", ModeDark))
 
 	if got := lipglossWidth(progress(s, 0, time.Minute, 16)); got != 16 {
 		t.Errorf("progress width at the start = %d, want 16", got)

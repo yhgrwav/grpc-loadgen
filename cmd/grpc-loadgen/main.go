@@ -84,6 +84,8 @@ func run(args []string) error {
 			}
 		} else {
 			settings.Lang = string(cli.DetectLang())
+			settings.Mode = string(cli.ModeDark)
+			settings.Palette = cli.Palettes()[0].Name
 		}
 	}
 

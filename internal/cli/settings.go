@@ -26,8 +26,9 @@ const settingsDir = "grpc-loadgen"
 
 // Settings holds what the tool remembers between runs.
 type Settings struct {
-	Lang  string `yaml:"lang"`
-	Theme string `yaml:"theme"`
+	Lang    string `yaml:"lang"`
+	Mode    string `yaml:"mode"`
+	Palette string `yaml:"palette"`
 
 	path string
 }

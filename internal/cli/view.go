@@ -43,10 +43,6 @@ func NewProgram(target string, eng *engine.Engine, warmup time.Duration, setting
 }
 
 func (m *model) View() string {
-	if m.done {
-		return ""
-	}
-
 	width := m.width
 	if width < 40 {
 		width = 72
@@ -61,10 +57,14 @@ func (m *model) View() string {
 	b.WriteString("\n\n")
 
 	switch {
+	case m.done:
+		b.WriteString(m.finalReport(inner))
 	case m.showHelp:
 		b.WriteString(m.help())
 	case m.active == 0:
 		b.WriteString(m.summary(inner))
+	case m.active == m.settingsTab():
+		b.WriteString(m.settingsView())
 	default:
 		b.WriteString(m.method(inner, m.active-1))
 	}
@@ -199,9 +199,9 @@ func (m *model) gaugeRow(label string, value, limit float64, text string) string
 func (m *model) help() string {
 	rows := [][2]string{
 		{"tab", m.text.HelpTabs()},
+		{"↑↓ ←→", m.text.HelpSettings()},
 		{"?", m.text.HelpHelp()},
 		{"q", m.text.HelpQuit()},
-		{"/", m.text.HelpCommands()},
 	}
 
 	var b strings.Builder
@@ -219,15 +219,120 @@ func (m *model) help() string {
 }
 
 func (m *model) footer() string {
-	if m.inCmd {
-		return m.styles.title.Render(m.command) + m.styles.faint.Render("▏")
+	if m.done {
+		return keyHint(m.styles, m.text.PressToExit())
 	}
 
 	if m.notice != "" {
 		return m.styles.note.Render(m.notice)
 	}
 
-	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintCommands(), m.text.HintQuit())
+	if m.active == m.settingsTab() {
+		return m.styles.faint.Render(m.text.SettingsHint())
+	}
+
+	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
+}
+
+func (m *model) settingsView() string {
+	rows := [][2]string{
+		{m.text.LanguageRow(), m.langTitle()},
+		{m.text.ModeRow(), m.modeTitle()},
+		{m.text.PaletteRow(), m.settings.Palette + "   " + swatch(m.styles.theme)},
+	}
+
+	var b strings.Builder
+
+	for i, row := range rows {
+		marker := "   "
+		style := m.styles.pick
+
+		if settingsRow(i) == m.row {
+			marker = " ▸ "
+			style = m.styles.pickOn
+		}
+
+		b.WriteString(m.styles.pickOn.Render(marker))
+		b.WriteString(m.styles.label.Render(fmt.Sprintf("%-12s", row[0])))
+		b.WriteString(style.Render(row[1]))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(m.styles.faint.Render(m.settings.Path()))
+
+	return b.String()
+}
+
+func (m *model) langTitle() string {
+	for _, option := range Languages() {
+		if string(option.Lang) == m.settings.Lang {
+			return option.Title
+		}
+	}
+
+	return m.settings.Lang
+}
+
+func (m *model) modeTitle() string {
+	if Mode(m.settings.Mode) == ModeLight {
+		return m.text.ModeLight()
+	}
+
+	return m.text.ModeDark()
+}
+
+func (m *model) finalReport(width int) string {
+	report := m.report
+
+	title := m.text.ReportTitle()
+	if m.stopping {
+		title = m.text.ReportStopped()
+	}
+
+	var b strings.Builder
+
+	b.WriteString(m.styles.title.Render(title))
+	b.WriteString("\n")
+	b.WriteString(statLine(m.styles,
+		[2]string{m.text.Sent(), formatCount(report.Sent)},
+		[2]string{m.text.Errors(), m.errorShare(report.Sent, report.Failed)},
+		[2]string{"rps", fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1))},
+		[2]string{m.text.Latency(), formatDuration(report.Duration)},
+	))
+	b.WriteString("\n" + "\n")
+
+	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-32s %8s %8s %9s %9s %9s",
+		m.text.ColumnMethod(), m.text.Sent(), m.text.Errors(), "p50", "p95", "p99")))
+	b.WriteString("\n")
+
+	for _, method := range report.Methods {
+		name := shortMethod(method.Method)
+
+		errors := m.styles.value
+		if method.Failed > 0 {
+			errors = m.styles.bad
+		}
+
+		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-32s", name)))
+		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %8s", formatCount(method.Sent))))
+		b.WriteString(errors.Render(fmt.Sprintf(" %8s", m.errorShare(method.Sent, method.Failed))))
+		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatDuration(method.P50), formatDuration(method.P95))))
+		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatDuration(method.P99))))
+		b.WriteString("\n")
+	}
+
+	if m.stopping {
+		b.WriteString("\n")
+		b.WriteString(m.styles.note.Render("› " + m.text.ReportStoppedNote()))
+	}
+
+	if m.err != nil && !m.stopping {
+		b.WriteString("\n")
+		b.WriteString(m.styles.bad.Render("› " + m.err.Error()))
+	}
+
+	return b.String()
 }
 
 func (m *model) note() string {

@@ -25,8 +25,8 @@ type setupStep int
 
 const (
 	stepLang setupStep = iota
-	stepTheme
-	stepDone
+	stepMode
+	stepPalette
 )
 
 type setupModel struct {
@@ -38,13 +38,20 @@ type setupModel struct {
 	frame    int
 }
 
-// RunSetup asks for the interface language and colour theme, then stores them.
+// RunSetup asks for the interface language, mode and palette, then stores them.
 func RunSetup(settings *Settings) error {
+	if settings.Mode == "" {
+		settings.Mode = string(ModeDark)
+	}
+	if settings.Palette == "" {
+		settings.Palette = Palettes()[0].Name
+	}
+
 	m := &setupModel{
 		settings: settings,
-		styles:   newStyles(ThemeByName("")),
 		text:     NewText(DetectLang()),
 	}
+	m.restyle()
 
 	program := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(os.Stderr))
 	if _, err := program.Run(); err != nil {
@@ -52,6 +59,10 @@ func RunSetup(settings *Settings) error {
 	}
 
 	return settings.Save()
+}
+
+func (m *setupModel) restyle() {
+	m.styles = newStyles(ThemeFor(m.settings.Palette, Mode(m.settings.Mode)))
 }
 
 func (m *setupModel) Init() tea.Cmd {
@@ -71,12 +82,14 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "up", "k":
-			m.cursor = max(m.cursor-1, 0)
+			m.cursor = wrap(m.cursor-1, m.options())
+			m.preview()
 
 		case "down", "j":
-			m.cursor = min(m.cursor+1, m.options()-1)
+			m.cursor = wrap(m.cursor+1, m.options())
+			m.preview()
 
-		case "enter", " ":
+		case "enter", " ", "right", "l":
 			return m.choose()
 		}
 	}
@@ -85,31 +98,60 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *setupModel) options() int {
-	if m.step == stepLang {
+	switch m.step {
+	case stepLang:
 		return len(Languages())
+	case stepMode:
+		return 2
+	case stepPalette:
+		return len(Palettes())
 	}
 
-	return len(Themes())
+	return 1
+}
+
+func (m *setupModel) preview() {
+	switch m.step {
+	case stepLang:
+		m.text = NewText(Languages()[m.cursor].Lang)
+
+	case stepMode:
+		m.settings.Mode = string(m.modeAt(m.cursor))
+		m.restyle()
+
+	case stepPalette:
+		m.settings.Palette = Palettes()[m.cursor].Name
+		m.restyle()
+	}
+}
+
+func (m *setupModel) modeAt(index int) Mode {
+	if index == 1 {
+		return ModeLight
+	}
+
+	return ModeDark
 }
 
 func (m *setupModel) choose() (tea.Model, tea.Cmd) {
 	switch m.step {
 	case stepLang:
-		lang := Languages()[m.cursor].Lang
-		m.settings.Lang = string(lang)
-		m.text = NewText(lang)
-		m.step = stepTheme
+		m.settings.Lang = string(Languages()[m.cursor].Lang)
+		m.text = NewText(Lang(m.settings.Lang))
+		m.step = stepMode
 		m.cursor = 0
+		m.preview()
 
-	case stepTheme:
-		theme := Themes()[m.cursor]
-		m.settings.Theme = theme.Name
-		m.styles = newStyles(theme)
-		m.step = stepDone
+	case stepMode:
+		m.settings.Mode = string(m.modeAt(m.cursor))
+		m.step = stepPalette
+		m.cursor = 0
+		m.preview()
 
-		return m, tea.Quit
+	case stepPalette:
+		m.settings.Palette = Palettes()[m.cursor].Name
+		m.restyle()
 
-	case stepDone:
 		return m, tea.Quit
 	}
 
@@ -121,21 +163,19 @@ func (m *setupModel) View() string {
 
 	b.WriteString(m.styles.shimmer("◆ grpc-loadgen", m.frame))
 	b.WriteString("\n\n")
-
-	title := m.text.PickLanguage()
-	if m.step == stepTheme {
-		title = m.text.PickTheme()
-	}
-
-	b.WriteString(m.styles.title.Render(title))
+	b.WriteString(m.styles.title.Render(m.stepTitle()))
 	b.WriteString("\n\n")
 
 	for i, option := range m.entries() {
+		marker := m.styles.pick.Render("   ")
+		style := m.styles.pick
+
 		if i == m.cursor {
-			b.WriteString(m.styles.tabOn.Render("▸ " + option))
-		} else {
-			b.WriteString(m.styles.muted.Render("  " + option))
+			marker = m.styles.pickOn.Render(" ▸ ")
+			style = m.styles.pickOn
 		}
+
+		b.WriteString(marker + style.Render(option))
 		b.WriteString("\n")
 	}
 
@@ -145,22 +185,55 @@ func (m *setupModel) View() string {
 	return m.styles.frame.Render(b.String())
 }
 
+func (m *setupModel) stepTitle() string {
+	switch m.step {
+	case stepLang:
+		return m.text.PickLanguage()
+	case stepMode:
+		return m.text.PickTheme()
+	case stepPalette:
+		return m.text.PaletteRow()
+	}
+
+	return ""
+}
+
 func (m *setupModel) entries() []string {
-	if m.step == stepLang {
+	switch m.step {
+	case stepLang:
 		names := make([]string, 0, len(Languages()))
 		for _, option := range Languages() {
 			names = append(names, option.Title)
 		}
 
 		return names
+
+	case stepMode:
+		return []string{m.text.ModeDark(), m.text.ModeLight()}
+
+	case stepPalette:
+		palettes := Palettes()
+
+		names := make([]string, 0, len(palettes))
+		for i := range palettes {
+			theme := palettes[i].Dark
+			if Mode(m.settings.Mode) == ModeLight {
+				theme = palettes[i].Light
+			}
+
+			names = append(names, padRight(palettes[i].Name, 10)+swatch(theme))
+		}
+
+		return names
 	}
 
-	themes := Themes()
+	return nil
+}
 
-	names := make([]string, 0, len(themes))
-	for i := range themes {
-		names = append(names, themes[i].Name)
+func padRight(text string, width int) string {
+	if len(text) >= width {
+		return text
 	}
 
-	return names
+	return text + strings.Repeat(" ", width-len(text))
 }

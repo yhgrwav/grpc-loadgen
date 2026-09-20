@@ -20,9 +20,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type Theme struct {
-	Name string
+type Mode string
 
+const (
+	ModeDark  Mode = "dark"
+	ModeLight Mode = "light"
+)
+
+type Theme struct {
 	Accent  lipgloss.Color
 	Text    lipgloss.Color
 	Muted   lipgloss.Color
@@ -34,40 +39,114 @@ type Theme struct {
 	Shimmer []lipgloss.Color
 }
 
-// Themes lists the colour themes the tool ships with.
-func Themes() []Theme {
-	return []Theme{
+type Palette struct {
+	Name  string
+	Dark  Theme
+	Light Theme
+}
+
+// Palettes lists the colour schemes the tool ships with.
+func Palettes() []Palette {
+	return []Palette{
 		{
-			Name:   "aurora",
-			Accent: "81", Text: "252", Muted: "245", Faint: "240",
-			Good: "114", Warn: "179", Bad: "203", Border: "238",
-			Shimmer: []lipgloss.Color{"39", "45", "51", "87", "123", "87", "51", "45"},
+			Name: "aurora",
+			Dark: Theme{
+				Accent: "81", Text: "252", Muted: "245", Faint: "240",
+				Good: "114", Warn: "179", Bad: "203", Border: "238",
+				Shimmer: shades("39", "45", "51", "87", "123"),
+			},
+			Light: Theme{
+				Accent: "31", Text: "236", Muted: "241", Faint: "247",
+				Good: "28", Warn: "130", Bad: "160", Border: "251",
+				Shimmer: shades("25", "31", "38", "44", "37"),
+			},
 		},
 		{
-			Name:   "ember",
-			Accent: "209", Text: "252", Muted: "245", Faint: "240",
-			Good: "150", Warn: "215", Bad: "203", Border: "238",
-			Shimmer: []lipgloss.Color{"166", "173", "180", "215", "222", "215", "180", "173"},
+			Name: "ember",
+			Dark: Theme{
+				Accent: "209", Text: "252", Muted: "245", Faint: "240",
+				Good: "150", Warn: "215", Bad: "203", Border: "238",
+				Shimmer: shades("166", "173", "180", "215", "222"),
+			},
+			Light: Theme{
+				Accent: "166", Text: "236", Muted: "241", Faint: "247",
+				Good: "28", Warn: "130", Bad: "124", Border: "251",
+				Shimmer: shades("130", "166", "172", "208", "214"),
+			},
 		},
 		{
-			Name:   "mono",
-			Accent: "255", Text: "252", Muted: "245", Faint: "239",
-			Good: "252", Warn: "248", Bad: "231", Border: "237",
-			Shimmer: []lipgloss.Color{"240", "244", "248", "252", "255", "252", "248", "244"},
+			Name: "forest",
+			Dark: Theme{
+				Accent: "114", Text: "252", Muted: "245", Faint: "240",
+				Good: "119", Warn: "179", Bad: "203", Border: "238",
+				Shimmer: shades("22", "28", "35", "71", "114"),
+			},
+			Light: Theme{
+				Accent: "28", Text: "236", Muted: "241", Faint: "247",
+				Good: "22", Warn: "130", Bad: "124", Border: "251",
+				Shimmer: shades("22", "28", "34", "64", "70"),
+			},
+		},
+		{
+			Name: "violet",
+			Dark: Theme{
+				Accent: "141", Text: "252", Muted: "245", Faint: "240",
+				Good: "114", Warn: "179", Bad: "204", Border: "238",
+				Shimmer: shades("55", "92", "98", "141", "183"),
+			},
+			Light: Theme{
+				Accent: "91", Text: "236", Muted: "241", Faint: "247",
+				Good: "28", Warn: "130", Bad: "161", Border: "251",
+				Shimmer: shades("54", "91", "97", "104", "134"),
+			},
+		},
+		{
+			Name: "mono",
+			Dark: Theme{
+				Accent: "255", Text: "252", Muted: "245", Faint: "239",
+				Good: "252", Warn: "248", Bad: "231", Border: "237",
+				Shimmer: shades("240", "244", "248", "252", "255"),
+			},
+			Light: Theme{
+				Accent: "235", Text: "236", Muted: "242", Faint: "250",
+				Good: "238", Warn: "240", Bad: "232", Border: "252",
+				Shimmer: shades("250", "246", "242", "238", "235"),
+			},
 		},
 	}
 }
 
-// ThemeByName returns the named theme, falling back to the first one.
-func ThemeByName(name string) Theme {
-	themes := Themes()
-	for i := range themes {
-		if themes[i].Name == name {
-			return themes[i]
+func shades(colors ...lipgloss.Color) []lipgloss.Color {
+	wave := make([]lipgloss.Color, 0, len(colors)*2-2)
+	wave = append(wave, colors...)
+
+	for i := len(colors) - 2; i > 0; i-- {
+		wave = append(wave, colors[i])
+	}
+
+	return wave
+}
+
+// PaletteByName returns the named palette, falling back to the first one.
+func PaletteByName(name string) Palette {
+	palettes := Palettes()
+	for i := range palettes {
+		if palettes[i].Name == name {
+			return palettes[i]
 		}
 	}
 
-	return Themes()[0]
+	return palettes[0]
+}
+
+// ThemeFor resolves a palette and mode into the colours to draw with.
+func ThemeFor(name string, mode Mode) Theme {
+	palette := PaletteByName(name)
+	if mode == ModeLight {
+		return palette.Light
+	}
+
+	return palette.Dark
 }
 
 type styles struct {
@@ -90,6 +169,8 @@ type styles struct {
 	spark    lipgloss.Style
 	helpKey  lipgloss.Style
 	helpText lipgloss.Style
+	pick     lipgloss.Style
+	pickOn   lipgloss.Style
 }
 
 func newStyles(theme Theme) styles {
@@ -112,6 +193,8 @@ func newStyles(theme Theme) styles {
 		spark:    lipgloss.NewStyle().Foreground(theme.Accent),
 		helpKey:  lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		helpText: lipgloss.NewStyle().Foreground(theme.Muted),
+		pick:     lipgloss.NewStyle().Foreground(theme.Muted),
+		pickOn:   lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 	}
 }
 
@@ -126,6 +209,18 @@ func (s styles) shimmer(text string, frame int) string {
 	for i, r := range text {
 		color := colors[(i+frame)%len(colors)]
 		b.WriteString(lipgloss.NewStyle().Foreground(color).Bold(true).Render(string(r)))
+	}
+
+	return b.String()
+}
+
+func swatch(theme Theme) string {
+	colors := []lipgloss.Color{theme.Accent, theme.Good, theme.Warn, theme.Bad, theme.Muted}
+
+	var b strings.Builder
+
+	for _, color := range colors {
+		b.WriteString(lipgloss.NewStyle().Foreground(color).Render("██"))
 	}
 
 	return b.String()

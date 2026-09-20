@@ -142,10 +142,6 @@ func (t Text) HintQuit() string {
 	return t.get(phrase{LangRU: "q остановить", LangEN: "q stop", LangDE: "q stoppen", LangZH: "q 停止"})
 }
 
-func (t Text) HintCommands() string {
-	return t.get(phrase{LangRU: "/ команды", LangEN: "/ commands", LangDE: "/ Befehle", LangZH: "/ 命令"})
-}
-
 func (t Text) WarmupNote(left string) string {
 	return t.get(phrase{
 		LangRU: "идёт прогрев (" + left + "): эти запросы не попадут в percentiles, поэтому p99 пока пуст",
@@ -189,12 +185,84 @@ func (t Text) HelpQuit() string {
 	return t.get(phrase{LangRU: "остановить прогон и напечатать отчёт", LangEN: "stop the run and print the report", LangDE: "Lauf stoppen und Bericht ausgeben", LangZH: "停止运行并输出报告"})
 }
 
-func (t Text) HelpCommands() string {
-	return t.get(phrase{LangRU: "команды: /lang, /theme, /help, /quit", LangEN: "commands: /lang, /theme, /help, /quit", LangDE: "Befehle: /lang, /theme, /help, /quit", LangZH: "命令：/lang、/theme、/help、/quit"})
+func (t Text) HelpSettings() string {
+	return t.get(phrase{
+		LangRU: "открыть настройки: язык, тема, палитра",
+		LangEN: "open the settings: language, mode, palette",
+		LangDE: "Einstellungen öffnen: Sprache, Modus, Palette",
+		LangZH: "打开设置：语言、模式、配色",
+	})
 }
 
 func (t Text) PickLanguage() string {
 	return "Язык интерфейса · Interface language · Sprache · 界面语言"
+}
+
+func (t Text) Settings() string {
+	return t.get(phrase{LangRU: "настройки", LangEN: "settings", LangDE: "Einstellungen", LangZH: "设置"})
+}
+
+func (t Text) LanguageRow() string {
+	return t.get(phrase{LangRU: "Язык", LangEN: "Language", LangDE: "Sprache", LangZH: "语言"})
+}
+
+func (t Text) ModeRow() string {
+	return t.get(phrase{LangRU: "Тема", LangEN: "Mode", LangDE: "Modus", LangZH: "模式"})
+}
+
+func (t Text) PaletteRow() string {
+	return t.get(phrase{LangRU: "Палитра", LangEN: "Palette", LangDE: "Palette", LangZH: "配色"})
+}
+
+func (t Text) ModeDark() string {
+	return t.get(phrase{LangRU: "тёмная", LangEN: "dark", LangDE: "dunkel", LangZH: "深色"})
+}
+
+func (t Text) ModeLight() string {
+	return t.get(phrase{LangRU: "светлая", LangEN: "light", LangDE: "hell", LangZH: "浅色"})
+}
+
+func (t Text) SettingsHint() string {
+	return t.get(phrase{
+		LangRU: "↑↓ строка   ←→ значение   изменения сохраняются сразу",
+		LangEN: "↑↓ row   ←→ value   changes are saved immediately",
+		LangDE: "↑↓ Zeile   ←→ Wert   Änderungen werden sofort gespeichert",
+		LangZH: "↑↓ 选择行   ←→ 切换值   更改会立即保存",
+	})
+}
+
+func (t Text) ReportTitle() string {
+	return t.get(phrase{LangRU: "Прогон завершён", LangEN: "Run finished", LangDE: "Lauf beendet", LangZH: "运行结束"})
+}
+
+func (t Text) ReportStopped() string {
+	return t.get(phrase{LangRU: "Прогон остановлен", LangEN: "Run stopped", LangDE: "Lauf gestoppt", LangZH: "运行已中止"})
+}
+
+func (t Text) ReportStoppedNote() string {
+	return t.get(phrase{
+		LangRU: "прогон прерван, нагрузка была не полной — числа ниже описывают только то, что успело пройти",
+		LangEN: "the run was cut short, so the numbers below describe only the part that ran",
+		LangDE: "der Lauf wurde abgebrochen; die Zahlen unten beschreiben nur den gelaufenen Teil",
+		LangZH: "运行被中止，以下数字仅反映已完成的部分",
+	})
+}
+
+func (t Text) ColumnMethod() string {
+	return t.get(phrase{LangRU: "метод", LangEN: "method", LangDE: "Methode", LangZH: "方法"})
+}
+
+func (t Text) PressToExit() string {
+	return t.get(phrase{
+		LangRU: "enter выйти",
+		LangEN: "enter to exit",
+		LangDE: "enter zum Beenden",
+		LangZH: "enter 退出",
+	})
+}
+
+func (t Text) HintSettings() string {
+	return t.get(phrase{LangRU: "настройки на последней вкладке", LangEN: "settings in the last tab", LangDE: "Einstellungen im letzten Reiter", LangZH: "设置在最后一个标签页"})
 }
 
 func (t Text) PickTheme() string {
@@ -216,14 +284,5 @@ func (t Text) PickHint() string {
 		LangEN: "↑↓ move   enter confirm",
 		LangDE: "↑↓ wählen   enter bestätigen",
 		LangZH: "↑↓ 选择   enter 确认",
-	})
-}
-
-func (t Text) UnknownCommand(name string) string {
-	return t.get(phrase{
-		LangRU: "неизвестная команда: " + name,
-		LangEN: "unknown command: " + name,
-		LangDE: "unbekannter Befehl: " + name,
-		LangZH: "未知命令：" + name,
 	})
 }

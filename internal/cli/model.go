@@ -27,7 +27,7 @@ const (
 	refresh      = 120 * time.Millisecond
 	historyLimit = 240
 	gaugeWidth   = 24
-	sparkWidth   = 36
+	sparkWidth   = 48
 )
 
 type tickMsg time.Time
@@ -53,6 +53,15 @@ func appendCapped(values []float64, v float64) []float64 {
 	return values
 }
 
+type settingsRow int
+
+const (
+	rowLang settingsRow = iota
+	rowMode
+	rowPalette
+	settingsRows
+)
+
 type model struct {
 	target string
 	engine *engine.Engine
@@ -60,22 +69,21 @@ type model struct {
 
 	text   Text
 	styles styles
-	theme  string
 
 	snapshot  engine.Snapshot
+	report    engine.Report
 	warmup    time.Duration
 	overall   history
 	perMethod map[string]*history
 
 	tabs   []string
 	active int
+	row    settingsRow
 
 	frame    int
 	width    int
 	height   int
 	showHelp bool
-	command  string
-	inCmd    bool
 	notice   string
 	stopping bool
 	done     bool
@@ -85,30 +93,41 @@ type model struct {
 }
 
 func newModel(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *model {
-	text := NewText(Lang(settings.Lang))
-	theme := ThemeByName(settings.Theme)
-
-	calls := eng.Calls()
-
-	tabs := make([]string, 0, len(calls)+1)
-	tabs = append(tabs, text.Summary())
-
-	for _, call := range calls {
-		tabs = append(tabs, shortMethod(call.Method))
-	}
-
-	return &model{
+	m := &model{
 		target:    target,
 		engine:    eng,
 		cancel:    cancel,
-		text:      text,
-		styles:    newStyles(theme),
-		theme:     theme.Name,
 		warmup:    warmup,
 		perMethod: make(map[string]*history),
-		tabs:      tabs,
 		settings:  settings,
 	}
+
+	m.applySettings()
+	m.buildTabs(eng)
+
+	return m
+}
+
+func (m *model) applySettings() {
+	m.text = NewText(Lang(m.settings.Lang))
+	m.styles = newStyles(ThemeFor(m.settings.Palette, Mode(m.settings.Mode)))
+}
+
+func (m *model) buildTabs(eng *engine.Engine) {
+	calls := eng.Calls()
+
+	m.tabs = make([]string, 0, len(calls)+2)
+	m.tabs = append(m.tabs, m.text.Summary())
+
+	for _, call := range calls {
+		m.tabs = append(m.tabs, shortMethod(call.Method))
+	}
+
+	m.tabs = append(m.tabs, m.text.Settings())
+}
+
+func (m *model) settingsTab() int {
+	return len(m.tabs) - 1
 }
 
 func (m *model) Init() tea.Cmd {
@@ -124,26 +143,30 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.frame++
-		m.snapshot = m.engine.Snapshot()
-		m.overall.push(m.snapshot.RPS, m.snapshot.P99)
 
-		for _, method := range m.snapshot.Methods {
-			h, ok := m.perMethod[method.Method]
-			if !ok {
-				h = &history{}
-				m.perMethod[method.Method] = h
+		if !m.done {
+			m.snapshot = m.engine.Snapshot()
+			m.overall.push(m.snapshot.RPS, m.snapshot.P99)
+
+			for _, method := range m.snapshot.Methods {
+				h, ok := m.perMethod[method.Method]
+				if !ok {
+					h = &history{}
+					m.perMethod[method.Method] = h
+				}
+				h.push(method.RPS, method.P99)
 			}
-			h.push(method.RPS, method.P99)
 		}
 
 		return m, tick()
 
 	case doneMsg:
 		m.snapshot = m.engine.Snapshot()
+		m.report = m.engine.Report()
 		m.done = true
 		m.err = msg.err
 
-		return m, tea.Quit
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.onKey(msg)
@@ -153,22 +176,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.inCmd {
-		return m.onCommandKey(msg)
+	key := msg.String()
+
+	if m.done {
+		switch key {
+		case "enter", "q", "esc", "ctrl+c", " ":
+			return m, tea.Quit
+		}
+
+		return m, nil
 	}
 
-	switch msg.String() {
+	switch key {
 	case "q", "ctrl+c":
 		m.stop()
 
 		return m, nil
 
-	case "tab", "right", "l":
+	case "tab":
 		m.active = (m.active + 1) % len(m.tabs)
 
 		return m, nil
 
-	case "shift+tab", "left", "h":
+	case "shift+tab":
 		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
 
 		return m, nil
@@ -178,99 +208,90 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case "/":
-		m.inCmd = true
-		m.command = "/"
-		m.notice = ""
+	case "esc":
+		m.showHelp = false
 
 		return m, nil
 	}
 
-	return m, nil
-}
+	if m.active == m.settingsTab() {
+		return m.onSettingsKey(key)
+	}
 
-func (m *model) onCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.inCmd = false
-		m.command = ""
-
-	case "enter":
-		m.runCommand(strings.TrimSpace(m.command))
-		m.inCmd = false
-		m.command = ""
-
-	case "backspace":
-		if len(m.command) > 1 {
-			m.command = m.command[:len(m.command)-1]
-		}
-
-	default:
-		if len(msg.String()) == 1 {
-			m.command += msg.String()
-		}
+	switch key {
+	case "right", "l":
+		m.active = (m.active + 1) % len(m.tabs)
+	case "left", "h":
+		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
 	}
 
 	return m, nil
 }
 
-func (m *model) runCommand(cmd string) {
-	name, arg, _ := strings.Cut(strings.TrimPrefix(cmd, "/"), " ")
-	arg = strings.TrimSpace(arg)
+func (m *model) onSettingsKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		m.row = (m.row - 1 + settingsRows) % settingsRows
 
-	switch name {
-	case "help":
-		m.showHelp = true
+	case "down", "j":
+		m.row = (m.row + 1) % settingsRows
 
-	case "quit", "stop":
-		m.stop()
+	case "right", "l", "enter", " ":
+		m.cycleSetting(1)
 
-	case "theme":
-		m.applyTheme(arg)
-
-	case "lang":
-		m.applyLang(arg)
-
-	default:
-		m.notice = m.text.UnknownCommand(name)
-	}
-}
-
-func (m *model) applyTheme(name string) {
-	if name == "" {
-		themes := Themes()
-		for i := range themes {
-			if themes[i].Name == m.theme {
-				name = themes[(i+1)%len(themes)].Name
-
-				break
-			}
-		}
+	case "left", "h":
+		m.cycleSetting(-1)
 	}
 
-	theme := ThemeByName(name)
-	m.styles = newStyles(theme)
-	m.theme = theme.Name
-	m.settings.Theme = theme.Name
-	m.saveSettings()
+	return m, nil
 }
 
-func (m *model) applyLang(code string) {
-	if code == "" {
+func (m *model) cycleSetting(step int) {
+	switch m.row {
+	case rowLang:
 		langs := Languages()
+		index := 0
+
 		for i, option := range langs {
-			if option.Lang == m.text.Lang() {
-				code = string(langs[(i+1)%len(langs)].Lang)
+			if string(option.Lang) == m.settings.Lang {
+				index = i
 
 				break
 			}
 		}
+
+		m.settings.Lang = string(langs[wrap(index+step, len(langs))].Lang)
+
+	case rowMode:
+		if Mode(m.settings.Mode) == ModeLight {
+			m.settings.Mode = string(ModeDark)
+		} else {
+			m.settings.Mode = string(ModeLight)
+		}
+
+	case rowPalette:
+		palettes := Palettes()
+		index := 0
+
+		for i := range palettes {
+			if palettes[i].Name == m.settings.Palette {
+				index = i
+
+				break
+			}
+		}
+
+		m.settings.Palette = palettes[wrap(index+step, len(palettes))].Name
 	}
 
-	m.text = NewText(Lang(code))
-	m.settings.Lang = code
+	m.applySettings()
 	m.tabs[0] = m.text.Summary()
+	m.tabs[m.settingsTab()] = m.text.Settings()
 	m.saveSettings()
+}
+
+func wrap(index, length int) int {
+	return ((index % length) + length) % length
 }
 
 func (m *model) saveSettings() {
