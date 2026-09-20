@@ -66,7 +66,7 @@ func NewWorkerPool(sender Sender, maxInFlight int) *WorkerPool {
 	}
 }
 
-func (p *WorkerPool) InFlight() int {
+func (p *WorkerPool) inFlightCount() int {
 	return int(p.inFlight.Load())
 }
 

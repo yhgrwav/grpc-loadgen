@@ -381,7 +381,7 @@ func waitForNoneInFlight(t *testing.T, pool *WorkerPool) {
 	deadline := time.After(2 * time.Second)
 
 	for {
-		if pool.InFlight() == 0 {
+		if pool.inFlightCount() == 0 {
 			return
 		}
 

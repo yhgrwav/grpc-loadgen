@@ -68,7 +68,7 @@ func New(opts Options) (*Engine, error) {
 
 func (e *Engine) Snapshot() Snapshot {
 	snapshot := e.stats.Snapshot()
-	snapshot.InFlight = e.pool.InFlight()
+	snapshot.InFlight = e.pool.inFlightCount()
 	snapshot.Total = e.plannedDuration()
 
 	targets := e.targetRates()
