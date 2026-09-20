@@ -91,8 +91,11 @@ func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 
 	report := eng.Report()
 
-	if report.Sent != 10 {
-		t.Errorf("sent = %d, want 10", report.Sent)
+	// Warmup is left out of the counters as well as of the latencies: the report
+	// describes the measured half of the run, and counting the other half would
+	// halve the reported rate.
+	if report.Sent != 5 {
+		t.Errorf("sent = %d, want 5 of the 10 requests", report.Sent)
 	}
 	if got := report.Methods[0].Latencies; got != 5 {
 		t.Errorf("latencies kept = %d, want 5 of the 10 requests", got)

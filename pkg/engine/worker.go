@@ -33,7 +33,23 @@ type Result struct {
 	Method      string
 	ScheduledAt time.Time
 	BegunAt     time.Time
+	// Deadline is the instant this call was to be abandoned at, carried over
+	// from the request. A call that hit it is known only to have lasted at
+	// least this long, and the bound comes from here rather than from DoneAt:
+	// past the deadline nobody was listening, so a later DoneAt would claim
+	// more than was observed. Zero when the call had no deadline.
+	Deadline time.Time
 	Outcome
+}
+
+// CensorThreshold reports the latency below which an abandoned call is known
+// not to have finished.
+func (r Result) CensorThreshold() time.Duration {
+	if r.Deadline.IsZero() {
+		return r.Latency()
+	}
+
+	return r.Deadline.Sub(r.ScheduledAt)
 }
 
 func (r Result) Latency() time.Duration {
@@ -211,6 +227,7 @@ func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, r
 		Method:      req.Method,
 		ScheduledAt: req.ScheduledAt,
 		BegunAt:     begunAt,
+		Deadline:    req.Deadline,
 		Outcome:     outcome,
 	}
 

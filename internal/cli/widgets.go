@@ -16,6 +16,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -64,10 +65,27 @@ func sparkline(s styles, values []float64, width int) string {
 		values = values[len(values)-width:]
 	}
 
-	low, high := values[0], values[0]
+	// A NaN marks a tick with no measurement. It is drawn as a gap and kept out
+	// of the scale: plotting it as zero would read as latency dropping to zero
+	// exactly where nothing is known.
+	low, high, known := 0.0, 0.0, false
+
 	for _, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
+		if !known {
+			low, high, known = v, v, true
+
+			continue
+		}
+
 		low = min(low, v)
 		high = max(high, v)
+	}
+
+	if !known {
+		return s.faint.Render(strings.Repeat("·", width))
 	}
 
 	span := high - low
@@ -76,6 +94,12 @@ func sparkline(s styles, values []float64, width int) string {
 	var b strings.Builder
 
 	for _, v := range values {
+		if math.IsNaN(v) {
+			b.WriteRune('·')
+
+			continue
+		}
+
 		level := len(sparkLevels) / 2
 		if !flat {
 			level = int((v - low) / span * float64(len(sparkLevels)-1))

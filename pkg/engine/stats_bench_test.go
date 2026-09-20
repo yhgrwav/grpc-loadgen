@@ -16,6 +16,7 @@ package engine
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -46,28 +47,57 @@ func benchStats(methods, perMethod int) *Stats {
 // a snapshot eight times a second, and the old implementation sorted every
 // recorded latency under the recording lock each time.
 func BenchmarkStatsSnapshot(b *testing.B) {
-	stats := benchStats(10, 10000)
+	for _, perMethod := range []int{1000, 10000, 100000} {
+		b.Run(fmt.Sprintf("obs%d", perMethod), func(b *testing.B) {
+			stats := benchStats(10, perMethod)
 
-	b.ResetTimer()
+			b.ResetTimer()
 
-	for range b.N {
-		_ = stats.Snapshot()
+			for range b.N {
+				_ = stats.Snapshot()
+			}
+		})
 	}
 }
 
+// BenchmarkStatsRecord runs at the concurrency a real run reaches: one
+// goroutine per in-flight request, which at 1000 RPS against a target
+// answering in 500ms means five hundred of them writing to one distribution.
 func BenchmarkStatsRecord(b *testing.B) {
-	stats := NewStats()
-	start := time.Now()
-	stats.Start(start, 0)
+	for _, writers := range []int{8, 100, 500, 1000} {
+		b.Run(fmt.Sprintf("writers%d", writers), func(b *testing.B) {
+			stats := NewStats()
+			start := time.Now()
+			stats.Start(start, 0)
 
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			stats.Record(Result{
-				Method:      "pkg.Service/Method",
-				ScheduledAt: start,
-				Outcome:     Outcome{DoneAt: start.Add(12 * time.Millisecond), Category: CategorySuccess},
-			})
-		}
-	})
+			var wg sync.WaitGroup
+
+			each := b.N / writers
+			if each < 1 {
+				each = 1
+			}
+
+			b.ResetTimer()
+
+			for range writers {
+				wg.Add(1)
+
+				go func() {
+					defer wg.Done()
+
+					for range each {
+						stats.Record(Result{
+							Method:      "pkg.Service/Method",
+							ScheduledAt: start,
+							Outcome:     Outcome{DoneAt: start.Add(12 * time.Millisecond), Category: CategorySuccess},
+						})
+					}
+				}()
+			}
+
+			wg.Wait()
+			b.StopTimer()
+			b.ReportMetric(float64(writers*each), "records")
+		})
+	}
 }

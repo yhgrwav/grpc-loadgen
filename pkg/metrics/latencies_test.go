@@ -430,3 +430,15 @@ func TestMergeOfNoSnapshotsIsEmpty(t *testing.T) {
 		t.Errorf("Percentile(0.5) = %+v, want Defined = false", q)
 	}
 }
+
+func TestPercentileZeroOnEmptySnapshotIsUndefined(t *testing.T) {
+	snap := NewLatencies().Snapshot()
+
+	for _, p := range []float64{0, 0.5, 1} {
+		got := snap.Percentile(p)
+		if got.Defined {
+			t.Errorf("Percentile(%v) = %+v, want undefined: a zero here would be "+
+				"indistinguishable from a measured zero", p, got)
+		}
+	}
+}

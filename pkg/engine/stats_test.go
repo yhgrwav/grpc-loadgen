@@ -102,13 +102,14 @@ func TestStatsReportsTimeoutAsLowerBound(t *testing.T) {
 func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
-	stats.Start(start, time.Minute)
+	stats.Start(start, 0)
 
-	// Inside the warmup window, so it is counted but not measured.
+	// The call never reached the target, so the method exists in the report but
+	// has nothing to build a percentile from.
 	stats.Record(Result{
 		Method:      "a",
 		ScheduledAt: start,
-		Outcome:     Outcome{DoneAt: start.Add(time.Millisecond), Category: CategorySuccess},
+		Outcome:     Outcome{DoneAt: start.Add(time.Millisecond), Category: CategoryUnreachable},
 	})
 
 	report := stats.Report()
@@ -117,7 +118,7 @@ func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 		t.Errorf("p99 = %+v, want undefined: nothing was measured", got)
 	}
 	if got := report.Methods[0].Sent; got != 1 {
-		t.Errorf("sent = %d, want the warmup request still counted", got)
+		t.Errorf("sent = %d, want the failed request counted", got)
 	}
 }
 
@@ -159,5 +160,96 @@ func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 
 	if report.Sent != 1 || report.Failed != 1 {
 		t.Fatalf("sent %d failed %d, want a sender that forgot Category to count as failed", report.Sent, report.Failed)
+	}
+}
+
+func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	for range 9 {
+		stats.Record(Result{
+			Method:      "a",
+			ScheduledAt: start,
+			Outcome:     Outcome{DoneAt: start.Add(100 * time.Millisecond), Category: CategorySuccess},
+		})
+	}
+	// A refused connection comes back almost instantly; counted as a latency it
+	// would drag the median down while the target is in fact unreachable.
+	stats.Record(Result{
+		Method:      "a",
+		ScheduledAt: start,
+		Outcome:     Outcome{DoneAt: start.Add(50 * time.Microsecond), Category: CategoryUnreachable},
+	})
+
+	report := stats.Report()
+	method := report.Methods[0]
+
+	if method.Unanswered != 1 {
+		t.Errorf("unanswered = %d, want 1", method.Unanswered)
+	}
+	if method.Latencies != 9 {
+		t.Errorf("latencies = %d, want 9: an unreachable call is not a measurement", method.Latencies)
+	}
+	if method.Failed != 1 {
+		t.Errorf("failed = %d, want 1: it still failed", method.Failed)
+	}
+	if got := method.P50; !got.Defined || got.Value < 100*time.Millisecond {
+		t.Errorf("p50 = %+v, want the median of the calls that answered", got)
+	}
+}
+
+func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	// The sender noticed the timeout 40ms after the deadline; only the deadline
+	// itself is a justified lower bound.
+	stats.Record(Result{
+		Method:      "a",
+		ScheduledAt: start,
+		Deadline:    start.Add(time.Second),
+		Outcome:     Outcome{DoneAt: start.Add(1040 * time.Millisecond), Category: CategoryTimeout},
+	})
+
+	report := stats.Report()
+
+	if got := report.Methods[0].P99; got.Value >= 1040*time.Millisecond {
+		t.Errorf("bound = %s, want the deadline of 1s, not the moment the timeout was noticed", got.Value)
+	}
+	if got := report.Methods[0].P99; got.Value < time.Second {
+		t.Errorf("bound = %s, want at least the deadline", got.Value)
+	}
+}
+
+func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, time.Second)
+
+	stats.Record(Result{
+		Method:      "a",
+		ScheduledAt: start,
+		Outcome:     Outcome{DoneAt: start.Add(time.Millisecond), Category: CategoryServerFault},
+	})
+	stats.Record(Result{
+		Method:      "a",
+		ScheduledAt: start.Add(1500 * time.Millisecond),
+		Outcome:     Outcome{DoneAt: start.Add(1510 * time.Millisecond), Category: CategorySuccess},
+	})
+
+	stats.Finish(start.Add(3 * time.Second))
+
+	report := stats.Report()
+
+	if report.Sent != 1 || report.Failed != 0 {
+		t.Fatalf("sent %d failed %d, want the warmup request left out of both", report.Sent, report.Failed)
+	}
+	// Two measured seconds of the three, one request: the rate divides by the
+	// measured window, not by the whole run.
+	if got := report.Methods[0].RPS; got < 0.49 || got > 0.51 {
+		t.Errorf("rps = %.3f, want ~0.5: one request over the two measured seconds", got)
 	}
 }

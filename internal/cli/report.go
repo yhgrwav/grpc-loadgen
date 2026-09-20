@@ -31,12 +31,13 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
 		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
 
-	censored, invalid := 0, 0
+	censored, invalid, unanswered := 0, 0, 0
 
 	for i := range report.Methods {
 		m := &report.Methods[i]
 		censored += m.Censored
 		invalid += m.Invalid
+		unanswered += m.Unanswered
 
 		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
 			m.Method, m.Sent, m.Failed, m.RPS,
@@ -47,6 +48,11 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		fmt.Fprintf(w, "\n%d requests were abandoned before answering. A percentile shown as "+
 			"\"> value\"\nis a lower bound: the real tail lies above it. Raise the timeout to see it.\n",
 			censored)
+	}
+
+	if unanswered > 0 {
+		fmt.Fprintf(w, "\n%d requests never reached the target and carry no latency, so they are\n"+
+			"counted as failures but left out of the percentiles above.\n", unanswered)
 	}
 
 	if invalid > 0 {

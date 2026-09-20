@@ -64,6 +64,9 @@ type MethodReport struct {
 	Latencies int
 	Censored  int
 	Invalid   int
+	// Unanswered counts calls that never reached the target, so they are absent
+	// from the distribution rather than recorded as very fast replies.
+	Unanswered int
 }
 
 type Report struct {
@@ -84,9 +87,10 @@ type Stats struct {
 }
 
 type methodStats struct {
-	sent    int
-	failed  int
-	latency *metrics.Latencies
+	sent       int
+	failed     int
+	unanswered int
+	latency    *metrics.Latencies
 }
 
 func NewStats() *Stats {
@@ -108,8 +112,18 @@ func (s *Stats) Finish(at time.Time) {
 	s.endedAt = at
 }
 
+// Record files one finished call. Requests inside the warmup window are left
+// out entirely — of the counters as much as of the distribution — because the
+// report describes the measured part of the run, and counting them would skew
+// the reported rate and hide the cold-start failures warmup exists to absorb.
 func (s *Stats) Record(r Result) {
 	s.mu.Lock()
+
+	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
+		s.mu.Unlock()
+
+		return
+	}
 
 	s.sent++
 	if r.Category != CategorySuccess {
@@ -127,17 +141,24 @@ func (s *Stats) Record(r Result) {
 		method.failed++
 	}
 
-	warm := r.ScheduledAt.Before(s.startedAt.Add(s.warmup))
+	// A call that never reached the target has no latency to record: a refused
+	// connection comes back in microseconds and would pull both the median and
+	// the tail down while the target is in fact unreachable.
+	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable
+	if unanswered {
+		method.unanswered++
+	}
+
 	s.mu.Unlock()
 
-	if warm {
+	if unanswered {
 		return
 	}
 
-	// A call abandoned at its deadline lasted longer than the deadline by an
-	// unknown amount, so its latency is a lower bound rather than a measurement.
+	// An abandoned call is known only to have lasted at least as long as its
+	// deadline, so it is recorded as a bound rather than as a measurement.
 	if r.Category == CategoryTimeout {
-		method.latency.RecordCensored(r.Latency())
+		method.latency.RecordCensored(r.CensorThreshold())
 		return
 	}
 
@@ -148,25 +169,36 @@ func (s *Stats) Record(r Result) {
 // snapshot of its distribution, so percentiles can be computed without holding
 // anything.
 type methodView struct {
-	name   string
-	sent   int
-	failed int
-	dist   *metrics.Snapshot
+	name       string
+	sent       int
+	failed     int
+	unanswered int
+	dist       *metrics.Snapshot
 }
 
 // views copies the counters under the lock and takes each distribution's
 // snapshot outside it: every snapshot briefly locks its own distribution, and
 // nesting those under the Stats lock would stall recording for as long as all
 // methods together take to copy.
-func (s *Stats) views() (elapsed time.Duration, sent, failed int, out []methodView) {
+func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out []methodView) {
 	s.mu.Lock()
 	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
+
+	// Rates divide by the measured window, not by the whole run: the counters
+	// exclude warmup, so dividing by elapsed would report a rate lower than the
+	// one actually driven.
+	measured = elapsed - s.warmup
+	if measured < 0 {
+		measured = 0
+	}
 
 	out = make([]methodView, 0, len(s.byMethod))
 	sources := make([]*metrics.Latencies, 0, len(s.byMethod))
 
 	for name, method := range s.byMethod {
-		out = append(out, methodView{name: name, sent: method.sent, failed: method.failed})
+		out = append(out, methodView{
+			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
+		})
 		sources = append(sources, method.latency)
 	}
 	s.mu.Unlock()
@@ -177,19 +209,19 @@ func (s *Stats) views() (elapsed time.Duration, sent, failed int, out []methodVi
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
 
-	return elapsed, sent, failed, out
+	return elapsed, measured, sent, failed, out
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	elapsed, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views()
 
 	snapshot := Snapshot{
 		Elapsed: elapsed,
 		Sent:    sent,
 		Failed:  failed,
 	}
-	if elapsed > 0 {
-		snapshot.RPS = float64(sent) / elapsed.Seconds()
+	if measured > 0 {
+		snapshot.RPS = float64(sent) / measured.Seconds()
 	}
 
 	dists := make([]*metrics.Snapshot, 0, len(views))
@@ -205,8 +237,8 @@ func (s *Stats) Snapshot() Snapshot {
 			P90:    v.dist.Percentile(0.90),
 			P99:    v.dist.Percentile(0.99),
 		}
-		if elapsed > 0 {
-			entry.RPS = float64(v.sent) / elapsed.Seconds()
+		if measured > 0 {
+			entry.RPS = float64(v.sent) / measured.Seconds()
 		}
 
 		snapshot.Methods = append(snapshot.Methods, entry)
@@ -223,7 +255,7 @@ func (s *Stats) Snapshot() Snapshot {
 }
 
 func (s *Stats) Report() Report {
-	elapsed, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views()
 
 	report := Report{
 		Duration: elapsed,
@@ -233,21 +265,22 @@ func (s *Stats) Report() Report {
 
 	for _, v := range views {
 		entry := MethodReport{
-			Method:    v.name,
-			Sent:      v.sent,
-			Failed:    v.failed,
-			Latencies: int(v.dist.Count()),
-			Censored:  int(v.dist.CensoredCount()),
-			Invalid:   int(v.dist.InvalidCount()),
-			Min:       v.dist.Percentile(0),
-			P50:       v.dist.Percentile(0.50),
-			P90:       v.dist.Percentile(0.90),
-			P95:       v.dist.Percentile(0.95),
-			P99:       v.dist.Percentile(0.99),
-			Max:       v.dist.Percentile(1),
+			Method:     v.name,
+			Sent:       v.sent,
+			Failed:     v.failed,
+			Latencies:  int(v.dist.Count()),
+			Censored:   int(v.dist.CensoredCount()),
+			Invalid:    int(v.dist.InvalidCount()),
+			Unanswered: v.unanswered,
+			Min:        v.dist.Percentile(0),
+			P50:        v.dist.Percentile(0.50),
+			P90:        v.dist.Percentile(0.90),
+			P95:        v.dist.Percentile(0.95),
+			P99:        v.dist.Percentile(0.99),
+			Max:        v.dist.Percentile(1),
 		}
-		if elapsed > 0 {
-			entry.RPS = float64(v.sent) / elapsed.Seconds()
+		if measured > 0 {
+			entry.RPS = float64(v.sent) / measured.Seconds()
 		}
 
 		report.Methods = append(report.Methods, entry)

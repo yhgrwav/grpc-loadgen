@@ -34,6 +34,12 @@ const (
 	// CategoryOverload means the target rejected the call for lack of
 	// capacity, not because of anything wrong with the request itself.
 	CategoryOverload
+	// CategoryUnreachable means the call never reached the target and no reply
+	// was coming: the connection was refused, dropped, or never established.
+	// It carries no latency to speak of — a refused connection comes back in
+	// microseconds — so it is counted apart from the distribution rather than
+	// recorded as a fast response.
+	CategoryUnreachable
 )
 
 func (c Category) String() string {
@@ -48,6 +54,8 @@ func (c Category) String() string {
 		return "timeout"
 	case CategoryOverload:
 		return "overload"
+	case CategoryUnreachable:
+		return "unreachable"
 	default:
 		return "unknown"
 	}
