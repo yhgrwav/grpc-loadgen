@@ -3,6 +3,7 @@ module github.com/yhgrwav/grpc-loadgen
 go 1.25.0
 
 require (
+	github.com/HdrHistogram/hdrhistogram-go v1.3.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/goccy/go-yaml v1.19.2
