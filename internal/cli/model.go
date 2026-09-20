@@ -194,11 +194,17 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		m.moveTab(key)
+
 		return m, nil
 	}
 
 	switch key {
 	case "q", "ctrl+c":
+		if m.stopping {
+			return m, tea.Quit
+		}
+
 		m.stop()
 
 		return m, nil
@@ -232,14 +238,18 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch key {
-	case "right", "l":
-		m.active = (m.active + 1) % len(m.tabs)
-	case "left", "h":
-		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
-	}
+	m.moveTab(key)
 
 	return m, nil
+}
+
+func (m *model) moveTab(key string) {
+	switch key {
+	case "right", "l", "tab":
+		m.active = (m.active + 1) % len(m.tabs)
+	case "left", "h", "shift+tab":
+		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
+	}
 }
 
 func (m *model) onSettingsKey(key string) (tea.Model, tea.Cmd) {

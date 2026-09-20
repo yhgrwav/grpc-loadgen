@@ -272,7 +272,7 @@ func (m *model) help() string {
 
 func (m *model) footer() string {
 	if m.done {
-		return keyHint(m.styles, m.text.PressToExit())
+		return keyHint(m.styles, m.text.HintTabs(), m.text.PressToExit())
 	}
 
 	if m.notice != "" {
