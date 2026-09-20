@@ -47,8 +47,8 @@ type Palette struct {
 }
 
 const (
-	darkBg  lipgloss.Color = "234"
-	lightBg lipgloss.Color = "255"
+	darkBg  lipgloss.Color = "235"
+	lightBg lipgloss.Color = "254"
 )
 
 // Palettes lists the colour schemes the tool ships with.
@@ -206,6 +206,14 @@ func newStyles(theme Theme) styles {
 		pick:     bg(lipgloss.NewStyle().Foreground(theme.Muted)),
 		pickOn:   bg(lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)),
 	}
+}
+
+func (s styles) pad(width int) string {
+	if width < 1 {
+		return ""
+	}
+
+	return s.faint.Render(strings.Repeat(" ", width))
 }
 
 func (s styles) shimmer(text string, frame int) string {

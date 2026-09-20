@@ -106,8 +106,8 @@ func (m *model) header(width int) string {
 
 	s := m.snapshot
 
-	return left + strings.Repeat(" ", gap) + right + "\n" +
-		progress(m.styles, s.Elapsed, s.Total, width) + " " +
+	return left + m.styles.pad(gap) + right + "\n" +
+		progress(m.styles, s.Elapsed, s.Total, width) + m.styles.pad(1) +
 		m.styles.muted.Render(formatDuration(s.Elapsed)+" / "+formatDuration(s.Total))
 }
 
@@ -197,7 +197,7 @@ func (m *model) method(width, index int) string {
 
 func (m *model) gaugeRow(label string, value, limit float64, text string) string {
 	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
-		gauge(m.styles, value, limit, gaugeWidth) + "  " +
+		gauge(m.styles, value, limit, gaugeWidth) + m.styles.pad(2) +
 		m.styles.value.Render(text)
 }
 
@@ -279,17 +279,26 @@ func (m *model) settingsView() string {
 
 func (m *model) option(text string, selected bool) string {
 	if selected {
-		return m.styles.pickOn.Render("[" + text + "]")
+		return m.styles.pickOn.Render("[") + text + m.styles.pickOn.Render("]")
 	}
 
-	return m.styles.pick.Render(" " + text + " ")
+	return m.styles.pad(1) + text + m.styles.pad(1)
+}
+
+func (m *model) optionText(text string, selected bool) string {
+	if selected {
+		return m.styles.pickOn.Render(text)
+	}
+
+	return m.styles.pick.Render(text)
 }
 
 func (m *model) langOptions() []string {
 	options := make([]string, 0, len(Languages()))
 
 	for _, lang := range Languages() {
-		options = append(options, m.option(lang.Title, string(lang.Lang) == m.settings.Lang))
+		selected := string(lang.Lang) == m.settings.Lang
+		options = append(options, m.option(m.optionText(lang.Title, selected), selected))
 	}
 
 	return options
@@ -299,8 +308,8 @@ func (m *model) modeOptions() []string {
 	light := Mode(m.settings.Mode) == ModeLight
 
 	return []string{
-		m.option(m.text.ModeDark(), !light),
-		m.option(m.text.ModeLight(), light),
+		m.option(m.optionText(m.text.ModeDark(), !light), !light),
+		m.option(m.optionText(m.text.ModeLight(), light), light),
 	}
 }
 
@@ -314,8 +323,9 @@ func (m *model) paletteOptions() []string {
 			theme = palettes[i].Light
 		}
 
-		label := palettes[i].Name + " " + swatch(theme)
-		options = append(options, m.option(label, palettes[i].Name == m.settings.Palette))
+		selected := palettes[i].Name == m.settings.Palette
+		label := m.optionText(palettes[i].Name+" ", selected) + swatch(theme)
+		options = append(options, m.option(label, selected))
 	}
 
 	return options

@@ -221,7 +221,7 @@ func (m *setupModel) entries() []string {
 				theme = palettes[i].Light
 			}
 
-			names = append(names, padRight(palettes[i].Name, 10)+swatch(theme))
+			names = append(names, m.styles.pick.Render(padRight(palettes[i].Name, 10))+swatch(theme))
 		}
 
 		return names
