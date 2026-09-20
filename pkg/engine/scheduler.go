@@ -29,20 +29,26 @@ var (
 )
 
 type Request struct {
-	Method      string
+	Method string
+	// Payload is encoded once before the run starts and shared by every
+	// request for this method; senders must treat it as read-only.
+	Payload     []byte
 	ScheduledAt time.Time
+	// Deadline is the absolute moment derived from ScheduledAt plus the
+	// method's timeout, so a request stuck in queue does not get a fresh
+	// budget. Zero means no deadline.
+	Deadline time.Time
+	// KeepResponse says whether to keep the response body; needed for the
+	// dependency graph, always false in the MVP.
+	KeepResponse bool
 }
 
 type Scheduler struct {
-	Method string
-	Stages []Stage
+	Call Call
 }
 
-func NewScheduler(method string, stages []Stage) *Scheduler {
-	return &Scheduler{
-		Method: method,
-		Stages: stages,
-	}
+func NewScheduler(call Call) *Scheduler {
+	return &Scheduler{Call: call}
 }
 
 func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
@@ -52,7 +58,7 @@ func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
 
 	stageStart := time.Now()
 
-	for i, stage := range s.Stages {
+	for i, stage := range s.Call.Stages {
 		if err := s.runStage(ctx, out, stage, stageStart); err != nil {
 			return fmt.Errorf("stage %d: %w", i, err)
 		}
@@ -63,11 +69,11 @@ func (s *Scheduler) Run(ctx context.Context, out chan<- Request) error {
 }
 
 func (s *Scheduler) validate() error {
-	if len(s.Stages) == 0 {
+	if len(s.Call.Stages) == 0 {
 		return ErrNoStages
 	}
 
-	for i, stage := range s.Stages {
+	for i, stage := range s.Call.Stages {
 		if stage.StartRPS != stage.TargetRPS {
 			return fmt.Errorf("stage %d: %w", i, ErrRampNotYet)
 		}
@@ -102,7 +108,22 @@ func (s *Scheduler) runStage(ctx context.Context, out chan<- Request, stage Stag
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case out <- Request{Method: s.Method, ScheduledAt: scheduledAt}:
+		case out <- s.newRequest(scheduledAt):
 		}
 	}
+}
+
+func (s *Scheduler) newRequest(scheduledAt time.Time) Request {
+	req := Request{
+		Method:       s.Call.Method,
+		Payload:      s.Call.Payload,
+		ScheduledAt:  scheduledAt,
+		KeepResponse: s.Call.KeepResponse,
+	}
+
+	if s.Call.Timeout > 0 {
+		req.Deadline = scheduledAt.Add(s.Call.Timeout)
+	}
+
+	return req
 }

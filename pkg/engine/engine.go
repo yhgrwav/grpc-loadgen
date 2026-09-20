@@ -28,8 +28,11 @@ var (
 )
 
 type Call struct {
-	Method string
-	Stages []Stage
+	Method       string
+	Payload      []byte
+	Timeout      time.Duration
+	Stages       []Stage
+	KeepResponse bool
 }
 
 type Options struct {
@@ -133,7 +136,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		go func() {
 			defer schedulers.Done()
 
-			if err := NewScheduler(call.Method, call.Stages).Run(ctx, requests); err != nil {
+			if err := NewScheduler(call).Run(ctx, requests); err != nil {
 				scheduleMu.Lock()
 				if scheduleErr == nil {
 					scheduleErr = fmt.Errorf("%s: %w", call.Method, err)

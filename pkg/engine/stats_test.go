@@ -53,9 +53,9 @@ func TestStatsSplitsMethods(t *testing.T) {
 	start := time.Now()
 	stats.Start(start, 0)
 
-	stats.Record(Result{Method: "a", ScheduledAt: start, DoneAt: start.Add(10 * time.Millisecond)})
-	stats.Record(Result{Method: "a", ScheduledAt: start, DoneAt: start.Add(20 * time.Millisecond)})
-	stats.Record(Result{Method: "b", ScheduledAt: start, DoneAt: start.Add(30 * time.Millisecond), Err: ErrFakeFailure})
+	stats.Record(Result{Method: "a", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(10 * time.Millisecond)}})
+	stats.Record(Result{Method: "a", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(20 * time.Millisecond)}})
+	stats.Record(Result{Method: "b", ScheduledAt: start, Outcome: Outcome{DoneAt: start.Add(30 * time.Millisecond), Category: CategoryServerFault, Err: ErrFakeFailure}})
 
 	stats.Finish(start.Add(time.Second))
 

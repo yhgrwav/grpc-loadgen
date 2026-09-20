@@ -29,20 +29,23 @@ var (
 	ErrInFlightCapExceeded = errors.New("in-flight cap exceeded")
 )
 
-type Sender interface {
-	Send(ctx context.Context, req Request) error
-}
-
 type Result struct {
 	Method      string
 	ScheduledAt time.Time
-	SentAt      time.Time
-	DoneAt      time.Time
-	Err         error
+	BegunAt     time.Time
+	Outcome
 }
 
 func (r Result) Latency() time.Duration {
 	return r.DoneAt.Sub(r.ScheduledAt)
+}
+
+func (r Result) QueueTime() time.Duration {
+	return r.BegunAt.Sub(r.ScheduledAt)
+}
+
+func (r Result) TransportWait() time.Duration {
+	return r.SentAt.Sub(r.BegunAt)
 }
 
 func (r Result) ServiceTime() time.Duration {
@@ -75,68 +78,125 @@ func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Resu
 		return fmt.Errorf("%w: %d", ErrInvalidInFlightCap, p.MaxInFlight)
 	}
 
-	sendCtx, abortSends := context.WithCancel(ctx)
-	defer abortSends()
+	r := newPoolRun(ctx, p.MaxInFlight)
+	defer r.abort()
 
-	inFlight := make(chan struct{}, p.MaxInFlight)
+	return r.dispatch(p, in, out)
+}
 
-	var wg sync.WaitGroup
+// poolRun tracks the state of a single Run call: the context sends are made
+// under, the in-flight slots, and the first fatal error seen by any worker.
+type poolRun struct {
+	sendCtx context.Context
+	abort   context.CancelFunc
+	slots   chan struct{}
 
-	finish := func(err error) error {
-		if err != nil {
-			abortSends()
-		}
-		wg.Wait()
+	wg sync.WaitGroup
 
-		return err
-	}
+	mu       sync.Mutex
+	fatalErr error
+}
 
-	for {
-		var req Request
+func newPoolRun(ctx context.Context, maxInFlight int) *poolRun {
+	sendCtx, abort := context.WithCancel(ctx)
 
-		select {
-		case <-ctx.Done():
-			return finish(ctx.Err())
-		case r, ok := <-in:
-			if !ok {
-				return finish(nil)
-			}
-			req = r
-		}
-
-		select {
-		case inFlight <- struct{}{}:
-		case <-ctx.Done():
-			return finish(ctx.Err())
-		default:
-			return finish(fmt.Errorf("%w: %d", ErrInFlightCapExceeded, p.MaxInFlight))
-		}
-
-		p.inFlight.Add(1)
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			defer func() {
-				p.inFlight.Add(-1)
-				<-inFlight
-			}()
-
-			p.send(sendCtx, req, out)
-		}()
+	return &poolRun{
+		sendCtx: sendCtx,
+		abort:   abort,
+		slots:   make(chan struct{}, maxInFlight),
 	}
 }
 
-func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result) {
-	sentAt := time.Now()
-	err := p.Sender.Send(ctx, req)
+// fail records err as the run's outcome unless one was already recorded, and
+// stops every in-flight and future send.
+func (r *poolRun) fail(err error) {
+	r.mu.Lock()
+	if r.fatalErr == nil {
+		r.fatalErr = err
+	}
+	r.mu.Unlock()
+
+	r.abort()
+}
+
+func (r *poolRun) finish(err error) error {
+	if err != nil {
+		r.fail(err)
+	}
+	r.wg.Wait()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.fatalErr != nil {
+		return r.fatalErr
+	}
+
+	return err
+}
+
+func (r *poolRun) dispatch(p *WorkerPool, in <-chan Request, out chan<- Result) error {
+	for {
+		select {
+		case <-r.sendCtx.Done():
+			return r.finish(r.sendCtx.Err())
+		case req, ok := <-in:
+			if !ok {
+				return r.finish(nil)
+			}
+			if err := r.launch(p, req, out); err != nil {
+				return r.finish(err)
+			}
+		}
+	}
+}
+
+func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
+	select {
+	case r.slots <- struct{}{}:
+	case <-r.sendCtx.Done():
+		return r.sendCtx.Err()
+	default:
+		return fmt.Errorf("%w: %d", ErrInFlightCapExceeded, cap(r.slots))
+	}
+
+	p.inFlight.Add(1)
+	r.wg.Add(1)
+
+	go func() {
+		defer r.wg.Done()
+		defer func() {
+			p.inFlight.Add(-1)
+			<-r.slots
+		}()
+
+		p.send(r.sendCtx, req, out, r.fail)
+	}()
+
+	return nil
+}
+
+func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, fail func(error)) {
+	begunAt := time.Now()
+
+	outcome, err := p.Sender.Send(ctx, req)
+	if err != nil {
+		fail(err)
+		return
+	}
+
+	if outcome.SentAt.IsZero() {
+		outcome.SentAt = begunAt
+	}
+	if outcome.DoneAt.IsZero() {
+		outcome.DoneAt = time.Now()
+	}
 
 	result := Result{
 		Method:      req.Method,
 		ScheduledAt: req.ScheduledAt,
-		SentAt:      sentAt,
-		DoneAt:      time.Now(),
-		Err:         err,
+		BegunAt:     begunAt,
+		Outcome:     outcome,
 	}
 
 	select {
