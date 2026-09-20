@@ -72,6 +72,21 @@ func run(args []string) error {
 		return err
 	}
 
+	settings, err := cli.LoadSettings()
+	if err != nil {
+		return err
+	}
+
+	if !settings.Configured() {
+		if cli.Interactive() {
+			if err := cli.RunSetup(settings); err != nil {
+				return err
+			}
+		} else {
+			settings.Lang = string(cli.DetectLang())
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -89,7 +104,7 @@ func run(args []string) error {
 	}
 
 	if cli.Interactive() {
-		program := cli.NewProgram(target, eng, start, cancel)
+		program := cli.NewProgram(target, eng, cfg.Load.Warmup, settings, start, cancel)
 		if _, err := program.Run(); err != nil {
 			return err
 		}

@@ -16,6 +16,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -25,79 +26,20 @@ import (
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
-const refresh = 100 * time.Millisecond
+// NewProgram builds the full-screen view of a run.
+func NewProgram(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, run func() error, cancel func()) *tea.Program {
+	m := newModel(target, eng, warmup, settings, cancel)
 
-var (
-	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
-	titleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
-	alertStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
-	hintStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true)
-	barFilled  = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	barEmpty   = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-)
-
-type tickMsg time.Time
-
-type doneMsg struct {
-	err error
-}
-
-type model struct {
-	target   string
-	engine   *engine.Engine
-	snapshot engine.Snapshot
-	cancel   func()
-	done     bool
-	err      error
-	stopping bool
-}
-
-// NewProgram builds the live view of a run.
-func NewProgram(target string, eng *engine.Engine, run func() error, cancel func()) *tea.Program {
-	m := &model{target: target, engine: eng, cancel: cancel}
-
-	program := tea.NewProgram(m, tea.WithOutput(stderr()))
+	program := tea.NewProgram(m,
+		tea.WithAltScreen(),
+		tea.WithOutput(os.Stderr),
+	)
 
 	go func() {
-		err := run()
-		program.Send(doneMsg{err: err})
+		program.Send(doneMsg{err: run()})
 	}()
 
 	return program
-}
-
-func (m *model) Init() tea.Cmd {
-	return tick()
-}
-
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tickMsg:
-		m.snapshot = m.engine.Snapshot()
-
-		return m, tick()
-
-	case doneMsg:
-		m.snapshot = m.engine.Snapshot()
-		m.done = true
-		m.err = msg.err
-
-		return m, tea.Quit
-
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			if !m.stopping {
-				m.stopping = true
-				m.cancel()
-			}
-
-			return m, nil
-		}
-	}
-
-	return m, nil
 }
 
 func (m *model) View() string {
@@ -105,77 +47,223 @@ func (m *model) View() string {
 		return ""
 	}
 
+	width := m.width
+	if width < 40 {
+		width = 72
+	}
+	inner := width - 6
+
+	var b strings.Builder
+
+	b.WriteString(m.header(inner))
+	b.WriteString("\n\n")
+	b.WriteString(m.tabBar(inner))
+	b.WriteString("\n\n")
+
+	switch {
+	case m.showHelp:
+		b.WriteString(m.help())
+	case m.active == 0:
+		b.WriteString(m.summary(inner))
+	default:
+		b.WriteString(m.method(inner, m.active-1))
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(m.footer())
+
+	return m.styles.frame.Width(width - 2).Render(b.String())
+}
+
+func (m *model) header(width int) string {
+	status := m.text.Running()
+	glyph := spinner(m.frame / 2)
+
+	switch {
+	case m.stopping:
+		status = m.text.Stopping()
+	case m.done:
+		status = m.text.Finished()
+		glyph = "●"
+	}
+
+	left := m.styles.shimmer(glyph+" grpc-loadgen", m.frame) +
+		m.styles.faint.Render("  ·  ") +
+		m.styles.muted.Render(m.text.Target()+" ") +
+		m.styles.value.Render(m.target)
+
+	right := m.styles.muted.Render(status)
+
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+
+	s := m.snapshot
+
+	return left + strings.Repeat(" ", gap) + right + "\n" +
+		progress(m.styles, s.Elapsed, s.Total, width) + " " +
+		m.styles.muted.Render(formatDuration(s.Elapsed)+" / "+formatDuration(s.Total))
+}
+
+func (m *model) tabBar(width int) string {
+	var parts []string
+
+	for i, name := range m.tabs {
+		if i == m.active {
+			parts = append(parts, m.styles.tabOn.Render(name))
+
+			continue
+		}
+		parts = append(parts, m.styles.tab.Render(name))
+	}
+
+	row := strings.Join(parts, "")
+
+	return row + "\n" + m.styles.faint.Render(strings.Repeat("─", width))
+}
+
+func (m *model) summary(width int) string {
 	s := m.snapshot
 
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("grpc-loadgen"))
-	b.WriteString(labelStyle.Render("  →  " + m.target))
+	b.WriteString(statLine(m.styles,
+		[2]string{m.text.Sent(), formatCount(s.Sent)},
+		[2]string{"rps", fmt.Sprintf("%.0f", s.RPS)},
+		[2]string{m.text.InFlight(), formatCount(s.InFlight)},
+		[2]string{m.text.Errors(), m.errorShare(s.Sent, s.Failed)},
+		[2]string{"p99", formatDuration(s.P99)},
+	))
 	b.WriteString("\n\n")
 
-	b.WriteString(progressBar(s.Elapsed, s.Total))
-	b.WriteString("  ")
-	b.WriteString(valueStyle.Render(formatElapsed(s.Elapsed, s.Total)))
-	b.WriteString("\n\n")
-
-	b.WriteString(field("sent", fmt.Sprintf("%d", s.Sent)))
-	b.WriteString(field("rps", fmt.Sprintf("%.0f", s.RPS)))
-	b.WriteString(field("in-flight", fmt.Sprintf("%d", s.InFlight)))
-	b.WriteString(errField(s))
-	b.WriteString(field("p99", formatDuration(s.P99)))
-	b.WriteString("\n\n")
-
-	if m.stopping {
-		b.WriteString(alertStyle.Render("stopping, waiting for requests in flight"))
-	} else {
-		b.WriteString(hintStyle.Render("q to stop the run"))
-	}
+	b.WriteString(m.gaugeRow("rps", s.RPS, m.totalTarget(), fmt.Sprintf("%.0f", s.RPS)))
 	b.WriteString("\n")
+	b.WriteString(m.gaugeRow(m.text.InFlight(), float64(s.InFlight), float64(max(s.InFlight, 1)*2), formatCount(s.InFlight)))
+	b.WriteString("\n\n")
+
+	b.WriteString(m.styles.label.Render(m.text.Rate()+"  ") + sparkline(m.styles, m.overall.rps, sparkWidth))
+	b.WriteString("\n")
+	b.WriteString(m.styles.label.Render(m.text.Latency()+"  ") + sparkline(m.styles, m.overall.p99, sparkWidth))
+
+	if note := m.note(); note != "" {
+		b.WriteString("\n\n")
+		b.WriteString(m.styles.note.Render("› " + note))
+	}
 
 	return b.String()
 }
 
-func field(label, value string) string {
-	return labelStyle.Render(label+" ") + valueStyle.Render(value) + labelStyle.Render("   ")
-}
-
-func errField(s engine.Snapshot) string {
-	ratio := 0.0
-	if s.Sent > 0 {
-		ratio = float64(s.Failed) / float64(s.Sent) * 100
+func (m *model) method(width, index int) string {
+	if index >= len(m.snapshot.Methods) {
+		return m.styles.faint.Render("…")
 	}
 
-	value := fmt.Sprintf("%.1f%%", ratio)
-	if s.Failed > 0 {
-		return labelStyle.Render("errors ") + alertStyle.Render(value) + labelStyle.Render("   ")
+	method := m.snapshot.Methods[index]
+
+	var b strings.Builder
+
+	b.WriteString(m.styles.value.Render(method.Method))
+	b.WriteString("\n\n")
+
+	b.WriteString(statLine(m.styles,
+		[2]string{m.text.Sent(), formatCount(method.Sent)},
+		[2]string{"rps", fmt.Sprintf("%.0f", method.RPS)},
+		[2]string{m.text.Errors(), m.errorShare(method.Sent, method.Failed)},
+		[2]string{"p50", formatDuration(method.P50)},
+		[2]string{"p99", formatDuration(method.P99)},
+	))
+	b.WriteString("\n\n")
+
+	b.WriteString(m.gaugeRow("rps", method.RPS, float64(method.TargetRPS), fmt.Sprintf("%.0f / %d", method.RPS, method.TargetRPS)))
+	b.WriteString("\n\n")
+
+	h := m.perMethod[method.Method]
+	if h == nil {
+		h = &history{}
 	}
 
-	return field("errors", value)
+	b.WriteString(m.styles.label.Render(m.text.Rate()+"  ") + sparkline(m.styles, h.rps, sparkWidth))
+	b.WriteString("\n")
+	b.WriteString(m.styles.label.Render(m.text.Latency()+"  ") + sparkline(m.styles, h.p99, sparkWidth))
+
+	return b.String()
 }
 
-func progressBar(elapsed, total time.Duration) string {
-	const width = 32
+func (m *model) gaugeRow(label string, value, limit float64, text string) string {
+	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
+		gauge(m.styles, value, limit, gaugeWidth) + "  " +
+		m.styles.value.Render(text)
+}
 
-	filled := 0
-	if total > 0 {
-		filled = int(float64(width) * float64(elapsed) / float64(total))
+func (m *model) help() string {
+	rows := [][2]string{
+		{"tab", m.text.HelpTabs()},
+		{"?", m.text.HelpHelp()},
+		{"q", m.text.HelpQuit()},
+		{"/", m.text.HelpCommands()},
 	}
-	filled = min(max(filled, 0), width)
 
-	return barFilled.Render(strings.Repeat("━", filled)) +
-		barEmpty.Render(strings.Repeat("━", width-filled))
-}
+	var b strings.Builder
 
-func formatElapsed(elapsed, total time.Duration) string {
-	if total <= 0 {
-		return formatDuration(elapsed)
+	b.WriteString(m.styles.title.Render(m.text.HelpTitle()))
+	b.WriteString("\n\n")
+
+	for _, row := range rows {
+		b.WriteString(m.styles.helpKey.Render(fmt.Sprintf("%-8s", row[0])))
+		b.WriteString(m.styles.helpText.Render(row[1]))
+		b.WriteString("\n")
 	}
 
-	return formatDuration(elapsed) + labelStyle.Render(" / ") + formatDuration(total)
+	return b.String()
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(refresh, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+func (m *model) footer() string {
+	if m.inCmd {
+		return m.styles.title.Render(m.command) + m.styles.faint.Render("▏")
+	}
+
+	if m.notice != "" {
+		return m.styles.note.Render(m.notice)
+	}
+
+	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintCommands(), m.text.HintQuit())
+}
+
+func (m *model) note() string {
+	s := m.snapshot
+
+	if m.warmup > 0 && s.Elapsed < m.warmup {
+		return m.text.WarmupNote(formatDuration(m.warmup - s.Elapsed))
+	}
+	if s.Sent > 0 && float64(s.Failed)/float64(s.Sent) > 0.05 {
+		return m.text.ErrorsNote()
+	}
+	if s.InFlight > 0 && float64(s.InFlight) > m.totalTarget() {
+		return m.text.InFlightNote()
+	}
+
+	return ""
+}
+
+func (m *model) errorShare(sent, failed int) string {
+	if sent == 0 {
+		return "0%"
+	}
+
+	return fmt.Sprintf("%.1f%%", float64(failed)/float64(sent)*100)
+}
+
+func (m *model) totalTarget() float64 {
+	var total float64
+
+	for _, method := range m.snapshot.Methods {
+		total += float64(method.TargetRPS)
+	}
+
+	if total == 0 {
+		return 1
+	}
+
+	return total
 }

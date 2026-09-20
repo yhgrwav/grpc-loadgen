@@ -68,7 +68,31 @@ func (e *Engine) Snapshot() Snapshot {
 	snapshot.InFlight = e.pool.InFlight()
 	snapshot.Total = e.plannedDuration()
 
+	targets := e.targetRates()
+	for i, method := range snapshot.Methods {
+		snapshot.Methods[i].TargetRPS = targets[method.Method]
+	}
+
 	return snapshot
+}
+
+func (e *Engine) targetRates() map[string]int {
+	rates := make(map[string]int, len(e.opts.Calls))
+
+	for _, call := range e.opts.Calls {
+		for _, stage := range call.Stages {
+			if stage.TargetRPS > rates[call.Method] {
+				rates[call.Method] = stage.TargetRPS
+			}
+		}
+	}
+
+	return rates
+}
+
+// Calls returns the calls this engine was built for.
+func (e *Engine) Calls() []Call {
+	return e.opts.Calls
 }
 
 func (e *Engine) plannedDuration() time.Duration {

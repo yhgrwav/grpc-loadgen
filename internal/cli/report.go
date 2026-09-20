@@ -17,15 +17,10 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
-
-func stderr() io.Writer {
-	return os.Stderr
-}
 
 // PrintReport writes the finished run to w as plain text.
 func PrintReport(w io.Writer, target string, report engine.Report) {

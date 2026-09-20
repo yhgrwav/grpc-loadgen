@@ -16,6 +16,7 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,6 +29,17 @@ type Snapshot struct {
 	InFlight int
 	RPS      float64
 	P99      time.Duration
+	Methods  []MethodSnapshot
+}
+
+type MethodSnapshot struct {
+	Method    string
+	Sent      int
+	Failed    int
+	RPS       float64
+	TargetRPS int
+	P50       time.Duration
+	P99       time.Duration
 }
 
 type MethodReport struct {
@@ -129,9 +141,28 @@ func (s *Stats) Snapshot() Snapshot {
 	}
 
 	all := make([]time.Duration, 0, s.sent)
-	for _, method := range s.byMethod {
+
+	for name, method := range s.byMethod {
 		all = append(all, method.latencies...)
+
+		entry := MethodSnapshot{
+			Method: name,
+			Sent:   method.sent,
+			Failed: method.failed,
+			P50:    percentile(method.latencies, 50),
+			P99:    percentile(method.latencies, 99),
+		}
+		if elapsed > 0 {
+			entry.RPS = float64(method.sent) / elapsed.Seconds()
+		}
+
+		snapshot.Methods = append(snapshot.Methods, entry)
 	}
+
+	slices.SortFunc(snapshot.Methods, func(a, b MethodSnapshot) int {
+		return strings.Compare(a.Method, b.Method)
+	})
+
 	snapshot.P99 = percentile(all, 99)
 
 	return snapshot
@@ -175,14 +206,7 @@ func (s *Stats) Report() Report {
 	}
 
 	slices.SortFunc(report.Methods, func(a, b MethodReport) int {
-		switch {
-		case a.Method < b.Method:
-			return -1
-		case a.Method > b.Method:
-			return 1
-		default:
-			return 0
-		}
+		return strings.Compare(a.Method, b.Method)
 	})
 
 	return report
