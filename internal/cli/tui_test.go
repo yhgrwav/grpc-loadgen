@@ -20,6 +20,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
 func TestSettingsRoundTrip(t *testing.T) {
@@ -266,5 +270,158 @@ func TestChartOfNothingIsBlank(t *testing.T) {
 		if got := lipglossWidth(row); got != 10 {
 			t.Errorf("row width = %d, want 10", got)
 		}
+	}
+}
+
+func testModel(t *testing.T) *model {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{
+			{Method: "pkg.Svc/One", Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
+			{Method: "pkg.Svc/Two", Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
+		},
+		Sender:      engine.FakeSender{},
+		MaxInFlight: 1,
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+
+	settings, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	settings.Lang = string(LangEN)
+	settings.Mode = string(ModeDark)
+	settings.Palette = "aurora"
+
+	return newModel("localhost:50051", eng, 0, settings, func() {})
+}
+
+func press(m *model, keys ...string) {
+	for _, key := range keys {
+		m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune(key)}))
+	}
+}
+
+func pressKey(m *model, types ...tea.KeyType) {
+	for _, keyType := range types {
+		m.onKey(tea.KeyMsg(tea.Key{Type: keyType}))
+	}
+}
+
+func TestArrowsWalkEveryTab(t *testing.T) {
+	m := testModel(t)
+
+	if len(m.tabs) != 4 {
+		t.Fatalf("tabs = %d, want summary + 2 methods + settings", len(m.tabs))
+	}
+
+	for want := 1; want < len(m.tabs); want++ {
+		pressKey(m, tea.KeyRight)
+
+		if m.active != want {
+			t.Fatalf("after %d right presses active = %d, want %d", want, m.active, want)
+		}
+		if m.editing {
+			t.Fatalf("walking to tab %d entered the settings", want)
+		}
+	}
+
+	pressKey(m, tea.KeyRight)
+
+	if m.active != 0 {
+		t.Errorf("right from the last tab = %d, want a wrap to 0", m.active)
+	}
+}
+
+func TestSettingsTabLetsArrowsThrough(t *testing.T) {
+	m := testModel(t)
+	m.active = m.settingsTab()
+
+	pressKey(m, tea.KeyLeft)
+
+	if m.active != m.settingsTab()-1 {
+		t.Errorf("left on the settings tab = %d, want %d", m.active, m.settingsTab()-1)
+	}
+}
+
+func TestEnterEntersSettingsAndEscLeaves(t *testing.T) {
+	m := testModel(t)
+	m.active = m.settingsTab()
+
+	pressKey(m, tea.KeyEnter)
+
+	if !m.editing {
+		t.Fatal("enter on the settings tab did not enter the settings")
+	}
+
+	pressKey(m, tea.KeyRight)
+
+	if m.active != m.settingsTab() {
+		t.Errorf("right inside the settings moved to tab %d", m.active)
+	}
+
+	pressKey(m, tea.KeyEsc)
+
+	if m.editing {
+		t.Fatal("esc did not leave the settings")
+	}
+
+	pressKey(m, tea.KeyLeft)
+
+	if m.active == m.settingsTab() {
+		t.Error("arrows stay dead after leaving the settings")
+	}
+}
+
+func TestEnterDoesNothingOutsideTheSettingsTab(t *testing.T) {
+	m := testModel(t)
+
+	pressKey(m, tea.KeyEnter)
+
+	if m.editing {
+		t.Error("enter on the summary tab entered the settings")
+	}
+}
+
+func TestSettingsKeysChangeValuesOnlyWhileEditing(t *testing.T) {
+	m := testModel(t)
+	m.active = m.settingsTab()
+
+	before := m.settings.Mode
+
+	press(m, "j", "l")
+
+	if m.settings.Mode != before || m.row != rowLang {
+		t.Error("settings changed without entering them")
+	}
+
+	m.active = m.settingsTab()
+	pressKey(m, tea.KeyEnter)
+	press(m, "j")
+	pressKey(m, tea.KeyRight)
+
+	if m.row != rowMode {
+		t.Errorf("row = %d, want the mode row", m.row)
+	}
+	if m.settings.Mode == before {
+		t.Error("the mode did not change inside the settings")
+	}
+}
+
+func TestEscFromAMethodTabGoesToTheSummary(t *testing.T) {
+	m := testModel(t)
+	m.active = 2
+
+	pressKey(m, tea.KeyEsc)
+
+	if m.active != 0 {
+		t.Errorf("active = %d, want the summary", m.active)
 	}
 }

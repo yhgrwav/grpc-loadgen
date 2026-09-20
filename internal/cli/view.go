@@ -249,8 +249,9 @@ func (m *model) gaugeRow(label string, value, limit float64, text string) string
 
 func (m *model) help() string {
 	rows := [][2]string{
-		{"tab", m.text.HelpTabs()},
-		{"↑↓ ←→", m.text.HelpSettings()},
+		{"←→", m.text.HelpTabs()},
+		{"enter", m.text.HelpSettings()},
+		{"esc", m.text.HelpEscape()},
 		{"?", m.text.HelpHelp()},
 		{"q", m.text.HelpQuit()},
 	}
@@ -290,7 +291,7 @@ func (m *model) footer() string {
 		return keyHint(m.styles, m.text.HintBack(), m.text.HintQuit())
 	}
 
-	return keyHint(m.styles, m.text.HintTabs(), m.text.HintSettings(), m.text.HintHelp(), m.text.HintQuit())
+	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
 }
 
 func (m *model) settingsView() string {
