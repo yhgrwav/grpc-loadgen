@@ -21,7 +21,7 @@ jobs:
       matrix:
         # The lower bound is the version declared in go.mod: if it stops
         # compiling there, the module's compatibility claim is wrong.
-        go: ["1.24", "1.27.1"]
+        go: ["1.25", "1.27.1"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -30,6 +30,21 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./...
+
+  # A stable name for branch protection: the matrix job names carry a Go version
+  # and would have to be re-registered on every bump.
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    steps:
+      - name: Fail unless every matrix job passed
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "matrix result: ${{ needs.test.result }}"
+            exit 1
+          fi
 
   lint:
     name: golangci-lint
