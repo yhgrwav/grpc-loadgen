@@ -13,3 +13,108 @@
 // limitations under the License.
 
 package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+)
+
+var (
+	ErrNoSender       = errors.New("worker pool has no sender")
+	ErrNoInFlightRoom = errors.New("in-flight limit reached")
+)
+
+type Sender interface {
+	Send(ctx context.Context, req Request) error
+}
+
+type Result struct {
+	ScheduledAt time.Time
+	SentAt      time.Time
+	DoneAt      time.Time
+	Err         error
+}
+
+func (r Result) Latency() time.Duration {
+	return r.DoneAt.Sub(r.ScheduledAt)
+}
+
+func (r Result) ServiceTime() time.Duration {
+	return r.DoneAt.Sub(r.SentAt)
+}
+
+type WorkerPool struct {
+	Sender      Sender
+	MaxInFlight int
+}
+
+func NewWorkerPool(sender Sender, maxInFlight int) *WorkerPool {
+	return &WorkerPool{
+		Sender:      sender,
+		MaxInFlight: maxInFlight,
+	}
+}
+
+func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Result) error {
+	if p.Sender == nil {
+		return ErrNoSender
+	}
+	if p.MaxInFlight < 1 {
+		return fmt.Errorf("%w: %d", ErrNoInFlightRoom, p.MaxInFlight)
+	}
+
+	inFlight := make(chan struct{}, p.MaxInFlight)
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	for {
+		var req Request
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case r, ok := <-in:
+			if !ok {
+				return nil
+			}
+			req = r
+		}
+
+		select {
+		case inFlight <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return fmt.Errorf("%w: %d", ErrNoInFlightRoom, p.MaxInFlight)
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-inFlight }()
+
+			p.send(ctx, req, out)
+		}()
+	}
+}
+
+func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result) {
+	sentAt := time.Now()
+	err := p.Sender.Send(ctx, req)
+
+	result := Result{
+		ScheduledAt: req.ScheduledAt,
+		SentAt:      sentAt,
+		DoneAt:      time.Now(),
+		Err:         err,
+	}
+
+	select {
+	case out <- result:
+	case <-ctx.Done():
+	}
+}
