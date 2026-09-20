@@ -13,8 +13,18 @@
 > **Early WIP.** The engine is under construction, there is nothing to run yet. Everything below
 > is the interface we are building toward.
 
-One run. As many methods as you like, each at its own RPS. Latency you can trust. No `.proto`,
-no codegen, no scripts.
+One run. As many methods as you like, each at its own RPS. No `.proto`, no codegen, no scripts.
+
+The project rests on three priorities, in this order.
+
+**Measurement correctness** — the numbers match what actually happened, including while the
+service degrades.
+
+**Usability.** This category takes for granted that a tool built for engineers is allowed to be
+unpleasant to use. I disagree: the interface is one of the product's main advantages, and an
+unclear error message is as much a defect as a wrong number.
+
+**Speed** — the generator never becomes the bottleneck.
 
 ## Install
 

@@ -5,6 +5,9 @@
 grpc-loadgen rests on a single principle: a load test is worth something only when its result can
 be trusted without qualification. Everything else in the tool follows from that.
 
+The priorities are ordered: **measurement correctness**, then **usability**, then **speed**. Where
+they conflict the first one wins — an optimization that degrades accuracy is rejected.
+
 ## Load that mirrors production
 
 The tool describes load the way it actually occurs: several methods at once, each at its own rate

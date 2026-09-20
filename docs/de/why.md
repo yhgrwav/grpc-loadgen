@@ -5,6 +5,10 @@
 grpc-loadgen ruht auf einem Grundsatz: Ein Lasttest ist nur dann etwas wert, wenn man seinem
 Ergebnis ohne Einschränkung vertrauen kann. Alles andere im Werkzeug folgt daraus.
 
+Die Prioritäten sind geordnet: **Korrektheit der Messung**, dann **Bedienbarkeit**, dann
+**Geschwindigkeit**. Im Konflikt gewinnt die erste — eine Optimierung, die die Genauigkeit
+verschlechtert, wird abgelehnt.
+
 ## Last, die die Produktion abbildet
 
 Das Werkzeug beschreibt Last so, wie sie tatsächlich auftritt: mehrere Methoden gleichzeitig,
