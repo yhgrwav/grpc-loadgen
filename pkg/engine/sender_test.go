@@ -27,7 +27,8 @@ func TestCategoryString(t *testing.T) {
 		{"server fault", CategoryServerFault, "server fault"},
 		{"timeout", CategoryTimeout, "timeout"},
 		{"overload", CategoryOverload, "overload"},
-		{"unknown", Category(99), "unknown"},
+		{"unknown zero value", CategoryUnknown, "unknown"},
+		{"unrecognized value", Category(99), "unknown"},
 	}
 
 	for _, tt := range tests {

@@ -119,6 +119,9 @@ func (e *Engine) Report() Report {
 }
 
 func (e *Engine) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	requests := make(chan Request, e.opts.MaxInFlight)
 	results := make(chan Result, e.opts.MaxInFlight)
 
@@ -136,7 +139,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		go func() {
 			defer schedulers.Done()
 
-			if err := NewScheduler(call).Run(ctx, requests); err != nil {
+			if err := NewScheduler(call).Run(runCtx, requests); err != nil {
 				scheduleMu.Lock()
 				if scheduleErr == nil {
 					scheduleErr = fmt.Errorf("%s: %w", call.Method, err)
@@ -162,7 +165,8 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}()
 
-	sendErr := e.pool.Run(ctx, requests, results)
+	sendErr := e.pool.Run(runCtx, requests, results)
+	cancel()
 
 	close(results)
 	collector.Wait()

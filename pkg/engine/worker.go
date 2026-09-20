@@ -131,8 +131,13 @@ func (r *poolRun) finish(err error) error {
 	if r.fatalErr != nil {
 		return r.fatalErr
 	}
+	if err != nil {
+		return err
+	}
 
-	return err
+	// A send may have swallowed its own error as a side effect of this same
+	// cancellation; make sure the cancellation still surfaces here.
+	return r.sendCtx.Err()
 }
 
 func (r *poolRun) dispatch(p *WorkerPool, in <-chan Request, out chan<- Result) error {
@@ -152,10 +157,12 @@ func (r *poolRun) dispatch(p *WorkerPool, in <-chan Request, out chan<- Result) 
 }
 
 func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
+	if err := r.sendCtx.Err(); err != nil {
+		return err
+	}
+
 	select {
 	case r.slots <- struct{}{}:
-	case <-r.sendCtx.Done():
-		return r.sendCtx.Err()
 	default:
 		return fmt.Errorf("%w: %d", ErrInFlightCapExceeded, cap(r.slots))
 	}
@@ -165,23 +172,31 @@ func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
 
 	go func() {
 		defer r.wg.Done()
-		defer func() {
+
+		release := func() {
 			p.inFlight.Add(-1)
 			<-r.slots
-		}()
+		}
 
-		p.send(r.sendCtx, req, out, r.fail)
+		p.send(r.sendCtx, req, out, release, r.fail)
 	}()
 
 	return nil
 }
 
-func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, fail func(error)) {
+// send delivers one request and releases its in-flight slot as soon as Send
+// returns, before the result is handed to out, so a slow result consumer
+// never holds a slot open.
+func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, release func(), fail func(error)) {
 	begunAt := time.Now()
 
 	outcome, err := p.Sender.Send(ctx, req)
+	release()
+
 	if err != nil {
-		fail(err)
+		if ctx.Err() == nil {
+			fail(err)
+		}
 		return
 	}
 

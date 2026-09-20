@@ -22,7 +22,10 @@ import (
 type Category int
 
 const (
-	CategorySuccess Category = iota
+	// CategoryUnknown is the zero value: a sender that forgot to set Category
+	// gets counted as a failure instead of silently passing as a success.
+	CategoryUnknown Category = iota
+	CategorySuccess
 	// CategoryClientFault means the request will fail the same way again; it
 	// usually points at the run's config, not at the target.
 	CategoryClientFault
@@ -58,8 +61,8 @@ type Outcome struct {
 	DoneAt   time.Time
 	Category Category
 	// Err is the error as reported by the transport, including any text from
-	// the target. Nil for CategorySuccess, non-nil otherwise. The engine
-	// prints it but does not inspect it.
+	// the target. Nil for CategorySuccess, non-nil otherwise. pkg/engine
+	// does not inspect or print it; that is left to the caller.
 	Err error
 	// Response is the raw, undecoded response body, filled in only when
 	// Request.KeepResponse is set.
@@ -72,6 +75,10 @@ type Outcome struct {
 // is unusable and the run cannot continue. Outcome.Category != CategorySuccess
 // with a nil error means the call happened and failed; that is data about the
 // target, and the run goes on.
+//
+// ctx being canceled is not a sender failure: it is the engine stopping the
+// run. If cancellation is why Send returns an error, that error must wrap
+// ctx.Err() (via %w), so callers can tell it apart with errors.Is.
 //
 // Implementations must be safe for concurrent use, and must apply
 // req.Deadline as given rather than recompute it from the current time.

@@ -17,6 +17,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -331,6 +332,98 @@ func TestResultLatencyComponentsSumToTotal(t *testing.T) {
 	got := <-out
 	if sum := got.QueueTime() + got.TransportWait() + got.ServiceTime(); sum != got.Latency() {
 		t.Errorf("QueueTime + TransportWait + ServiceTime = %s, want Latency %s", sum, got.Latency())
+	}
+}
+
+func TestPoolFreesSlotBeforeResultIsDelivered(t *testing.T) {
+	const limit = 2
+	const requests = 6
+
+	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
+		return Outcome{Category: CategorySuccess}, nil
+	})
+
+	in := make(chan Request)
+	out := make(chan Result)
+
+	pool := NewWorkerPool(sender, limit)
+
+	done := make(chan error, 1)
+	go func() { done <- pool.Run(context.Background(), in, out) }()
+
+	go func() {
+		for i := range requests {
+			in <- Request{ScheduledAt: time.Now()}
+			if i >= limit {
+				time.Sleep(2 * time.Millisecond)
+			}
+		}
+		close(in)
+	}()
+
+	var collected sync.WaitGroup
+	collected.Add(1)
+	go func() {
+		defer collected.Done()
+		// The consumer stays away far longer than any Send takes, so a slot
+		// held open until its result is read would starve later launches.
+		time.Sleep(50 * time.Millisecond)
+		for range requests {
+			<-out
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v, want nil: a busy result consumer must not hold in-flight slots", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return: slots appear to be held until the result is delivered")
+	}
+
+	collected.Wait()
+}
+
+func TestPoolDoesNotBlameSenderForOwnCancellation(t *testing.T) {
+	const requests = 4
+
+	sentinel := errors.New("sender reports cancel")
+	started := make(chan struct{}, requests)
+
+	sender := senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return Outcome{}, fmt.Errorf("%w: %w", sentinel, ctx.Err())
+	})
+
+	in := make(chan Request, requests)
+	for range requests {
+		in <- Request{ScheduledAt: time.Now()}
+	}
+	close(in)
+
+	out := make(chan Result, requests)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pool := NewWorkerPool(sender, requests)
+
+	done := make(chan error, 1)
+	go func() { done <- pool.Run(ctx, in, out) }()
+
+	for range requests {
+		<-started
+	}
+	cancel()
+
+	err := <-done
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want %v", err, context.Canceled)
+	}
+	if errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want cancellation not attributed to the sender", err)
 	}
 }
 
