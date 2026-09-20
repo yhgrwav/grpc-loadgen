@@ -19,12 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 var (
-	ErrNoSender       = errors.New("worker pool has no sender")
-	ErrNoInFlightRoom = errors.New("in-flight limit reached")
+	ErrNoSender            = errors.New("worker pool has no sender")
+	ErrInvalidInFlightCap  = errors.New("in-flight cap must be positive")
+	ErrInFlightCapExceeded = errors.New("in-flight cap exceeded")
 )
 
 type Sender interface {
@@ -32,6 +34,7 @@ type Sender interface {
 }
 
 type Result struct {
+	Method      string
 	ScheduledAt time.Time
 	SentAt      time.Time
 	DoneAt      time.Time
@@ -49,6 +52,8 @@ func (r Result) ServiceTime() time.Duration {
 type WorkerPool struct {
 	Sender      Sender
 	MaxInFlight int
+
+	inFlight atomic.Int64
 }
 
 func NewWorkerPool(sender Sender, maxInFlight int) *WorkerPool {
@@ -58,28 +63,43 @@ func NewWorkerPool(sender Sender, maxInFlight int) *WorkerPool {
 	}
 }
 
+func (p *WorkerPool) InFlight() int {
+	return int(p.inFlight.Load())
+}
+
 func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Result) error {
 	if p.Sender == nil {
 		return ErrNoSender
 	}
 	if p.MaxInFlight < 1 {
-		return fmt.Errorf("%w: %d", ErrNoInFlightRoom, p.MaxInFlight)
+		return fmt.Errorf("%w: %d", ErrInvalidInFlightCap, p.MaxInFlight)
 	}
+
+	sendCtx, abortSends := context.WithCancel(ctx)
+	defer abortSends()
 
 	inFlight := make(chan struct{}, p.MaxInFlight)
 
 	var wg sync.WaitGroup
-	defer wg.Wait()
+
+	finish := func(err error) error {
+		if err != nil {
+			abortSends()
+		}
+		wg.Wait()
+
+		return err
+	}
 
 	for {
 		var req Request
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return finish(ctx.Err())
 		case r, ok := <-in:
 			if !ok {
-				return nil
+				return finish(nil)
 			}
 			req = r
 		}
@@ -87,17 +107,22 @@ func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Resu
 		select {
 		case inFlight <- struct{}{}:
 		case <-ctx.Done():
-			return ctx.Err()
+			return finish(ctx.Err())
 		default:
-			return fmt.Errorf("%w: %d", ErrNoInFlightRoom, p.MaxInFlight)
+			return finish(fmt.Errorf("%w: %d", ErrInFlightCapExceeded, p.MaxInFlight))
 		}
 
+		p.inFlight.Add(1)
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
-			defer func() { <-inFlight }()
+			defer func() {
+				p.inFlight.Add(-1)
+				<-inFlight
+			}()
 
-			p.send(ctx, req, out)
+			p.send(sendCtx, req, out)
 		}()
 	}
 }
@@ -107,6 +132,7 @@ func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result) {
 	err := p.Sender.Send(ctx, req)
 
 	result := Result{
+		Method:      req.Method,
 		ScheduledAt: req.ScheduledAt,
 		SentAt:      sentAt,
 		DoneAt:      time.Now(),

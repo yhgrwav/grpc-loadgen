@@ -13,3 +13,141 @@
 // limitations under the License.
 
 package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+)
+
+var (
+	ErrNoCalls     = errors.New("engine has no calls")
+	ErrFakeFailure = errors.New("fake sender failure")
+)
+
+type Call struct {
+	Method string
+	Stages []Stage
+}
+
+type Options struct {
+	Calls       []Call
+	Sender      Sender
+	MaxInFlight int
+	Warmup      time.Duration
+}
+
+type Engine struct {
+	opts  Options
+	stats *Stats
+	pool  *WorkerPool
+}
+
+func New(opts Options) (*Engine, error) {
+	if len(opts.Calls) == 0 {
+		return nil, ErrNoCalls
+	}
+	if opts.Sender == nil {
+		return nil, ErrNoSender
+	}
+	if opts.MaxInFlight < 1 {
+		return nil, fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
+	}
+
+	return &Engine{
+		opts:  opts,
+		stats: NewStats(),
+		pool:  NewWorkerPool(opts.Sender, opts.MaxInFlight),
+	}, nil
+}
+
+func (e *Engine) Snapshot() Snapshot {
+	snapshot := e.stats.Snapshot()
+	snapshot.InFlight = e.pool.InFlight()
+	snapshot.Total = e.plannedDuration()
+
+	return snapshot
+}
+
+func (e *Engine) plannedDuration() time.Duration {
+	var longest time.Duration
+
+	for _, call := range e.opts.Calls {
+		var total time.Duration
+		for _, stage := range call.Stages {
+			total += stage.Duration
+		}
+		if total > longest {
+			longest = total
+		}
+	}
+
+	return longest
+}
+
+func (e *Engine) Report() Report {
+	return e.stats.Report()
+}
+
+func (e *Engine) Run(ctx context.Context) error {
+	requests := make(chan Request, e.opts.MaxInFlight)
+	results := make(chan Result, e.opts.MaxInFlight)
+
+	e.stats.Start(time.Now(), e.opts.Warmup)
+
+	var (
+		schedulers  sync.WaitGroup
+		scheduleMu  sync.Mutex
+		scheduleErr error
+	)
+
+	for _, call := range e.opts.Calls {
+		schedulers.Add(1)
+
+		go func() {
+			defer schedulers.Done()
+
+			if err := NewScheduler(call.Method, call.Stages).Run(ctx, requests); err != nil {
+				scheduleMu.Lock()
+				if scheduleErr == nil {
+					scheduleErr = fmt.Errorf("%s: %w", call.Method, err)
+				}
+				scheduleMu.Unlock()
+			}
+		}()
+	}
+
+	go func() {
+		schedulers.Wait()
+		close(requests)
+	}()
+
+	var collector sync.WaitGroup
+
+	collector.Add(1)
+	go func() {
+		defer collector.Done()
+
+		for result := range results {
+			e.stats.Record(result)
+		}
+	}()
+
+	sendErr := e.pool.Run(ctx, requests, results)
+
+	close(results)
+	collector.Wait()
+
+	e.stats.Finish(time.Now())
+
+	if sendErr != nil {
+		return sendErr
+	}
+
+	scheduleMu.Lock()
+	defer scheduleMu.Unlock()
+
+	return scheduleErr
+}
