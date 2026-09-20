@@ -203,18 +203,6 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case "tab":
-		m.active = (m.active + 1) % len(m.tabs)
-		m.editing = false
-
-		return m, nil
-
-	case "shift+tab":
-		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
-		m.editing = false
-
-		return m, nil
-
 	case "?":
 		m.showHelp = !m.showHelp
 
@@ -234,16 +222,14 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.active == m.settingsTab() {
-		if !m.editing {
-			if key == "enter" || key == " " {
-				m.editing = true
-			}
-
-			return m, nil
-		}
-
+	if m.editing {
 		return m.onSettingsKey(key)
+	}
+
+	if m.active == m.settingsTab() && (key == "enter" || key == " ") {
+		m.editing = true
+
+		return m, nil
 	}
 
 	switch key {

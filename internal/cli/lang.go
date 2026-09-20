@@ -131,7 +131,7 @@ func (t Text) Rate() string {
 }
 
 func (t Text) HintTabs() string {
-	return t.get(phrase{LangRU: "tab вкладки", LangEN: "tab switch", LangDE: "tab wechseln", LangZH: "tab 切换"})
+	return t.get(phrase{LangRU: "←→ вкладки", LangEN: "←→ tabs", LangDE: "←→ Reiter", LangZH: "←→ 标签页"})
 }
 
 func (t Text) HintHelp() string {
@@ -171,6 +171,15 @@ func (t Text) ErrorsNote() string {
 
 func (t Text) HelpTitle() string {
 	return t.get(phrase{LangRU: "Управление", LangEN: "Keys", LangDE: "Tasten", LangZH: "按键"})
+}
+
+func (t Text) HelpEscape() string {
+	return t.get(phrase{
+		LangRU: "выйти из настроек, иначе вернуться на сводку",
+		LangEN: "leave the settings, otherwise go back to the summary",
+		LangDE: "die Einstellungen verlassen, sonst zurück zur Übersicht",
+		LangZH: "退出设置，否则返回概览",
+	})
 }
 
 func (t Text) HelpTabs() string {
@@ -224,19 +233,19 @@ func (t Text) ModeLight() string {
 
 func (t Text) SettingsHint() string {
 	return t.get(phrase{
-		LangRU: "↑↓ строка   ←→ значение   esc назад   сохраняется сразу",
-		LangEN: "↑↓ row   ←→ value   esc back   saved immediately",
-		LangDE: "↑↓ Zeile   ←→ Wert   esc zurück   sofort gespeichert",
-		LangZH: "↑↓ 选择行   ←→ 切换值   esc 返回   立即保存",
+		LangRU: "↑↓ строка   ←→ значение   esc к вкладкам   сохраняется сразу",
+		LangEN: "↑↓ row   ←→ value   esc back to the tabs   saved immediately",
+		LangDE: "↑↓ Zeile   ←→ Wert   esc zurück zu den Reitern   sofort gespeichert",
+		LangZH: "↑↓ 选择行   ←→ 切换值   esc 返回标签页   立即保存",
 	})
 }
 
 func (t Text) SettingsLocked() string {
 	return t.get(phrase{
-		LangRU: "enter изменить настройки   esc назад",
-		LangEN: "enter to edit the settings   esc back",
-		LangDE: "enter zum Ändern   esc zurück",
-		LangZH: "enter 编辑设置   esc 返回",
+		LangRU: "enter изменить   ←→ вкладки   esc к сводке",
+		LangEN: "enter to edit   ←→ tabs   esc to the summary",
+		LangDE: "enter zum Ändern   ←→ Reiter   esc zur Übersicht",
+		LangZH: "enter 编辑   ←→ 标签页   esc 返回概览",
 	})
 }
 
@@ -272,10 +281,6 @@ func (t Text) PressToExit() string {
 		LangDE: "enter zum Beenden",
 		LangZH: "enter 退出",
 	})
-}
-
-func (t Text) HintSettings() string {
-	return t.get(phrase{LangRU: "tab настройки", LangEN: "tab settings", LangDE: "tab Einstellungen", LangZH: "tab 设置"})
 }
 
 func (t Text) PickTheme() string {
