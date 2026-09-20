@@ -249,11 +249,12 @@ func (m *model) gaugeRow(label string, value, limit float64, text string) string
 
 func (m *model) help() string {
 	rows := [][2]string{
-		{"←→", m.text.HelpTabs()},
+		{"←→ tab", m.text.HelpTabs()},
 		{"enter", m.text.HelpSettings()},
 		{"esc", m.text.HelpEscape()},
 		{"?", m.text.HelpHelp()},
 		{"q", m.text.HelpQuit()},
+		{"q q", m.text.HelpQuitAgain()},
 	}
 
 	var b strings.Builder
