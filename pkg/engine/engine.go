@@ -58,6 +58,9 @@ func New(opts Options) (*Engine, error) {
 	if opts.MaxInFlight < 1 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
 	}
+	if err := checkInFlightBudget(opts.Calls, opts.MaxInFlight); err != nil {
+		return nil, err
+	}
 
 	return &Engine{
 		opts:  opts,

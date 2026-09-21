@@ -31,6 +31,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/stats"
+
+	"github.com/yhgrwav/grpc-loadgen/internal/cli"
+	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
 const (
@@ -43,12 +47,21 @@ type health struct {
 	grpc_health_v1.UnimplementedHealthServer
 
 	calls atomic.Int64
+	delay time.Duration
 }
 
-func (h *health) Check(context.Context, *grpc_health_v1.HealthCheckRequest) (
+func (h *health) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (
 	*grpc_health_v1.HealthCheckResponse, error,
 ) {
 	h.calls.Add(1)
+
+	if h.delay > 0 {
+		select {
+		case <-time.After(h.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 
 	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
 }
@@ -80,12 +93,19 @@ type liveTarget struct {
 func startTarget(t *testing.T) liveTarget {
 	t.Helper()
 
+	return startSlowTarget(t, 0)
+}
+
+// startSlowTarget is startTarget with every answer held back by delay.
+func startSlowTarget(t *testing.T, delay time.Duration) liveTarget {
+	t.Helper()
+
 	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 
-	h := &health{}
+	h := &health{delay: delay}
 	ends := &connEnds{done: make(chan struct{})}
 	srv := grpc.NewServer(grpc.StatsHandler(ends))
 	grpc_health_v1.RegisterHealthServer(srv, h)
@@ -147,6 +167,13 @@ func closedPort(t *testing.T) string {
 func writeConfig(t *testing.T, addr, method, tlsLine string) string {
 	t.Helper()
 
+	return writeConfigWith(t, addr, method, tlsLine, "")
+}
+
+// writeConfigWith adds callLines, indented as fields of the call, to the config.
+func writeConfigWith(t *testing.T, addr, method, tlsLine, callLines string) string {
+	t.Helper()
+
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatalf("split %q: %v", addr, err)
@@ -162,7 +189,7 @@ load:
     - method: %s
       rps: 50
       duration: 300ms
-`, host, port, tlsLine, method)
+%s`, host, port, tlsLine, method, callLines)
 
 	path := filepath.Join(t.TempDir(), "loadgen.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
@@ -390,5 +417,73 @@ func TestRun_FakeTuningWithoutFakeIsAnError(t *testing.T) {
 				t.Errorf("err = %v, want an error pointing at -fake", res.err)
 			}
 		})
+	}
+}
+
+// --- timeout and the in-flight budget -----------------------------------
+
+func TestRun_TimeoutFromTheConfigCensorsAHungTarget(t *testing.T) {
+	target := startSlowTarget(t, 5*time.Second)
+	cfg := writeConfigWith(t, target.addr, checkMethod, plaintext, "      timeout: 100ms\n")
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	if res.err != nil {
+		t.Fatalf("run: %v, want timeouts to be measurements, not a failed run", res.err)
+	}
+
+	sent, failed := reportRow(t, res.stdout, checkMethod)
+	if sent == 0 || failed != sent {
+		t.Errorf("sent %d, failed %d, want every request timed out", sent, failed)
+	}
+	if !strings.Contains(res.stdout, "abandoned before answering") {
+		t.Errorf("report does not mark the percentiles as lower bounds:\n%s", res.stdout)
+	}
+}
+
+func TestRun_OverBudgetConfigFailsBeforeConnecting(t *testing.T) {
+	// 50 RPS x the default 2s = 100 in flight against a hung target, over a
+	// cap of 10. A silent target would hold a connect attempt for 10s, so a
+	// quick return proves the check came first.
+	addr := silentTarget(t)
+
+	res := runCLI(t.Context(), t, 3*time.Second,
+		"-max-in-flight", "10", "-c", writeConfig(t, addr, checkMethod, plaintext))
+	if res.err == nil {
+		t.Fatal("run succeeded, want the in-flight budget to reject the config")
+	}
+	if res.stdout != "" {
+		t.Errorf("stdout = %q, want no report", res.stdout)
+	}
+}
+
+func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
+	// Cap 10 at 50 RPS allows a timeout of 10/50 = 200ms; keeping 2s needs a
+	// cap of 50 x 2 = 100.
+	res := runCLI(t.Context(), t, 3*time.Second,
+		"-max-in-flight", "10", "-c", writeConfig(t, closedPort(t), checkMethod, plaintext))
+	if res.err == nil {
+		t.Fatal("run succeeded, want the in-flight budget to reject the config")
+	}
+
+	for _, want := range []string{"timeout", "200ms", "-max-in-flight", "100"} {
+		if !strings.Contains(res.err.Error(), want) {
+			t.Errorf("error %q lacks %q", res.err, want)
+		}
+	}
+}
+
+func TestExampleConfigFitsTheDefaultInFlightCap(t *testing.T) {
+	cfg, err := config.LoadFile(filepath.Join("..", "..", "examples", "loadgen.yaml"))
+	if err != nil {
+		t.Fatalf("load example: %v", err)
+	}
+
+	_, err = engine.New(engine.Options{
+		Calls:       cli.CallsFromConfig(cfg),
+		Sender:      engine.FakeSender{},
+		MaxInFlight: defaultMaxInFlight,
+	})
+	if err != nil {
+		t.Errorf("the shipped example is rejected with the default cap: %v", err)
 	}
 }

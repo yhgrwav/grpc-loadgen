@@ -19,7 +19,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -56,6 +58,12 @@ type Sender struct {
 	mu     sync.RWMutex
 	conn   *grpc.ClientConn
 	closed bool
+
+	// paths maps a method as the config names it to its gRPC path. Copied on
+	// write: a method is added once, and every request after that reads the
+	// map without a lock or an allocation.
+	paths   atomic.Pointer[map[string]string]
+	pathsMu sync.Mutex
 }
 
 // New prepares a sender. It does not dial: the connection is established by
@@ -248,9 +256,33 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	return outcome, nil
 }
 
-// path turns the method a request names into the path gRPC sends.
+// path turns the method a request names into the path gRPC sends. The config
+// writes pkg.Service/Method; without the leading slash every call would come
+// back Unimplemented.
 func (s *Sender) path(method string) string {
-	return method
+	if strings.HasPrefix(method, "/") {
+		return method
+	}
+	if paths := s.paths.Load(); paths != nil {
+		if p, ok := (*paths)[method]; ok {
+			return p
+		}
+	}
+
+	s.pathsMu.Lock()
+	defer s.pathsMu.Unlock()
+
+	next := make(map[string]string)
+	if paths := s.paths.Load(); paths != nil {
+		for k, v := range *paths {
+			next[k] = v
+		}
+	}
+	p := "/" + method
+	next[method] = p
+	s.paths.Store(&next)
+
+	return p
 }
 
 // responseTarget picks what the codec decodes into: a byte slice when the run

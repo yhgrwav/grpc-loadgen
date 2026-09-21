@@ -25,7 +25,8 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 
 	for _, call := range cfg.Load.Calls {
 		calls = append(calls, engine.Call{
-			Method: call.Method,
+			Method:  call.Method,
+			Timeout: call.Timeout,
 			Stages: []engine.Stage{{
 				StartRPS:  call.RPS,
 				TargetRPS: call.RPS,
