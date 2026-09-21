@@ -162,16 +162,22 @@ func TestConnect_RefusedAddressFailsWithoutADeadline(t *testing.T) {
 }
 
 func TestConnect_RefusedAddressCarriesTheTransportCause(t *testing.T) {
-	sender := New(Options{Target: closedPort(t)})
+	addr := closedPort(t)
+	sender := New(Options{Target: addr})
 	t.Cleanup(func() { _ = sender.Close() })
 
 	err := connectWithin(withoutDeadline(t), t, sender, 3*time.Second)
 	if err == nil {
 		t.Fatal("connect to a closed port succeeded")
 	}
-	// "connection refused" on Linux, "actively refused it" on Windows.
-	if !strings.Contains(err.Error(), "refused") {
-		t.Errorf("error %q hides why the connection failed", err)
+	// The cause text comes from the OS and may be localized, so the test checks
+	// that one is there, not what it says.
+	_, cause, found := strings.Cut(err.Error(), addr)
+	if !found {
+		t.Fatalf("error %q does not name the address %s", err, addr)
+	}
+	if strings.TrimLeft(cause, ": ") == "" {
+		t.Errorf("error %q names the address but not why the connection failed", err)
 	}
 }
 
@@ -188,6 +194,21 @@ func TestConnect_UnresolvableNameFailsWithoutADeadline(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), addr) {
 		t.Errorf("error %q does not name the address %s", err, addr)
+	}
+}
+
+func TestTransportCause_ProbeThatReachesATargetHasNoEffect(t *testing.T) {
+	// The race the probe is built for: the connection came up between seeing
+	// TRANSIENT_FAILURE and probing. The target must see nothing it would act
+	// on, and the probe must report the connection as usable.
+	srv := &target{}
+	sender := dialTarget(t, srv)
+
+	if cause := transportCause(bounded(t), sender.conn); cause != nil {
+		t.Errorf("cause = %v, want nil: the target answered, so the connection works", cause)
+	}
+	if n := srv.calls.Load(); n != 0 {
+		t.Errorf("target served %d real calls, want none from a probe", n)
 	}
 }
 

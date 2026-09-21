@@ -69,9 +69,9 @@ func New(opts Options) *Sender {
 // unreachable target is reported before any load is scheduled rather than as a
 // wall of failures once the run is under way.
 //
-// ctx bounds the wait. gRPC keeps retrying an unreachable target on its own, so
-// a ctx without a deadline turns a mistyped address into a hang instead of an
-// error: give it one.
+// The first failed attempt is an error: a refused connection, a name that does
+// not resolve, a failed handshake. ctx only bounds a target that neither
+// answers nor refuses.
 func (s *Sender) Connect(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,20 +110,57 @@ func (s *Sender) Connect(ctx context.Context) error {
 	return nil
 }
 
-// waitReady blocks until the connection is usable or ctx runs out.
+// waitReady blocks until the connection is usable, the first attempt fails, or
+// ctx runs out. Waiting past a failure would wait forever: grpc-go backs off and
+// retries an unreachable target without end.
 func waitReady(ctx context.Context, conn *grpc.ClientConn) error {
 	conn.Connect()
 
 	for {
 		state := conn.GetState()
-		if state == connectivity.Ready {
+
+		switch state {
+		case connectivity.Ready:
 			return nil
+		case connectivity.TransientFailure:
+			if cause := transportCause(ctx, conn); cause != nil {
+				return cause
+			}
+
+			continue
+		case connectivity.Shutdown:
+			return ErrClosed
 		}
 
 		if !conn.WaitForStateChange(ctx, state) {
 			return ctx.Err()
 		}
 	}
+}
+
+// probeMethod is a path no service implements. The probe must not be able to
+// do anything if it does reach a target.
+const probeMethod = "/grpc.loadgen.v0.Probe/DoesNotExist"
+
+// transportCause asks the connection why it failed, or returns nil if it works
+// after all. grpc-go has no public accessor for the last connection error, but
+// a call that does not wait for readiness fails at once with that error's text.
+func transportCause(ctx context.Context, conn *grpc.ClientConn) error {
+	empty := []byte{}
+
+	err := conn.Invoke(ctx, probeMethod, &empty, &discarded{})
+	if status.Code(err) == codes.Unimplemented || conn.GetState() == connectivity.Ready {
+		// The connection came up between the failure and the probe.
+		return nil
+	}
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return errors.New(status.Convert(err).Message())
 }
 
 // Close releases the connection. Calling it twice is safe.
