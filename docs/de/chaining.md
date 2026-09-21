@@ -49,5 +49,4 @@ Eine offene Frage, die mit der Umsetzung geklärt wird: Was tun, wenn der Konsum
 als der Produzent und der Pool leerläuft — warten, Last senken oder abbrechen. Stillschweigend den
 letzten Wert wiederzuverwenden ist die einzige sicher falsche Antwort.
 
-Platz im Plan — nach dem Hochfahren der Last und den Datensätzen, siehe
-[Strategie](../strategy.md) (Russisch).
+Platz im Plan — nach dem Hochfahren der Last und den Datensätzen.
