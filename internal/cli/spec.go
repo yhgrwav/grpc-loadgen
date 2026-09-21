@@ -46,3 +46,8 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 func displayMethod(method string) string {
 	return strings.TrimPrefix(method, "/")
 }
+
+// ServiceLabel is what the header calls the run.
+func ServiceLabel(cfg *config.MasterConfig, configPath string) string {
+	return ""
+}

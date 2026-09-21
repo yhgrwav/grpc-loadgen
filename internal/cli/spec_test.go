@@ -55,3 +55,43 @@ func TestCallsFromConfig(t *testing.T) {
 		t.Errorf("duration = %s, want 1m", first.Stages[0].Duration)
 	}
 }
+
+func named(name string) *string { return &name }
+
+func TestServiceLabel(t *testing.T) {
+	call := func(method string) config.Call { return config.Call{Method: method} }
+
+	tests := []struct {
+		name  string
+		cfg   config.MasterConfig
+		path  string
+		label string
+	}{
+		{
+			name:  "one service gives its short name",
+			cfg:   config.MasterConfig{Load: config.Load{Calls: []config.Call{call("wallet.v1.WalletService/Get"), call("wallet.v1.WalletService/Put")}}},
+			path:  "configs/loadgen.yaml",
+			label: "WalletService",
+		},
+		{
+			name:  "several services fall back to the config file name",
+			cfg:   config.MasterConfig{Load: config.Load{Calls: []config.Call{call("a.v1.One/Get"), call("b.v1.Two/Get")}}},
+			path:  "configs/checkout.yaml",
+			label: "checkout",
+		},
+		{
+			name:  "an explicit name wins over the service",
+			cfg:   config.MasterConfig{Name: named("wallet smoke"), Load: config.Load{Calls: []config.Call{call("wallet.v1.WalletService/Get")}}},
+			path:  "loadgen.yaml",
+			label: "wallet smoke",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cli.ServiceLabel(&tt.cfg, tt.path); got != tt.label {
+				t.Errorf("ServiceLabel = %q, want %q", got, tt.label)
+			}
+		})
+	}
+}
