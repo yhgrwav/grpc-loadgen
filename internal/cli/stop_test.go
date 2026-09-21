@@ -161,3 +161,77 @@ func TestSecondQuitAbortsAndLeaves(t *testing.T) {
 		})
 	}
 }
+
+func TestStopper_AbortSkipsTheGentleStop(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	if stage := s.Abort(); stage != StageAbort {
+		t.Fatalf("stage = %v, want StageAbort", stage)
+	}
+	if c.stop.Load() != 0 || c.abort.Load() != 1 || c.exit.Load() != 0 {
+		t.Errorf("stop/abort/exit = %d/%d/%d, want 0/1/0", c.stop.Load(), c.abort.Load(), c.exit.Load())
+	}
+}
+
+func TestStopper_AbortAfterGentleStopAborts(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	s.Press()
+	if stage := s.Abort(); stage != StageAbort {
+		t.Fatalf("stage = %v, want StageAbort", stage)
+	}
+}
+
+func TestStopper_PressAfterTerminateExits(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	s.Abort()
+	if stage := s.Press(); stage != StageExit {
+		t.Fatalf("stage = %v, want StageExit", stage)
+	}
+}
+
+func TestStopper_AbortDuringAbortDoesNothing(t *testing.T) {
+	for name, start := range map[string]func(*Stopper){
+		"two presses": func(s *Stopper) { s.Press(); s.Press() },
+		"terminate":   func(s *Stopper) { s.Abort() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newStopCalls()
+			s := c.stopper(time.Hour)
+
+			start(s)
+			if stage := s.Abort(); stage != StageNone {
+				t.Fatalf("stage = %v, want StageNone: SIGTERM must not kill the report being built", stage)
+			}
+			if c.abort.Load() != 1 || c.exit.Load() != 0 {
+				t.Errorf("abort/exit = %d/%d, want 1/0", c.abort.Load(), c.exit.Load())
+			}
+		})
+	}
+}
+
+func TestStopper_AbortThatHangsAfterTerminateExitsAfterGrace(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(10 * time.Millisecond)
+
+	s.Abort()
+	select {
+	case <-c.exited:
+	case <-time.After(time.Second):
+		t.Fatal("a hung abort did not exit after grace")
+	}
+}
+
+func TestStopper_AbortAfterFinishDoesNothing(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	s.Finish()
+	if stage := s.Abort(); stage != StageNone {
+		t.Fatalf("stage = %v, want StageNone", stage)
+	}
+}

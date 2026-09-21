@@ -87,3 +87,27 @@ func (s *Stopper) Finish() {
 		s.timer.Stop()
 	}
 }
+
+// Abort is SIGTERM: it raises the stage to the abort and never past it, so an
+// abort already under way still gets to print its report.
+func (s *Stopper) Abort() StopStage {
+	s.mu.Lock()
+	if s.finished || s.presses >= int(StageAbort) {
+		s.mu.Unlock()
+		return StageNone
+	}
+	s.presses = int(StageAbort)
+	s.timer = time.AfterFunc(s.grace, s.exit)
+	s.mu.Unlock()
+
+	s.abort()
+	return StageAbort
+}
+
+// Stopping says a stop of any stage has started, by key or by signal.
+func (s *Stopper) Stopping() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.presses > 0
+}

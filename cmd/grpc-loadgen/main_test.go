@@ -297,7 +297,7 @@ func runCLI(ctx context.Context, t *testing.T, limit time.Duration, args ...stri
 	var stdout, stderr bytes.Buffer
 
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, nil, args, &stdout, &stderr) }()
+	go func() { done <- run(ctx, nil, nil, args, &stdout, &stderr) }()
 
 	select {
 	case err := <-done:
@@ -786,6 +786,17 @@ func TestRun_UnknownEnumNameFailsBeforeTheRun(t *testing.T) {
 // the run is under way.
 func runStopped(t *testing.T, presses int, callLines string) result {
 	t.Helper()
+	return runSignalled(t, callLines, func(stops, _ chan<- struct{}) {
+		for range presses {
+			stops <- struct{}{}
+		}
+	})
+}
+
+// runSignalled runs the fake target for a minute and calls signal once the run
+// is under way: stops carries Ctrl+C presses, aborts carries SIGTERM.
+func runSignalled(t *testing.T, callLines string, signal func(stops, aborts chan<- struct{})) result {
+	t.Helper()
 
 	// Pressed only once calls are in flight, so an abort has something to cut.
 	started := make(chan struct{})
@@ -814,20 +825,18 @@ func runStopped(t *testing.T, presses int, callLines string) result {
 	t.Setenv("APPDATA", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	stops := make(chan struct{})
+	stops, aborts := make(chan struct{}), make(chan struct{})
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	args := []string{"-c", path, "-fake", "-fake-delay", "20s"}
-	go func() { done <- run(t.Context(), stops, args, &stdout, &stderr) }()
+	go func() { done <- run(t.Context(), stops, aborts, args, &stdout, &stderr) }()
 
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the run did not start")
 	}
-	for range presses {
-		stops <- struct{}{}
-	}
+	go signal(stops, aborts)
 
 	select {
 	case err := <-done:
@@ -864,5 +873,26 @@ func TestRun_AbortCountsCutOffCallsAndPrintsTheReport(t *testing.T) {
 	}
 	if sent, failed := reportRow(t, res.stdout, checkMethod); sent == 0 || failed != 0 {
 		t.Errorf("row sent %d failed %d, want the aborted calls in sent and none in failed", sent, failed)
+	}
+}
+
+func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
+	// The timeout is 30 s and runSignalled waits 10: a gentle drain would not
+	// return in time, so returning at all means SIGTERM skipped it.
+	res := runSignalled(t, "      timeout: 30s\n", func(_, aborts chan<- struct{}) {
+		aborts <- struct{}{}
+	})
+
+	if !errors.Is(res.err, ErrIncomplete) {
+		t.Errorf("err = %v, want ErrIncomplete", res.err)
+	}
+	if !strings.Contains(res.stdout, "cut off by the abort") {
+		t.Errorf("report does not count the aborted calls:\n%s", res.stdout)
+	}
+	if strings.Contains(res.stderr, "Ctrl+C") {
+		t.Errorf("SIGTERM comes from an orchestrator, yet stderr hints at Ctrl+C:%s", res.stderr)
+	}
+	if strings.Contains(res.stderr, "stopping") {
+		t.Errorf("SIGTERM went through the gentle stop:\n%s", res.stderr)
 	}
 }

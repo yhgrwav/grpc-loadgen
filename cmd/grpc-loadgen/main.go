@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -57,16 +58,20 @@ var runStarting = func(*engine.Engine) {}
 
 func main() {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
-	stops := make(chan struct{})
+	stops, aborts := make(chan struct{}), make(chan struct{})
 	go func() {
-		for range signals {
-			stops <- struct{}{}
+		for sig := range signals {
+			if sig == syscall.SIGTERM {
+				aborts <- struct{}{}
+			} else {
+				stops <- struct{}{}
+			}
 		}
 	}()
 
-	err := run(context.Background(), stops, os.Args[1:], os.Stdout, os.Stderr)
+	err := run(context.Background(), stops, aborts, os.Args[1:], os.Stdout, os.Stderr)
 	signal.Stop(signals)
 
 	if err != nil {
@@ -78,13 +83,16 @@ func main() {
 // run is the whole command. The live view is used only when stderr is the
 // process terminal, so tests passing their own writers always get plain output.
 //
-// Each value on stops is one press of Ctrl+C. Before the run starts a press
-// cancels the connection; during the run it goes to the three-stage stopper.
-func run(ctx context.Context, stops <-chan struct{}, args []string, stdout, stderr io.Writer) error {
+// Each value on stops is one press of Ctrl+C, each value on aborts one SIGTERM.
+// Before the run starts either cancels the connection; during the run they go
+// to the three-stage stopper.
+func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdout, stderr io.Writer) error {
 	ctx, abort := context.WithCancel(ctx)
 	defer abort()
 
 	var stopper atomic.Pointer[cli.Stopper]
+	// SIGTERM comes from an orchestrator, not a keyboard: no Ctrl+C hint then.
+	var terminated atomic.Bool
 
 	finished := make(chan struct{})
 	defer close(finished)
@@ -97,6 +105,13 @@ func run(ctx context.Context, stops <-chan struct{}, args []string, stdout, stde
 			case <-stops:
 				if s := stopper.Load(); s != nil {
 					s.Press()
+				} else {
+					abort()
+				}
+			case <-aborts:
+				terminated.Store(true)
+				if s := stopper.Load(); s != nil {
+					s.Abort()
 				} else {
 					abort()
 				}
@@ -222,7 +237,11 @@ func run(ctx context.Context, stops <-chan struct{}, args []string, stdout, stde
 		func() {
 			abort()
 			if !interactive {
-				fmt.Fprintln(stderr, "aborting: requests in flight are cut off and counted as aborted. Ctrl+C again to exit without a report")
+				fmt.Fprint(stderr, "aborting: requests in flight are cut off and counted as aborted")
+				if !terminated.Load() {
+					fmt.Fprint(stderr, ". Ctrl+C again to exit without a report")
+				}
+				fmt.Fprintln(stderr)
 			}
 		},
 		exit,

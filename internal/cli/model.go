@@ -115,7 +115,6 @@ type model struct {
 	showHelp bool
 	editing  bool
 	notice   string
-	stopping bool
 
 	// hintKey is the last key that was no command, shown until hintStage
 	// runs out; hintAt is the frame it was pressed on.
@@ -201,8 +200,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		m.err = msg.err
 
-		// A q during the run asked to leave; the drain it started is over.
-		if m.stopping {
+		// A q or a SIGTERM during the run asked to leave; the stop it started is over.
+		if m.stopper.Stopping() {
 			return m, tea.Quit
 		}
 
@@ -378,8 +377,6 @@ func (m *model) saveSettings() {
 }
 
 func (m *model) stop() StopStage {
-	m.stopping = true
-
 	return m.stopper.Press()
 }
 
