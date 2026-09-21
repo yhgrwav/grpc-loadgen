@@ -70,11 +70,16 @@ func testMessages(t *testing.T) (item, empty protoreflect.MessageDescriptor) {
 					field("note_text", 5, str, ""),
 					field("nested_item", 6, msg, ".loadgen.test.Inner"),
 					field("child_item", 7, msg, ".loadgen.test.Item"),
+					field("user_id", 8, i32, ""),
 				},
 			},
 			{
-				Name:  proto.String("Inner"),
-				Field: []*descriptorpb.FieldDescriptorProto{field("deep_value", 1, str, "")},
+				Name: proto.String("Inner"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					field("deep_value", 1, str, ""),
+					// Named in JSON form on purpose: its JSON name is Item.user_id's.
+					field("userId", 2, i32, ""),
+				},
 			},
 			{Name: proto.String("Empty")},
 		},
@@ -219,5 +224,28 @@ func TestRequestBody_AMessageWithoutFieldsTakesNoData(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "in the .proto") {
 		t.Errorf("error = %q, want no .proto hint in it", err)
+	}
+}
+
+// protojson names a field by its JSON name alone, not by its message. Item's
+// user_id and Inner's userId are both userId in JSON, so an error about either
+// cannot tell which one is wrong, and naming one of them would send the user to
+// check a field that is fine.
+func TestRequestBody_NoHintWhenTheJSONNameIsShared(t *testing.T) {
+	item, _ := testMessages(t)
+
+	for name, data := range map[string]map[string]any{
+		"the outer field":  {"user_id": "x"},
+		"the nested field": {"nested_item": map[string]any{"userId": "x"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := cli.RequestBody(item, data)
+			if err == nil {
+				t.Fatal("RequestBody accepted data that does not fit the message")
+			}
+			if strings.Contains(err.Error(), "in the .proto)") {
+				t.Errorf("error = %q, want no hint: userId is two fields", err)
+			}
+		})
 	}
 }

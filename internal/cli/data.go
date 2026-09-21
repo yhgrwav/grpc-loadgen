@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -111,8 +110,18 @@ func withProtoNames(err error, desc protoreflect.MessageDescriptor) error {
 		return err
 	}
 
-	name, ok := protoNames(desc, map[protoreflect.FullName]bool{})[jsonName]
-	if !ok {
+	// protojson names the field by JSON name alone: when fields of different
+	// messages share it, any one name could send the user to a field that is fine.
+	names := protoNames(desc, map[protoreflect.FullName]bool{}, map[string]map[string]bool{})[jsonName]
+	if len(names) != 1 {
+		return err
+	}
+
+	var name string
+	for n := range names {
+		name = n
+	}
+	if name == jsonName {
 		return err
 	}
 
@@ -147,10 +156,9 @@ func fieldInError(text string) string {
 	return name
 }
 
-// protoNames maps the JSON name of every field reachable from desc to its
-// .proto name, where the two differ. seen stops at recursive messages.
-func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) map[string]string {
-	names := map[string]string{}
+// protoNames collects, for the JSON name of every field reachable from desc,
+// the .proto names spelled that way. seen stops at recursive messages.
+func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool, names map[string]map[string]bool) map[string]map[string]bool {
 	if seen[desc.FullName()] {
 		return names
 	}
@@ -159,11 +167,12 @@ func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullN
 	fields := desc.Fields()
 	for i := range fields.Len() {
 		field := fields.Get(i)
-		if field.JSONName() != string(field.Name()) {
-			names[field.JSONName()] = string(field.Name())
+		if names[field.JSONName()] == nil {
+			names[field.JSONName()] = map[string]bool{}
 		}
+		names[field.JSONName()][string(field.Name())] = true
 		if inner := field.Message(); inner != nil {
-			maps.Copy(names, protoNames(inner, seen))
+			protoNames(inner, seen, names)
 		}
 	}
 
