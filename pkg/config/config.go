@@ -65,6 +65,9 @@ type Call struct {
 	Method   string        `yaml:"method"`
 	RPS      int           `yaml:"rps"`
 	Duration time.Duration `yaml:"duration"`
+	// Data is the request body as written, built into the method's message
+	// before the run; nil sends an empty message.
+	Data any `yaml:"data"`
 	// RawTimeout is the field as written; nil means it was left out.
 	RawTimeout *time.Duration `yaml:"timeout"`
 	Timeout    time.Duration  `yaml:"-"`

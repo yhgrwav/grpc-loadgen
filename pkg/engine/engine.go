@@ -48,17 +48,25 @@ type Engine struct {
 	pool  *WorkerPool
 }
 
-func New(opts Options) (*Engine, error) {
+// CheckOptions validates everything about the calls and limits that New does,
+// without a sender. A caller can reject a bad config before paying for a
+// connection, and build the engine once the request bodies are ready.
+func CheckOptions(opts Options) error {
 	if len(opts.Calls) == 0 {
-		return nil, ErrNoCalls
+		return ErrNoCalls
 	}
+	if opts.MaxInFlight < 1 {
+		return fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
+	}
+
+	return checkInFlightBudget(opts.Calls, opts.MaxInFlight)
+}
+
+func New(opts Options) (*Engine, error) {
 	if opts.Sender == nil {
 		return nil, ErrNoSender
 	}
-	if opts.MaxInFlight < 1 {
-		return nil, fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
-	}
-	if err := checkInFlightBudget(opts.Calls, opts.MaxInFlight); err != nil {
+	if err := CheckOptions(opts); err != nil {
 		return nil, err
 	}
 

@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
+
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
 )
@@ -93,5 +96,32 @@ func TestServiceLabel(t *testing.T) {
 				t.Errorf("ServiceLabel = %q, want %q", got, tt.label)
 			}
 		})
+	}
+}
+
+func TestRequestBody_Uint64AboveTwoToTheFiftyThreeIsExact(t *testing.T) {
+	// No service in grpc-go takes a uint64 in a unary request, so the path is
+	// checked on a descriptor message that has one (positive_int_value), and
+	// short of the network: YAML through the config into the body.
+	// The rounding, if any, would happen here.
+	const want uint64 = 18_446_744_073_709_551_615
+
+	cfg, err := config.Parse([]byte("app:\n  target:\n    ip: localhost\n    port: 1\nload:\n  calls:\n" +
+		"    - method: a.B/C\n      rps: 1\n      duration: 1s\n      data:\n        positive_int_value: 18446744073709551615\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	body, err := cli.RequestBody((&descriptorpb.UninterpretedOption{}).ProtoReflect().Descriptor(), cfg.Load.Calls[0].Data)
+	if err != nil {
+		t.Fatalf("body: %v", err)
+	}
+
+	var got descriptorpb.UninterpretedOption
+	if err := proto.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.GetPositiveIntValue() != want {
+		t.Errorf("positive_int_value = %d, want exactly %d", got.GetPositiveIntValue(), want)
 	}
 }

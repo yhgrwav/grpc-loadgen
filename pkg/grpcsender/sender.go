@@ -32,6 +32,12 @@ import (
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
+// rawCall moves bytes through a call untouched. It is set per call, not on the
+// connection: reflection shares the connection and needs the proto codec. A
+// ready slice passed with ... costs no allocation per call, a fresh variadic one
+// escapes to the heap.
+var rawCall = []grpc.CallOption{grpc.ForceCodec(rawCodec{})}
+
 var (
 	ErrNotConnected = errors.New("sender is not connected, call Connect before the run")
 	ErrClosed       = errors.New("sender is closed")
@@ -91,7 +97,6 @@ func (s *Sender) Connect(ctx context.Context) error {
 	dialOpts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
 		grpc.WithStatsHandler(handler{}),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})),
 	}, s.opts.DialOptions...)
 
 	conn, err := grpc.NewClient(s.opts.Target, dialOpts...)
@@ -149,7 +154,7 @@ func transportCause(ctx context.Context, conn *grpc.ClientConn) error {
 	empty := []byte{}
 	probe := &callStats{}
 
-	err := conn.Invoke(context.WithValue(ctx, callKey{}, probe), probeMethod, &empty, &discarded{})
+	err := conn.Invoke(context.WithValue(ctx, callKey{}, probe), probeMethod, &empty, &discarded{}, rawCall...)
 	if err == nil || probe.answered {
 		// The connection came up between the failure and the probe. Any status
 		// from the target proves it, not only Unimplemented: a service that
@@ -224,7 +229,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	payload := req.Payload
 	body, target := responseTarget(req.KeepResponse)
 
-	err := conn.Invoke(callCtx, req.Method, &payload, target)
+	err := conn.Invoke(callCtx, req.Method, &payload, target, rawCall...)
 
 	// The run was stopped: not a broken sender, but nothing was measured either.
 	// gRPC does not wrap ctx.Err(), so the wrapping happens here — without it the
@@ -258,4 +263,13 @@ func responseTarget(keep bool) (body *[]byte, decodeInto any) {
 	body = new([]byte)
 
 	return body, body
+}
+
+// Conn is the connection calls go through, for resolving method schemas over
+// it before the run. Nil before Connect.
+func (s *Sender) Conn() grpc.ClientConnInterface {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.conn
 }
