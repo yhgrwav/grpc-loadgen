@@ -25,6 +25,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
 )
 
@@ -103,7 +104,7 @@ func tickN(m *model, n int) {
 }
 
 func TestUnknownKeyExplainsTheLayout(t *testing.T) {
-	for _, key := range []string{"й", "x"} {
+	for _, key := range []string{"ж", "x"} {
 		t.Run(key, func(t *testing.T) {
 			m := testModel(t)
 			press(m, key)
@@ -129,16 +130,16 @@ func TestLayoutHintWorksWhileEditingSettings(t *testing.T) {
 	m.active = m.settingsTab()
 	m.editing = true
 
-	press(m, "й")
+	press(m, "ж")
 
-	if footer := m.footer(); !strings.Contains(footer, "«й»") {
+	if footer := m.footer(); !strings.Contains(footer, "«ж»") {
 		t.Errorf("footer = %q, want the hint in the settings editor too", footer)
 	}
 }
 
 func TestLayoutHintFadesAndGoes(t *testing.T) {
 	m := testModel(t)
-	press(m, "й")
+	press(m, "ж")
 
 	tickN(m, ticksFor(1400*time.Millisecond))
 	if stage := m.hintStage(); stage != 0 {
@@ -151,7 +152,7 @@ func TestLayoutHintFadesAndGoes(t *testing.T) {
 	}
 
 	tickN(m, ticksFor(500*time.Millisecond))
-	if footer := m.footer(); strings.Contains(footer, "«й»") {
+	if footer := m.footer(); strings.Contains(footer, "«ж»") {
 		t.Errorf("footer at 2.2s = %q, want the hint gone and the usual hints back", footer)
 	}
 }
@@ -159,13 +160,13 @@ func TestLayoutHintFadesAndGoes(t *testing.T) {
 func TestAnotherWrongKeyRestartsTheHint(t *testing.T) {
 	m := testModel(t)
 
-	press(m, "й")
+	press(m, "ж")
 	tickN(m, ticksFor(1200*time.Millisecond))
 	press(m, "x")
 	tickN(m, ticksFor(1200*time.Millisecond))
 
 	footer := m.footer()
-	if !strings.Contains(footer, "«x»") || strings.Contains(footer, "«й»") {
+	if !strings.Contains(footer, "«x»") || strings.Contains(footer, "«ж»") {
 		t.Errorf("footer = %q, want only the latest key, still shown 1.2s after it", footer)
 	}
 }
@@ -184,14 +185,26 @@ func TestNothingWrapsInsideTheFrame(t *testing.T) {
 
 			limit := contentWidth(width)
 
-			for tab := range m.tabs {
-				m.active = tab
+			check := func(screen string) {
 				for i, line := range strings.Split(m.body(width), "\n") {
 					if w := lipgloss.Width(line); w > limit {
-						t.Errorf("tab %d, line %d is %d wide, the frame leaves %d: %q", tab, i, w, limit, line)
+						t.Errorf("%s, line %d is %d wide, the frame leaves %d: %q", screen, i, w, limit, line)
 					}
 				}
 			}
+
+			for tab := range m.tabs {
+				m.active = tab
+				check("tab " + strconv.Itoa(tab))
+			}
+
+			m.done = true
+			m.active = 0
+			m.report = engine.Report{Methods: []engine.MethodReport{{
+				Method: "/wallet.v1.WalletService/GetBalanceWithAVeryLongName", Sent: 1_000_000, Failed: 12,
+				P50: exact(31), P90: exact(35), P99: exact(36),
+			}}}
+			check("final report")
 		})
 	}
 }
@@ -429,5 +442,55 @@ func TestLatencyWithNoHistoryStillHasItsRows(t *testing.T) {
 
 	for _, label := range []string{"p50", "p90", "p99"} {
 		latencyRow(t, chart, label)
+	}
+}
+
+// --- supported layouts --------------------------------------------------
+
+func TestRussianLayoutQuits(t *testing.T) {
+	// On ЙЦУКЕН the q key sends й. Russian is an interface language, so its
+	// layout must work without switching.
+	cancelled := false
+	m := testModel(t)
+	m.cancel = func() { cancelled = true }
+
+	_, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("й")}))
+	if cmd == nil || !cancelled {
+		t.Errorf("й: quit = %v, cancelled = %v, want both, as for q", cmd != nil, cancelled)
+	}
+}
+
+func TestRussianLayoutWalksTabs(t *testing.T) {
+	// l and h sit under д and р.
+	m := testModel(t)
+
+	press(m, "д")
+	if m.active != 1 {
+		t.Fatalf("after д active = %d, want 1, as after l", m.active)
+	}
+
+	press(m, "р")
+	if m.active != 0 {
+		t.Errorf("after р active = %d, want 0, as after h", m.active)
+	}
+}
+
+func TestRussianLayoutLeavesTheReport(t *testing.T) {
+	m := testModel(t)
+	m.done = true
+
+	if _, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("й")})); cmd == nil {
+		t.Error("й on the report did not quit, as q does")
+	}
+}
+
+func TestRussianLayoutLeavesTheSetupWizard(t *testing.T) {
+	settings := &Settings{Mode: string(ModeDark), Palette: Palettes()[0].Name}
+
+	m := &setupModel{settings: settings, text: NewText(LangEN)}
+	m.restyle()
+
+	if _, cmd := m.Update(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("й")})); cmd == nil {
+		t.Error("й did not leave the setup wizard, as q does")
 	}
 }

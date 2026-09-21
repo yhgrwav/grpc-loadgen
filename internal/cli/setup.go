@@ -77,7 +77,7 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 
 	case tea.KeyMsg:
-		switch msg.String() {
+		switch keyOf(msg) {
 		case "ctrl+c", "esc", "q":
 			return m, tea.Quit
 
@@ -180,7 +180,7 @@ func (m *setupModel) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(m.styles.faint.Render(m.text.PickHint()))
+	b.WriteString(m.styles.muted.Render(m.text.PickHint()))
 
 	return m.styles.frame.Render(b.String())
 }

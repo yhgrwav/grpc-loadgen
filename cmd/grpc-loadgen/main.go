@@ -89,7 +89,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	)
 
 	if *fake {
-		target = "fake target"
+		target = cli.FakeTarget
 		sender = engine.FakeSender{Delay: *fakeDelay, Jitter: *fakeJitter, FailRatio: *fakeFail}
 	} else {
 		grpcSender = grpcsender.New(grpcsender.Options{Target: target, TLS: cfg.App.UseTLS})
@@ -134,21 +134,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	start := func() error { return eng.Run(ctx) }
+
 	var runErr error
 
-	start := func() error {
-		runErr = eng.Run(ctx)
-
-		return runErr
-	}
-
 	if interactive {
-		program := cli.NewProgram(target, eng, cfg.Load.Warmup, settings, start, cancel)
-		if _, err := program.Run(); err != nil {
-			return err
-		}
-	} else if err := cli.RunPlain(stderr, target, eng, start); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+		program := cli.NewProgram(target, eng, cfg.Load.Warmup, settings, cancel)
+		runErr = cli.RunLive(program, start, cancel)
+	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return runErr
 	}
 
 	cli.PrintReport(stdout, target, eng.Report())

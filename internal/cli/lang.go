@@ -139,7 +139,29 @@ func (t Text) HintHelp() string {
 }
 
 func (t Text) HintQuit() string {
-	return t.get(phrase{LangRU: "q остановить", LangEN: "q stop", LangDE: "q stoppen", LangZH: "q 停止"})
+	return t.get(phrase{LangRU: "q выйти", LangEN: "q quit", LangDE: "q beenden", LangZH: "q 退出"})
+}
+
+// UnknownKey is the hint for a key that is no command. It is short enough for
+// the narrowest view, and points at the layout: a letter from another layout
+// is the usual reason.
+func (t Text) UnknownKey(key string) string {
+	return t.get(phrase{
+		LangRU: "«" + key + "» не команда — проверьте раскладку · ? помощь",
+		LangEN: "«" + key + "» is not a key here — check the layout · ? help",
+		LangDE: "«" + key + "» ist kein Befehl — Layout prüfen · ? Hilfe",
+		LangZH: "«" + key + "» 不是命令 — 请检查键盘布局 · ? 帮助",
+	})
+}
+
+// FakeTarget names the built-in fake target in the header.
+func (t Text) FakeTarget() string {
+	return t.get(phrase{
+		LangRU: "заглушка (-fake)",
+		LangEN: "fake target (-fake)",
+		LangDE: "Attrappe (-fake)",
+		LangZH: "模拟目标 (-fake)",
+	})
 }
 
 func (t Text) WarmupNote(left string) string {
@@ -196,15 +218,6 @@ func (t Text) HelpQuit() string {
 		LangEN: "stop the run and print the report",
 		LangDE: "Lauf stoppen und Bericht ausgeben",
 		LangZH: "停止运行并输出报告",
-	})
-}
-
-func (t Text) HelpQuitAgain() string {
-	return t.get(phrase{
-		LangRU: "нажать ещё раз — выйти, не дожидаясь отчёта",
-		LangEN: "press again to leave without waiting for the report",
-		LangDE: "erneut drücken, um ohne Bericht zu beenden",
-		LangZH: "再按一次，不等报告直接退出",
 	})
 }
 

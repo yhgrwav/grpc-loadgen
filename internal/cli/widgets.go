@@ -128,7 +128,7 @@ func sparkRange(s styles, values []float64, unit string, format func(float64) st
 		high = max(high, v)
 	}
 
-	return s.faint.Render(format(low) + unit + " … " + format(high) + unit)
+	return s.muted.Render(format(low) + unit + " … " + format(high) + unit)
 }
 
 func statLine(s styles, pairs ...[2]string) string {
@@ -145,7 +145,7 @@ func keyHint(s styles, hints ...string) string {
 	parts := make([]string, 0, len(hints))
 
 	for _, hint := range hints {
-		parts = append(parts, s.faint.Render(hint))
+		parts = append(parts, s.muted.Render(hint))
 	}
 
 	return strings.Join(parts, s.faint.Render("   "))

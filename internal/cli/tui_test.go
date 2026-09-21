@@ -103,14 +103,13 @@ func TestEveryLanguageTranslatesTheBasics(t *testing.T) {
 		text := NewText(option.Lang)
 
 		for name, got := range map[string]string{
-			"summary":   text.Summary(),
-			"running":   text.Running(),
-			"sent":      text.Sent(),
-			"errors":    text.Errors(),
-			"inflight":  text.InFlight(),
-			"helptabs":  text.HelpTabs(),
-			"helpquit":  text.HelpQuit(),
-			"quitagain": text.HelpQuitAgain(),
+			"summary":  text.Summary(),
+			"running":  text.Running(),
+			"sent":     text.Sent(),
+			"errors":   text.Errors(),
+			"inflight": text.InFlight(),
+			"helptabs": text.HelpTabs(),
+			"helpquit": text.HelpQuit(),
 		} {
 			if got == "" {
 				t.Errorf("%s is empty in %s", name, option.Lang)
@@ -465,7 +464,7 @@ func TestHelpOffersNoSecondQuit(t *testing.T) {
 	// One q leaves now; a line about pressing it again describes a stop that
 	// no longer exists.
 	m := testModel(t)
-	if strings.Contains(m.help(), m.text.HelpQuitAgain()) {
+	if strings.Contains(m.help(), "q q") {
 		t.Error("help still tells to press q again")
 	}
 }

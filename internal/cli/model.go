@@ -45,9 +45,9 @@ func (h *history) push(rps float64, p50, p90, p99 metrics.Quantile) {
 	h.rps = appendCapped(h.rps, rps)
 
 	h.points = append(h.points, point{
-		p50: plotted(p50),
-		p90: plotted(p90),
-		p99: plotted(p99),
+		p50: plotted(p50), bound50: isBound(p50),
+		p90: plotted(p90), bound90: isBound(p90),
+		p99: plotted(p99), bound99: isBound(p99),
 	})
 
 	if len(h.points) > historyLimit {
@@ -63,6 +63,12 @@ func plotted(q metrics.Quantile) float64 {
 	}
 
 	return float64(q.Value.Microseconds()) / 1000
+}
+
+// isBound says the quantile is only a lower bound: the request it would be was
+// abandoned at the timeout.
+func isBound(q metrics.Quantile) bool {
+	return q.Defined && !q.Exact
 }
 
 func appendCapped(values []float64, v float64) []float64 {
@@ -108,8 +114,13 @@ type model struct {
 	editing  bool
 	notice   string
 	stopping bool
-	done     bool
-	err      error
+
+	// hintKey is the last key that was no command, shown until hintStage
+	// runs out; hintAt is the frame it was pressed on.
+	hintKey string
+	hintAt  int
+	done    bool
+	err     error
 
 	settings *Settings
 }
@@ -198,7 +209,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
+	key := keyOf(msg)
+
+	// Any key replaces the hint: a command clears it, another unknown key
+	// restarts it.
+	m.hintKey = ""
 
 	if m.done {
 		switch key {
@@ -206,20 +221,20 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		m.moveTab(key)
+		if !m.moveTab(key) {
+			m.unknownKey(msg)
+		}
 
 		return m, nil
 	}
 
 	switch key {
 	case "q", "ctrl+c":
-		if m.stopping {
-			return m, tea.Quit
-		}
-
+		// One press leaves: the run is cancelled here, and the caller waits
+		// for it to return before printing the report.
 		m.stop()
 
-		return m, nil
+		return m, tea.Quit
 
 	case "?":
 		m.showHelp = !m.showHelp
@@ -241,7 +256,11 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.editing {
-		return m.onSettingsKey(key)
+		if !m.onSettingsKey(key) {
+			m.unknownKey(msg)
+		}
+
+		return m, nil
 	}
 
 	if m.active == m.settingsTab() && (key == "enter" || key == " ") {
@@ -250,21 +269,27 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.moveTab(key)
+	if !m.moveTab(key) {
+		m.unknownKey(msg)
+	}
 
 	return m, nil
 }
 
-func (m *model) moveTab(key string) {
+func (m *model) moveTab(key string) bool {
 	switch key {
 	case "right", "l", "tab":
 		m.active = (m.active + 1) % len(m.tabs)
 	case "left", "h", "shift+tab":
 		m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
+	default:
+		return false
 	}
+
+	return true
 }
 
-func (m *model) onSettingsKey(key string) (tea.Model, tea.Cmd) {
+func (m *model) onSettingsKey(key string) bool {
 	switch key {
 	case "up", "k":
 		m.row = (m.row - 1 + settingsRows) % settingsRows
@@ -277,9 +302,12 @@ func (m *model) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 
 	case "left", "h":
 		m.cycleSetting(-1)
+
+	default:
+		return false
 	}
 
-	return m, nil
+	return true
 }
 
 func (m *model) cycleSetting(step int) {
