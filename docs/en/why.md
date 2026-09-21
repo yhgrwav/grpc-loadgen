@@ -64,4 +64,3 @@ defect.
 | Thresholds for CI | partly | yes | via plugins | planned |
 | Chaining calls on response data | no | by hand in a script | by hand | planned |
 
-The order of what is planned is in the [strategy](../strategy.md) (Russian).

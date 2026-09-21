@@ -142,7 +142,7 @@ $ grpc-loadgen -c loadgen.yaml
 ## 尚未实现
 
 从零逐步加压到目标 RPS、用于 CI 的通过/失败阈值与 JSON 报告、报告中按错误码细分失败、
-导出到 Prometheus。先后顺序见[策略](../strategy.md)（俄文）。
+导出到 Prometheus。
 
 ## 深入了解
 

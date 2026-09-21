@@ -48,4 +48,4 @@ An open question, settled with the implementation, is what to do when the consum
 the producer and the pool runs dry: wait, reduce load or fail. Silently reusing the last value is
 the one answer known to be wrong.
 
-Its place in the plan — after ramp-up and datasets, see the [strategy](../strategy.md) (Russian).
+Its place in the plan — after ramp-up and datasets.

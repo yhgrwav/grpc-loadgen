@@ -153,8 +153,7 @@ The report goes to stdout, progress and errors to stderr.
 ## Not yet
 
 Ramp-up from zero to the target RPS, pass/fail thresholds and a JSON report for CI, a breakdown
-of failures by code in the report, export to Prometheus. The order is in the
-[strategy](../strategy.md) (Russian).
+of failures by code in the report, export to Prometheus.
 
 ## Going deeper
 

@@ -57,8 +57,8 @@ config.local.*
 .vscode/
 *.swp
 
-# Local Claude tooling; project rules (WORKFLOW, LESSONS, skills) are tracked
-.claude/*
-!.claude/WORKFLOW.md
-!.claude/LESSONS.md
-!.claude/skills/
+# Internal development notes stay local
+.claude/
+CLAUDE.md
+docs/decisions.md
+docs/strategy.md

@@ -154,8 +154,7 @@ Der Bericht geht nach stdout, Fortschritt und Fehler nach stderr.
 ## Noch nicht vorhanden
 
 Hochfahren von null auf die Ziel-RPS, Pass/Fail-Schwellen und JSON-Bericht für CI, Aufschlüsselung
-der Fehler nach Code im Bericht, Export nach Prometheus. Die Reihenfolge steht in der
-[Strategie](../strategy.md) (Russisch).
+der Fehler nach Code im Bericht, Export nach Prometheus.
 
 ## Mehr erfahren
 

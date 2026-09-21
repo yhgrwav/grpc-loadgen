@@ -68,4 +68,3 @@ Fehlermeldung gilt als Defekt.
 | Schwellen für CI | teilweise | ja | über Plugins | geplant |
 | Verkettung von Aufrufen über Antwortdaten | nein | per Hand im Skript | per Hand | geplant |
 
-Die Reihenfolge des Geplanten steht in der [Strategie](../strategy.md) (Russisch).
