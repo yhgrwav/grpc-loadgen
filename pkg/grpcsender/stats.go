@@ -27,8 +27,12 @@ type callKey struct{}
 // Send puts a fresh one in the context; the handler fills it in. Each call has
 // its own, so nothing is shared between goroutines.
 type callStats struct {
-	sentAt time.Time
-	doneAt time.Time
+	// headerAt is when the stream's headers went out. grpc-go emits OutHeader
+	// inside NewStream after stream quota is granted, so a call without it
+	// never got a stream.
+	headerAt time.Time
+	sentAt   time.Time
+	doneAt   time.Time
 	// answered is true once the target's trailer arrives. It is the only way to
 	// tell a served status from a call that never reached anyone: gRPC reports
 	// both as UNAVAILABLE, and a refused connection carries no latency worth
@@ -53,6 +57,10 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	}
 
 	switch v := rpc.(type) {
+	case *stats.OutHeader:
+		// OutHeader carries no time of its own; the call is synchronous at the
+		// point the headers are handed to the transport.
+		call.headerAt = time.Now()
 	case *stats.OutPayload:
 		// SentTime is when the request went out on the wire, after the transport
 		// granted stream quota. Taking it here rather than with time.Now() in the
