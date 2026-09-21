@@ -2,21 +2,28 @@
 
 [← Back to docs](README.md)
 
-Nobody ever loads a real service through a single endpoint. In a payments service there are, at
-any moment, hundreds of balance reads, dozens of transfers and a handful of sign-ups — and it
-breaks on that mixture, not on any one method in isolation.
+> This translation may lag behind the [Russian original](../ru/problem.md).
 
-The tools normally used for this work differently. `ghz` takes one method per run: three methods
-mean three runs, three reports, and no answer at all to what happens when they run together. A
-service that handles 800 RPS of reads and 50 RPS of writes separately may fall over on their sum
-— a shared connection pool, database locks, contention over the same cache. Separate runs will
-never show that.
+A load test exists to answer one question: **at what load does the service stop coping, and
+where is the bottleneck.** That answer goes to the developers — to fix, to optimise, to decide
+whether the release ships.
 
-grpc-loadgen describes the load as a whole: a list of methods, each with its own RPS and
-duration, in one run and one report. That is the core difference — not "faster" or "nicer", but
-the ability to ask a question the other tools cannot express.
+For the answer to be true, two things are needed.
 
-The other half of the problem is trusting the numbers. A load tool produces a figure that
-decides whether something ships. A figure obtained the wrong way is more dangerous than no
-figure at all: a missing number is visible, a wrong one looks like knowledge. The specific ways
-these tools lie have [their own page](pitfalls.md).
+**Load that looks like production.** Nobody loads a real service through a single endpoint. A
+payment service at any moment handles hundreds of balance requests, dozens of transfers and a
+handful of sign-ups — and it breaks on that mix, not on each method alone. A service that holds
+800 RPS of reads and 50 RPS of writes separately can fall over on their sum — through a shared
+connection pool, database locks, contention for the same cache. `ghz` takes one method per run:
+three methods mean three runs and no answer to what happens when they run together. grpc-loadgen
+describes the whole load: a list of methods, each at its own RPS, one run, one report.
+
+**Numbers you can trust.** A load tool produces a number that decisions are made on. A number
+obtained the wrong way is more dangerous than no number: a missing number is visible, a wrong one
+looks like knowledge. The costliest mistakes happen exactly during degradation — the service
+slows down while the tool keeps showing pretty figures. The specific ways to lie are on
+[a separate page](pitfalls.md).
+
+What the tool does not do: it sees the service only from the outside — latency, throughput,
+errors. It does not see the service's CPU or memory and does not guess them from its own data.
+Those come from the service's monitoring and are lined up with the load over time.

@@ -2,6 +2,8 @@
 
 [← Zur Übersicht](README.md)
 
+> Diese Übersetzung kann hinter dem [russischen Original](../ru/feedback.md) zurückliegen.
+
 Das Projekt ist jung, und Rückmeldung ist derzeit mehr wert als Code: Solange die Schnittstelle
 nicht feststeht, ist eine schlechte Idee billig zu ändern.
 
