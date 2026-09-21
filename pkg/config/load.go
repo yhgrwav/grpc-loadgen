@@ -53,6 +53,9 @@ func Parse(raw []byte) (*MasterConfig, error) {
 
 func (m *MasterConfig) resolve() error {
 	m.App.ResolveTLS()
+	for i := range m.Load.Calls {
+		m.Load.Calls[i].ResolveTimeout()
+	}
 
 	address, err := m.App.Target.CreateConnectionString()
 	if err != nil {

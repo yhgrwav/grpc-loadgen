@@ -15,6 +15,8 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
@@ -25,7 +27,9 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 
 	for _, call := range cfg.Load.Calls {
 		calls = append(calls, engine.Call{
-			Method: call.Method,
+			// gRPC sends /pkg.Service/Method; the config writes it without the slash.
+			Method:  "/" + call.Method,
+			Timeout: call.Timeout,
 			Stages: []engine.Stage{{
 				StartRPS:  call.RPS,
 				TargetRPS: call.RPS,
@@ -35,4 +39,10 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 	}
 
 	return calls
+}
+
+// displayMethod shows a method the way the config names it: the engine carries
+// the gRPC path, which differs only by the leading slash.
+func displayMethod(method string) string {
+	return strings.TrimPrefix(method, "/")
 }

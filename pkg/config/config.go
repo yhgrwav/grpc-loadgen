@@ -17,6 +17,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +31,7 @@ var (
 	ErrInvalidRPS      = errors.New("rps must be positive")
 	ErrInvalidDuration = errors.New("duration must be positive")
 	ErrInvalidWarmup   = errors.New("warmup must not be negative")
+	ErrInvalidTimeout  = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
 )
 
 type MasterConfig struct {
@@ -59,6 +62,24 @@ type Call struct {
 	Method   string        `yaml:"method"`
 	RPS      int           `yaml:"rps"`
 	Duration time.Duration `yaml:"duration"`
+	// RawTimeout is the field as written; nil means it was left out.
+	RawTimeout *time.Duration `yaml:"timeout"`
+	Timeout    time.Duration  `yaml:"-"`
+}
+
+// DefaultTimeout applies to a call that sets none. It is short on purpose: in an
+// open model a hung target holds rps × timeout requests in flight, and 2s keeps
+// 2500 RPS under the default cap of 5000.
+const DefaultTimeout = 2 * time.Second
+
+// ResolveTimeout fills Timeout from the field or the default.
+func (c *Call) ResolveTimeout() {
+	if c.RawTimeout == nil {
+		c.Timeout = DefaultTimeout
+
+		return
+	}
+	c.Timeout = *c.RawTimeout
 }
 
 func (c ConnectionStringTarget) CreateConnectionString() (ConnectionString, error) {
@@ -68,7 +89,7 @@ func (c ConnectionStringTarget) CreateConnectionString() (ConnectionString, erro
 	if c.Port < 1 || c.Port > 65535 {
 		return "", fmt.Errorf("%w: %d", ErrInvalidPort, c.Port)
 	}
-	return ConnectionString(fmt.Sprintf("%s:%d", c.IP, c.Port)), nil
+	return ConnectionString(net.JoinHostPort(c.IP, strconv.Itoa(c.Port))), nil
 }
 
 func (a *App) ResolveTLS() {
@@ -108,6 +129,9 @@ func (c Call) Validate() error {
 	}
 	if c.Duration <= 0 {
 		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidDuration, c.Duration))
+	}
+	if c.RawTimeout != nil && *c.RawTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidTimeout, *c.RawTimeout))
 	}
 
 	return errors.Join(errs...)

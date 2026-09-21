@@ -108,3 +108,14 @@ func TestPrintReportShowsUnmeasuredPercentileAsDash(t *testing.T) {
 		t.Errorf("a method with no measurements must not print a zero percentile:\n%s", out.String())
 	}
 }
+
+func TestPrintReportShowsTheMethodAsTheConfigWritesIt(t *testing.T) {
+	report := engine.Report{Methods: []engine.MethodReport{{Method: "/a.B/One", Sent: 1}}}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	if strings.Contains(out.String(), "/a.B/One") || !strings.Contains(out.String(), "a.B/One") {
+		t.Errorf("report shows the gRPC path instead of the name from the config:\n%s", out.String())
+	}
+}

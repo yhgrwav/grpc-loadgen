@@ -286,11 +286,11 @@ func testModel(t *testing.T) *model {
 
 	eng, err := engine.New(engine.Options{
 		Calls: []engine.Call{
-			{Method: "pkg.Svc/One", Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
-			{Method: "pkg.Svc/Two", Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
+			{Method: "pkg.Svc/One", Timeout: time.Second, Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
+			{Method: "pkg.Svc/Two", Timeout: time.Second, Stages: []engine.Stage{{TargetRPS: 1, Duration: time.Second}}},
 		},
 		Sender:      engine.FakeSender{},
-		MaxInFlight: 1,
+		MaxInFlight: 2,
 	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

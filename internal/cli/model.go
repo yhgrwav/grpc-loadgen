@@ -356,9 +356,9 @@ func tick() tea.Cmd {
 }
 
 func shortMethod(method string) string {
-	_, name, found := strings.Cut(method, "/")
+	_, name, found := strings.Cut(displayMethod(method), "/")
 	if !found {
-		return method
+		return displayMethod(method)
 	}
 
 	return name

@@ -176,7 +176,7 @@ func (m *model) method(width, index int) string {
 
 	var b strings.Builder
 
-	b.WriteString(m.styles.value.Render(method.Method))
+	b.WriteString(m.styles.value.Render(displayMethod(method.Method)))
 	b.WriteString("\n\n")
 
 	b.WriteString(statLine(m.styles,

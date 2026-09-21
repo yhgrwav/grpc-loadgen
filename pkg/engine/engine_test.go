@@ -25,8 +25,8 @@ import (
 func TestEngineRunsEveryCall(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{
-			{Method: "a.B/One", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}},
-			{Method: "a.B/Two", Stages: []Stage{{StartRPS: 50, TargetRPS: 50, Duration: 100 * time.Millisecond}}},
+			{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}},
+			{Method: "a.B/Two", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 50, TargetRPS: 50, Duration: 100 * time.Millisecond}}},
 		},
 		Sender:      FakeSender{Delay: time.Millisecond},
 		MaxInFlight: 64,
@@ -55,7 +55,7 @@ func TestEngineRunsEveryCall(t *testing.T) {
 
 func TestEngineCountsFailures(t *testing.T) {
 	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
+		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
 		Sender:      FakeSender{Delay: time.Millisecond, FailRatio: 1},
 		MaxInFlight: 64,
 	})
@@ -76,7 +76,7 @@ func TestEngineCountsFailures(t *testing.T) {
 
 func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
+		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
 		Sender:      FakeSender{Delay: time.Millisecond},
 		MaxInFlight: 64,
 		Warmup:      50 * time.Millisecond,
@@ -104,7 +104,7 @@ func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 
 func TestEngineStopsOnCancel(t *testing.T) {
 	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}}},
+		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}}},
 		Sender:      FakeSender{Delay: time.Millisecond},
 		MaxInFlight: 64,
 	})
@@ -133,7 +133,7 @@ func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	})
 
 	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Hour}}}},
+		Calls:       []Call{{Method: "a.B/One", Timeout: 4 * time.Millisecond, Stages: []Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Hour}}}},
 		Sender:      sender,
 		MaxInFlight: 4,
 	})
@@ -195,7 +195,7 @@ func TestEngineRejectsBadOptions(t *testing.T) {
 
 func TestSnapshotTracksProgress(t *testing.T) {
 	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 200 * time.Millisecond}}}},
+		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 200 * time.Millisecond}}}},
 		Sender:      FakeSender{Delay: 5 * time.Millisecond},
 		MaxInFlight: 64,
 	})

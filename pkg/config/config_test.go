@@ -42,6 +42,12 @@ func TestCreateConnectionString(t *testing.T) {
 			want:   "127.0.0.1:65535",
 		},
 		{
+			// A bare "%s:%d" would give ::1:50051, which no dialer can parse.
+			name:   "ipv6 literal",
+			target: ConnectionStringTarget{IP: "::1", Port: 50051},
+			want:   "[::1]:50051",
+		},
+		{
 			name:    "empty ip",
 			target:  ConnectionStringTarget{Port: 50051},
 			wantErr: ErrInvalidIP,
