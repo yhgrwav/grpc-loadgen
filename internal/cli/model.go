@@ -91,8 +91,11 @@ const (
 
 type model struct {
 	target string
-	engine *engine.Engine
-	cancel func()
+	// service is what the header names: the one service of the config, or
+	// the collection name.
+	service string
+	engine  *engine.Engine
+	cancel  func()
 
 	text   Text
 	styles styles
