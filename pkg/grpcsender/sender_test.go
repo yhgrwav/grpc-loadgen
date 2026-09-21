@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,11 +41,14 @@ type target struct {
 
 	code  codes.Code
 	delay time.Duration
+	calls atomic.Int64
 }
 
 func (t *target) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (
 	*grpc_health_v1.HealthCheckResponse, error,
 ) {
+	t.calls.Add(1)
+
 	if t.delay > 0 {
 		select {
 		case <-time.After(t.delay):
@@ -97,18 +101,134 @@ func request(scheduled time.Time) engine.Request {
 
 // --- connection ---------------------------------------------------------
 
-func TestConnect_FailsOnUnreachableTargetAndNamesIt(t *testing.T) {
-	sender := New(Options{Target: "127.0.0.1:1"})
+// connectWithin runs Connect and fails the test if it has not returned by
+// limit: the property under test is that Connect gives up on its own, so the
+// ceiling lives outside the ctx that Connect sees.
+func connectWithin(ctx context.Context, t *testing.T, sender *Sender, limit time.Duration) error {
+	t.Helper()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- sender.Connect(ctx) }()
 
-	err := sender.Connect(ctx)
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(limit):
+		t.Fatalf("Connect has not returned after %v", limit)
+
+		return nil
+	}
+}
+
+// closedPort returns an address nothing listens on: the port was just taken
+// and released, so a dial there is refused immediately.
+func closedPort(t *testing.T) string {
+	t.Helper()
+
+	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := lis.Addr().String()
+	_ = lis.Close()
+
+	return addr
+}
+
+// withoutDeadline is a ctx the way a careless caller would pass it: no
+// deadline, cancelled only when the test ends so a hanging Connect does not
+// outlive it.
+func withoutDeadline(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
+func TestConnect_RefusedAddressFailsWithoutADeadline(t *testing.T) {
+	addr := closedPort(t)
+	sender := New(Options{Target: addr})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	err := connectWithin(withoutDeadline(t), t, sender, 3*time.Second)
 	if err == nil {
 		t.Fatal("connect to a closed port succeeded, want an error before the run starts")
 	}
-	if !strings.Contains(err.Error(), "127.0.0.1:1") {
-		t.Errorf("error %q does not name the address", err)
+	if !strings.Contains(err.Error(), addr) {
+		t.Errorf("error %q does not name the address %s", err, addr)
+	}
+}
+
+func TestConnect_RefusedAddressCarriesTheTransportCause(t *testing.T) {
+	sender := New(Options{Target: closedPort(t)})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	err := connectWithin(withoutDeadline(t), t, sender, 3*time.Second)
+	if err == nil {
+		t.Fatal("connect to a closed port succeeded")
+	}
+	// "connection refused" on Linux, "actively refused it" on Windows.
+	if !strings.Contains(err.Error(), "refused") {
+		t.Errorf("error %q hides why the connection failed", err)
+	}
+}
+
+func TestConnect_UnresolvableNameFailsWithoutADeadline(t *testing.T) {
+	// .invalid is reserved by RFC 2606 and never resolves.
+	const addr = "no-such-host.invalid:443"
+
+	sender := New(Options{Target: addr})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	err := connectWithin(withoutDeadline(t), t, sender, 5*time.Second)
+	if err == nil {
+		t.Fatal("connect to an unresolvable name succeeded")
+	}
+	if !strings.Contains(err.Error(), addr) {
+		t.Errorf("error %q does not name the address %s", err, addr)
+	}
+}
+
+func TestConnect_CallerDeadlineBoundsASilentTarget(t *testing.T) {
+	// Accepts TCP and never speaks: the handshake neither completes nor fails,
+	// so only the caller's deadline can end the wait.
+	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	accepted := make(chan net.Conn, 16)
+	go func() {
+		for {
+			conn, acceptErr := lis.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+	t.Cleanup(func() {
+		_ = lis.Close()
+		for {
+			select {
+			case conn := <-accepted:
+				_ = conn.Close()
+			default:
+				return
+			}
+		}
+	})
+
+	sender := New(Options{Target: lis.Addr().String()})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	err = connectWithin(ctx, t, sender, 3*time.Second)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want errors.Is(err, context.DeadlineExceeded)", err)
 	}
 }
 
@@ -203,7 +323,8 @@ func TestSend_AppliesDeadlineAsGiven(t *testing.T) {
 }
 
 func TestSend_DeadlineInThePastTimesOutWithoutSending(t *testing.T) {
-	sender := dialTarget(t, &target{delay: time.Second})
+	srv := &target{delay: time.Second}
+	sender := dialTarget(t, srv)
 
 	scheduled := time.Now()
 	req := request(scheduled)
@@ -215,6 +336,9 @@ func TestSend_DeadlineInThePastTimesOutWithoutSending(t *testing.T) {
 	}
 	if out.Category != engine.CategoryTimeout {
 		t.Errorf("category = %v, want timeout", out.Category)
+	}
+	if n := srv.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls, want none: the request had no budget left", n)
 	}
 }
 
@@ -260,22 +384,6 @@ func TestSend_MegabytePayloadGoesThrough(t *testing.T) {
 	}
 	if out.Category != engine.CategorySuccess {
 		t.Errorf("category = %v (%v), want success", out.Category, out.Err)
-	}
-}
-
-func TestSend_NanosecondDeadlineIsATimeoutNotAFailure(t *testing.T) {
-	sender := dialTarget(t, &target{delay: time.Second})
-
-	scheduled := time.Now()
-	req := request(scheduled)
-	req.Deadline = scheduled.Add(time.Nanosecond)
-
-	out, err := sender.Send(bounded(t), req)
-	if err != nil {
-		t.Fatalf("send: %v, want an exhausted deadline to be a measurement", err)
-	}
-	if out.Category != engine.CategoryTimeout {
-		t.Errorf("category = %v, want timeout", out.Category)
 	}
 }
 
@@ -381,8 +489,8 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 			if out.Category != tt.want {
 				t.Errorf("category = %v, want %v", out.Category, tt.want)
 			}
-			if tt.code != codes.OK && out.Err == nil {
-				t.Error("Err is nil although the call failed")
+			if (out.Err == nil) != (tt.code == codes.OK) {
+				t.Errorf("Err = %v, want nil exactly when the call succeeded", out.Err)
 			}
 		})
 	}
