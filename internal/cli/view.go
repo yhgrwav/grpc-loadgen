@@ -111,22 +111,111 @@ func (m *model) header(width int) string {
 		target = m.text.FakeTarget()
 	}
 
-	// One line, read left to right: what is happening, to which service, at
-	// which address. The project name lives in the footer; the header is about
-	// the run.
-	sep := m.styles.faint.Render("  ·  ")
-	lead := m.styles.shimmer(glyph+" "+status, m.frame) + sep
-	if m.service != "" {
-		lead += m.styles.value.Render(m.service) + sep
-	}
-	target = truncate(target, width-lipgloss.Width(lead))
+	// One line, read left to right: what is happening, what a stop key would
+	// do next, to which service, at which address. The project name lives in
+	// the footer; the header is about the run.
+	line := newHeaderLine(m.styles, width, m.styles.shimmer(glyph+" "+status, m.frame))
+	line.add(m.styles.warn, m.stopHint(), m.stopAction())
+	line.add(m.styles.value, m.service)
+	line.add(m.styles.muted, target)
 
 	s := m.snapshot
 	clock := formatDuration(s.Elapsed) + " / " + formatDuration(s.Total)
 
-	return lead + m.styles.muted.Render(target) + "\n" +
+	return line.text + "\n" +
 		progress(m.styles, s.Elapsed, s.Total, width-lipgloss.Width(clock)-1) + m.styles.pad(1) +
 		m.styles.muted.Render(clock)
+}
+
+// stopAction says what another press of the stop key does; it is empty while
+// no stop is under way.
+func (m *model) stopAction() string {
+	if m.done {
+		return ""
+	}
+
+	switch m.stopper.Stage() {
+	case StageNone:
+		return ""
+
+	case StageStop:
+		// With nothing in flight the run closes on its own, and another press
+		// would have nothing to cut off.
+		if m.snapshot.InFlight <= 0 {
+			return ""
+		}
+
+		return m.text.StopAgainAborts()
+
+	default:
+		return m.text.StopAgainExits()
+	}
+}
+
+// stopHint is the action with the count of calls the drain is still waiting
+// for. Past the gentle stop the count is dropped: those calls are being cut
+// off while the line is read, and the room goes to the way out of an abort
+// that hangs.
+func (m *model) stopHint() string {
+	action := m.stopAction()
+	if action == "" || m.stopper.Stage() > StageStop {
+		return action
+	}
+
+	return m.text.InFlightCount(formatCount(m.snapshot.InFlight)) + " · " + action
+}
+
+// headerLine lays the header pieces out left to right, each behind a
+// separator, and stops where the width runs out: the frame wraps a longer
+// line, and a wrapped header shifts everything below it.
+type headerLine struct {
+	text string
+	sep  string
+	room int
+}
+
+// minPiece is the narrowest a cut piece may get: four columns and the
+// ellipsis. Below it the piece carries nothing and is dropped.
+const minPiece = 5
+
+func newHeaderLine(s styles, width int, lead string) *headerLine {
+	return &headerLine{
+		text: lead,
+		sep:  s.faint.Render("  ·  "),
+		room: width - lipgloss.Width(lead),
+	}
+}
+
+// add appends the first piece that fits whole, falling back to the shorter
+// ones given after it; the last one is cut to what is left. A piece with no
+// room at all is dropped, the ones added before it keep theirs.
+func (l *headerLine) add(style lipgloss.Style, texts ...string) {
+	sepWidth := lipgloss.Width(l.sep)
+	room := l.room - sepWidth
+
+	for i, text := range texts {
+		if text == "" {
+			continue
+		}
+
+		if lipgloss.Width(text) > room {
+			if i < len(texts)-1 {
+				continue
+			}
+			// A shard of a word says nothing: below that the piece is
+			// dropped and the line ends on the one before it.
+			if room < minPiece {
+				return
+			}
+
+			text = truncate(text, room)
+		}
+
+		l.text += l.sep + style.Render(text)
+		l.room -= sepWidth + lipgloss.Width(text)
+
+		return
+	}
 }
 
 // truncate shortens s to width columns, marking the cut with an ellipsis.

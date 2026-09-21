@@ -104,10 +104,16 @@ func (s *Stopper) Abort() StopStage {
 	return StageAbort
 }
 
-// Stopping says a stop of any stage has started, by key or by signal.
-func (s *Stopper) Stopping() bool {
+// Stage is how far the stop has gone, by key or by signal. It does not fall
+// back when the run ends: the view reads it to say what the next press does.
+func (s *Stopper) Stage() StopStage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.presses > 0
+	return StopStage(min(s.presses, int(StageExit)))
+}
+
+// Stopping says a stop of any stage has started, by key or by signal.
+func (s *Stopper) Stopping() bool {
+	return s.Stage() > StageNone
 }

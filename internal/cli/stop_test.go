@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,6 +116,81 @@ func TestStopper_PressAfterFinishDoesNothing(t *testing.T) {
 
 	if c.stop.Load() != 0 {
 		t.Error("a press after the end stopped a run that is already over")
+	}
+}
+
+func TestStopper_StageFollowsThePresses(t *testing.T) {
+	for _, tt := range []struct {
+		presses int
+		want    StopStage
+	}{
+		{0, StageNone},
+		{1, StageStop},
+		{2, StageAbort},
+		{3, StageExit},
+		{4, StageExit},
+	} {
+		t.Run(fmt.Sprint(tt.presses), func(t *testing.T) {
+			c := newStopCalls()
+			s := c.stopper(time.Hour)
+
+			for range tt.presses {
+				s.Press()
+			}
+
+			got := s.Stage()
+			if got != tt.want {
+				t.Errorf("Stage() = %v after %d presses, want %v", got, tt.presses, tt.want)
+			}
+			if stopping := s.Stopping(); stopping != (tt.want > StageNone) {
+				t.Errorf("Stopping() = %v at stage %v", stopping, got)
+			}
+		})
+	}
+}
+
+func TestStopper_StageAfterTerminateIsAbort(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	s.Abort()
+
+	if got := s.Stage(); got != StageAbort {
+		t.Errorf("Stage() = %v after SIGTERM, want StageAbort: the view must not offer an abort again", got)
+	}
+}
+
+func TestStopper_StageKeepsTheAbortAfterFinish(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	s.Press()
+	s.Press()
+	s.Finish()
+
+	if got := s.Stage(); got != StageAbort {
+		t.Errorf("Stage() = %v after the report is out, want StageAbort", got)
+	}
+}
+
+func TestStopper_StageIsReadWhileTheSignalArrives(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(time.Hour)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		s.Abort()
+	}()
+
+	for range 1000 {
+		s.Stage()
+	}
+	<-done
+
+	if got := s.Stage(); got != StageAbort {
+		t.Errorf("Stage() = %v after the signal, want StageAbort", got)
 	}
 }
 
