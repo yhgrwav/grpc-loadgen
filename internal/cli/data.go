@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -107,23 +106,45 @@ func AttachData(ctx context.Context, resolver descriptor.Resolver, cfg *config.M
 // name: the config is usually written with response_type, and an error about
 // responseType reads like a different field.
 func withProtoNames(err error, desc protoreflect.MessageDescriptor) error {
-	text := err.Error()
-
-	var names []string
-
-	for jsonName, name := range protoNames(desc, map[protoreflect.FullName]bool{}) {
-		if strings.Contains(text, "field "+jsonName) {
-			names = append(names, name)
-		}
-	}
-
-	if len(names) == 0 {
+	jsonName := fieldInError(err.Error())
+	if jsonName == "" {
 		return err
 	}
 
-	slices.Sort(names)
+	name, ok := protoNames(desc, map[protoreflect.FullName]bool{})[jsonName]
+	if !ok {
+		return err
+	}
 
-	return fmt.Errorf("%w (field %s in the .proto)", err, strings.Join(names, ", "))
+	return fmt.Errorf("%w (field %s in the .proto)", err, name)
+}
+
+// fieldInError returns the JSON name protojson put in the text of an error, or
+// "" if it named no field.
+//
+// protojson spells a field by its JSON name in exactly one message —
+// "invalid value for <kind> field <jsonName>: <value>". On an unknown or a
+// duplicate field it quotes the key as the config wrote it, and there is
+// nothing to translate. The name is read out of that shape rather than looked
+// up by substring: JSON names nest (idX inside idXRay), and the rejected value
+// printed after the colon can name any field it likes.
+func fieldInError(text string) string {
+	_, rest, ok := strings.Cut(text, "invalid value for ")
+	if !ok {
+		return ""
+	}
+
+	_, rest, ok = strings.Cut(rest, " field ")
+	if !ok {
+		return ""
+	}
+
+	name, _, ok := strings.Cut(rest, ":")
+	if !ok {
+		return ""
+	}
+
+	return name
 }
 
 // protoNames maps the JSON name of every field reachable from desc to its
