@@ -94,7 +94,7 @@ type model struct {
 	// the collection name.
 	service string
 	engine  *engine.Engine
-	cancel  func()
+	stopper *Stopper
 
 	text   Text
 	styles styles
@@ -127,11 +127,11 @@ type model struct {
 	settings *Settings
 }
 
-func newModel(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *model {
+func newModel(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper) *model {
 	m := &model{
 		target:    target,
 		engine:    eng,
-		cancel:    cancel,
+		stopper:   stopper,
 		warmup:    warmup,
 		perMethod: make(map[string]*history),
 		settings:  settings,
@@ -201,6 +201,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		m.err = msg.err
 
+		// A q during the run asked to leave; the drain it started is over.
+		if m.stopping {
+			return m, tea.Quit
+		}
+
 		return m, nil
 
 	case tea.KeyMsg:
@@ -232,11 +237,13 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "q", "ctrl+c":
-		// One press leaves: the run is cancelled here, and the caller waits
-		// for it to return before printing the report.
-		m.stop()
+		// One press stops the run and leaves once the calls in flight drain; a
+		// second aborts them and leaves now; a third exits without a report.
+		if m.stop() >= StageAbort {
+			return m, tea.Quit
+		}
 
-		return m, tea.Quit
+		return m, nil
 
 	case "?":
 		m.showHelp = !m.showHelp
@@ -370,13 +377,10 @@ func (m *model) saveSettings() {
 	m.notice = m.text.Saved(m.settings.Path())
 }
 
-func (m *model) stop() {
-	if m.stopping {
-		return
-	}
-
+func (m *model) stop() StopStage {
 	m.stopping = true
-	m.cancel()
+
+	return m.stopper.Press()
 }
 
 func tick() tea.Cmd {

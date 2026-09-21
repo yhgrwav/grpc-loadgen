@@ -25,7 +25,10 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
@@ -36,10 +39,35 @@ import (
 
 const defaultMaxInFlight = 5000
 
+// ErrIncomplete says the run ended before its plan. The report is printed and
+// honest, but it covers less than was asked for, so the exit code is not zero:
+// a pipeline must not pass on a three-minute run of a ten-minute plan.
+var ErrIncomplete = errors.New("the run stopped before its planned end; the report covers only the part that ran")
+
+// exitNow is the way out that depends on nothing: the third stop, or an abort
+// that has not finished in time.
+var exitNow = func() {
+	fmt.Fprintln(os.Stderr, "grpc-loadgen: aborted without a report")
+	os.Exit(130)
+}
+
+// runStarting is called once presses go to the stopper; tests use it to press
+// during the run rather than during the connection.
+var runStarting = func(*engine.Engine) {}
+
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
-	stop()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	stops := make(chan struct{})
+	go func() {
+		for range signals {
+			stops <- struct{}{}
+		}
+	}()
+
+	err := run(context.Background(), stops, os.Args[1:], os.Stdout, os.Stderr)
+	signal.Stop(signals)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc-loadgen: %v\n", err)
@@ -49,7 +77,33 @@ func main() {
 
 // run is the whole command. The live view is used only when stderr is the
 // process terminal, so tests passing their own writers always get plain output.
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+//
+// Each value on stops is one press of Ctrl+C. Before the run starts a press
+// cancels the connection; during the run it goes to the three-stage stopper.
+func run(ctx context.Context, stops <-chan struct{}, args []string, stdout, stderr io.Writer) error {
+	ctx, abort := context.WithCancel(ctx)
+	defer abort()
+
+	var stopper atomic.Pointer[cli.Stopper]
+
+	finished := make(chan struct{})
+	defer close(finished)
+
+	go func() {
+		for {
+			select {
+			case <-finished:
+				return
+			case <-stops:
+				if s := stopper.Load(); s != nil {
+					s.Press()
+				} else {
+					abort()
+				}
+			}
+		}
+	}()
+
 	flags := flag.NewFlagSet("grpc-loadgen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
@@ -148,24 +202,56 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// The live view holds the terminal in raw mode; leaving without restoring it
+	// would leave the user a broken console.
+	var view atomic.Pointer[tea.Program]
+	exit := func() {
+		if p := view.Load(); p != nil {
+			p.Kill()
+		}
+		exitNow()
+	}
+
+	s := cli.NewStopper(
+		func() {
+			eng.Stop()
+			if !interactive {
+				fmt.Fprintln(stderr, "stopping: no new requests; waiting for those in flight. Ctrl+C again to cut them off")
+			}
+		},
+		func() {
+			abort()
+			if !interactive {
+				fmt.Fprintln(stderr, "aborting: requests in flight are cut off and counted as aborted. Ctrl+C again to exit without a report")
+			}
+		},
+		exit,
+		time.Second,
+	)
+	stopper.Store(s)
+	runStarting(eng)
 
 	start := func() error { return eng.Run(ctx) }
 
 	var runErr error
 
 	if interactive {
-		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, cancel)
-		runErr = cli.RunLive(program, start, cancel)
+		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
+		view.Store(program)
+		runErr = cli.RunLive(program, start, abort)
 	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
 	}
 
-	cli.PrintReport(stdout, target, eng.Report())
+	report := eng.Report()
+	cli.PrintReport(stdout, target, report)
+	s.Finish()
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
+	}
+	if report.Incomplete {
+		return ErrIncomplete
 	}
 
 	return nil

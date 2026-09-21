@@ -26,7 +26,11 @@ import (
 // PrintReport writes the finished run to w as plain text.
 func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "run finished: %s in %s\n", target, formatDuration(report.Duration))
-	fmt.Fprintf(w, "sent %d, failed %d\n\n", report.Sent, report.Failed)
+	if report.Aborted > 0 {
+		fmt.Fprintf(w, "sent %d, failed %d, aborted %d\n\n", report.Sent, report.Failed, report.Aborted)
+	} else {
+		fmt.Fprintf(w, "sent %d, failed %d\n\n", report.Sent, report.Failed)
+	}
 
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
 		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
@@ -44,10 +48,22 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 	}
 
-	if censored > 0 {
+	// Aborted calls are censored too, but raising the timeout would not show
+	// their tail: the stop cut them off, not the deadline.
+	if timedOut := censored - report.Aborted; timedOut > 0 {
 		fmt.Fprintf(w, "\n%d requests were abandoned before answering. A percentile shown as "+
 			"\"> value\"\nis a lower bound: the real tail lies above it. Raise the timeout to see it.\n",
-			censored)
+			timedOut)
+	}
+
+	if report.Aborted > 0 {
+		fmt.Fprintf(w, "\n%d requests were cut off by the abort. They are no fault of the target and are\n"+
+			"not counted as failures; each is known only to have lasted until the abort.\n", report.Aborted)
+	}
+
+	if report.Incomplete {
+		fmt.Fprint(w, "\nincomplete: the run stopped before its planned end. The numbers are honest but\n"+
+			"cover only the part that ran; do not compare them with a full run.\n")
 	}
 
 	if unanswered > 0 {

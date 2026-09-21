@@ -49,7 +49,14 @@ func (r Result) CensorThreshold() time.Duration {
 		return r.Latency()
 	}
 
-	return r.Deadline.Sub(r.ScheduledAt)
+	threshold := r.Deadline.Sub(r.ScheduledAt)
+	// An aborted call was watched only until the abort, which may come well
+	// before its deadline.
+	if r.Category == CategoryAborted {
+		threshold = max(0, min(threshold, r.Latency()))
+	}
+
+	return threshold
 }
 
 func (r Result) Latency() time.Duration {
@@ -86,6 +93,10 @@ func (p *WorkerPool) inFlightCount() int {
 	return int(p.inFlight.Load())
 }
 
+// Run sends every request from in until it closes, the context is cancelled
+// or a send fails fatally. Cancelling ctx aborts the calls in flight, and each
+// is still delivered to out as CategoryAborted: the caller must keep reading
+// out until Run returns, or Run will not return.
 func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Result) error {
 	if p.Sender == nil {
 		return ErrNoSender
@@ -95,7 +106,7 @@ func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Resu
 	}
 
 	r := newPoolRun(ctx, p.MaxInFlight)
-	defer r.abort()
+	defer r.close()
 
 	return r.dispatch(p, in, out)
 }
@@ -103,24 +114,58 @@ func (p *WorkerPool) Run(ctx context.Context, in <-chan Request, out chan<- Resu
 // poolRun tracks the state of a single Run call: the context sends are made
 // under, the in-flight slots, and the first fatal error seen by any worker.
 type poolRun struct {
+	parent  context.Context
 	sendCtx context.Context
 	abort   context.CancelFunc
-	slots   chan struct{}
+	// stopWatch detaches the watcher that records the abort moment.
+	stopWatch func() bool
+	slots     chan struct{}
+
+	// abortedAt is the one moment the caller aborted the run, stored before
+	// sendCtx is cancelled, so every call that sees the cancellation finds it.
+	// Taking time.Now() in each goroutine instead would add however long the
+	// cancellation took to reach it.
+	abortedAt atomic.Pointer[time.Time]
 
 	wg sync.WaitGroup
 
 	mu       sync.Mutex
 	fatalErr error
+	failed   chan struct{}
 }
 
 func newPoolRun(ctx context.Context, maxInFlight int) *poolRun {
-	sendCtx, abort := context.WithCancel(ctx)
+	sendCtx, abort := context.WithCancel(context.WithoutCancel(ctx))
 
-	return &poolRun{
+	r := &poolRun{
+		parent:  ctx,
 		sendCtx: sendCtx,
 		abort:   abort,
 		slots:   make(chan struct{}, maxInFlight),
+		failed:  make(chan struct{}),
 	}
+	r.stopWatch = context.AfterFunc(ctx, func() {
+		now := time.Now()
+		r.abortedAt.Store(&now)
+		abort()
+	})
+
+	return r
+}
+
+func (r *poolRun) close() {
+	r.stopWatch()
+	r.abort()
+}
+
+// aborted reports the moment the caller aborted the run, if it did.
+func (r *poolRun) aborted() (time.Time, bool) {
+	at := r.abortedAt.Load()
+	if at == nil {
+		return time.Time{}, false
+	}
+
+	return *at, true
 }
 
 // fail records err as the run's outcome unless one was already recorded, and
@@ -129,6 +174,7 @@ func (r *poolRun) fail(err error) {
 	r.mu.Lock()
 	if r.fatalErr == nil {
 		r.fatalErr = err
+		close(r.failed)
 	}
 	r.mu.Unlock()
 
@@ -136,7 +182,7 @@ func (r *poolRun) fail(err error) {
 }
 
 func (r *poolRun) finish(err error) error {
-	if err != nil {
+	if err != nil && r.parent.Err() == nil {
 		r.fail(err)
 	}
 	r.wg.Wait()
@@ -146,6 +192,9 @@ func (r *poolRun) finish(err error) error {
 
 	if r.fatalErr != nil {
 		return r.fatalErr
+	}
+	if abortErr := r.parent.Err(); abortErr != nil {
+		return abortErr
 	}
 	if err != nil {
 		return err
@@ -194,7 +243,7 @@ func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
 			<-r.slots
 		}
 
-		p.send(r.sendCtx, req, out, release, r.fail)
+		p.send(r, req, out, release)
 	}()
 
 	return nil
@@ -203,17 +252,29 @@ func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
 // send delivers one request and releases its in-flight slot as soon as Send
 // returns, before the result is handed to out, so a slow result consumer
 // never holds a slot open.
-func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, release func(), fail func(error)) {
+func (p *WorkerPool) send(r *poolRun, req Request, out chan<- Result, release func()) {
 	begunAt := time.Now()
 
-	outcome, err := p.Sender.Send(ctx, req)
+	outcome, err := p.Sender.Send(r.sendCtx, req)
 	release()
 
 	if err != nil {
-		if ctx.Err() == nil {
-			fail(err)
+		at, aborted := r.aborted()
+		if !aborted {
+			if r.sendCtx.Err() == nil {
+				r.fail(err)
+			}
+			return
 		}
-		return
+
+		// The caller aborted the run: the call is not lost, it is known to
+		// have lasted until the abort.
+		// A request launched in the instant between the abort moment and the
+		// cancellation would otherwise end before it began.
+		if at.Before(begunAt) {
+			at = begunAt
+		}
+		outcome = Outcome{Category: CategoryAborted, Err: err, SentAt: begunAt, DoneAt: at}
 	}
 
 	if outcome.SentAt.IsZero() {
@@ -231,8 +292,10 @@ func (p *WorkerPool) send(ctx context.Context, req Request, out chan<- Result, r
 		Outcome:     outcome,
 	}
 
+	// Delivered after an abort too: the collector reads until the pool has
+	// returned. Only a fatal failure, after which nobody may read, drops it.
 	select {
 	case out <- result:
-	case <-ctx.Done():
+	case <-r.failed:
 	}
 }

@@ -74,6 +74,12 @@ type Report struct {
 	Sent     int
 	Failed   int
 	Methods  []MethodReport
+	// Aborted counts calls cut off by an abort of the run. They are no fault
+	// of the target, so they are not in Failed; each is censored at the abort.
+	Aborted int
+	// Incomplete says the run ended before its plan, by Stop or by an abort.
+	// Every number is honest, but it covers less than was asked for.
+	Incomplete bool
 }
 
 type Stats struct {
@@ -83,6 +89,7 @@ type Stats struct {
 	warmup    time.Duration
 	sent      int
 	failed    int
+	aborted   int
 	byMethod  map[string]*methodStats
 }
 
@@ -126,8 +133,12 @@ func (s *Stats) Record(r Result) {
 	}
 
 	s.sent++
-	if r.Category != CategorySuccess {
+	failed := r.Category != CategorySuccess && r.Category != CategoryAborted
+	if failed {
 		s.failed++
+	}
+	if r.Category == CategoryAborted {
+		s.aborted++
 	}
 
 	method, ok := s.byMethod[r.Method]
@@ -137,7 +148,7 @@ func (s *Stats) Record(r Result) {
 	}
 
 	method.sent++
-	if r.Category != CategorySuccess {
+	if failed {
 		method.failed++
 	}
 
@@ -157,7 +168,7 @@ func (s *Stats) Record(r Result) {
 
 	// An abandoned call is known only to have lasted at least as long as its
 	// deadline, so it is recorded as a bound rather than as a measurement.
-	if r.Category == CategoryTimeout {
+	if r.Category == CategoryTimeout || r.Category == CategoryAborted {
 		method.latency.RecordCensored(r.CensorThreshold())
 		return
 	}
@@ -257,10 +268,15 @@ func (s *Stats) Snapshot() Snapshot {
 func (s *Stats) Report() Report {
 	elapsed, measured, sent, failed, views := s.views()
 
+	s.mu.Lock()
+	aborted := s.aborted
+	s.mu.Unlock()
+
 	report := Report{
 		Duration: elapsed,
 		Sent:     sent,
 		Failed:   failed,
+		Aborted:  aborted,
 	}
 
 	for _, v := range views {

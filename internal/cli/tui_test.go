@@ -258,7 +258,7 @@ func testModel(t *testing.T) *model {
 	settings.Mode = string(ModeDark)
 	settings.Palette = "aurora"
 
-	return newModel("localhost:50051", eng, 0, settings, func() {})
+	return newModel("localhost:50051", eng, 0, settings, NewStopper(func() {}, func() {}, func() {}, time.Hour))
 }
 
 func press(m *model, keys ...string) {

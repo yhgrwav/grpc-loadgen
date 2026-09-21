@@ -28,8 +28,8 @@ import (
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
 // with the run.
-func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *tea.Program {
-	m := newModel(target, eng, warmup, settings, cancel)
+func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper) *tea.Program {
+	m := newModel(target, eng, warmup, settings, stopper)
 	m.service = service
 
 	return tea.NewProgram(m,
