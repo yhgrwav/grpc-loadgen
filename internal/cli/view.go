@@ -43,10 +43,33 @@ func NewProgram(target string, eng *engine.Engine, warmup time.Duration, setting
 }
 
 func (m *model) View() string {
-	width := m.width
-	if width < 40 {
-		width = 72
+	width := m.viewWidth()
+
+	frame := m.styles.frame.Width(width - 4)
+	if m.height > 6 {
+		frame = frame.Height(m.height - 4)
 	}
+
+	return frame.Render(m.body(width))
+}
+
+func (m *model) viewWidth() int {
+	if m.width < 40 {
+		return 72
+	}
+
+	return m.width
+}
+
+// contentWidth is what the frame leaves for the body on a terminal this wide:
+// the border takes one column a side and the padding two.
+func contentWidth(width int) int {
+	return width - 4 - 4
+}
+
+// body is everything inside the frame. The frame wraps whatever is wider than
+// its content width, so a line laid out too wide breaks in the middle.
+func (m *model) body(width int) string {
 	inner := width - 6
 
 	var b strings.Builder
@@ -72,12 +95,7 @@ func (m *model) View() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.footer())
 
-	frame := m.styles.frame.Width(width - 4)
-	if m.height > 6 {
-		frame = frame.Height(m.height - 4)
-	}
-
-	return frame.Render(b.String())
+	return b.String()
 }
 
 func (m *model) header(width int) string {
@@ -469,4 +487,33 @@ func (m *model) totalTarget() float64 {
 	}
 
 	return total
+}
+
+// FakeTarget is the target name the CLI passes when -fake is on.
+const FakeTarget = "fake target"
+
+// LiveView is the part of a tea program RunLive drives.
+type LiveView interface {
+	Run() (tea.Model, error)
+	Send(msg tea.Msg)
+}
+
+// RunLive runs the view and the load side by side.
+func RunLive(view LiveView, run func() error, cancel func()) error {
+	var runErr error
+
+	go func() {
+		runErr = run()
+		view.Send(doneMsg{err: runErr})
+	}()
+
+	_, err := view.Run()
+
+	return err
+}
+
+// hintStage is the brightness step of the layout hint: 0 is full, higher is
+// fainter, -1 means no hint.
+func (m *model) hintStage() int {
+	return -1
 }
