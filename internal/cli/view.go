@@ -28,8 +28,9 @@ import (
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
 // with the run.
-func NewProgram(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *tea.Program {
+func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *tea.Program {
 	m := newModel(target, eng, warmup, settings, cancel)
+	m.service = service
 
 	return tea.NewProgram(m,
 		tea.WithAltScreen(),
@@ -110,18 +111,20 @@ func (m *model) header(width int) string {
 		target = m.text.FakeTarget()
 	}
 
-	// One line, read left to right: what, doing what, against what. A status
-	// pushed to the right edge read as a stray word and wrapped.
+	// One line, read left to right: what is happening, to which service, at
+	// which address. The project name lives in the footer; the header is about
+	// the run.
 	sep := m.styles.faint.Render("  ·  ")
-	lead := m.styles.shimmer(glyph+" grpc-loadgen", m.frame) + sep +
-		m.styles.value.Render(status) + sep +
-		m.styles.muted.Render(m.text.Target()+" ")
+	lead := m.styles.shimmer(glyph+" "+status, m.frame) + sep
+	if m.service != "" {
+		lead += m.styles.value.Render(m.service) + sep
+	}
 	target = truncate(target, width-lipgloss.Width(lead))
 
 	s := m.snapshot
 	clock := formatDuration(s.Elapsed) + " / " + formatDuration(s.Total)
 
-	return lead + m.styles.value.Render(target) + "\n" +
+	return lead + m.styles.muted.Render(target) + "\n" +
 		progress(m.styles, s.Elapsed, s.Total, width-lipgloss.Width(clock)-1) + m.styles.pad(1) +
 		m.styles.muted.Render(clock)
 }
@@ -278,11 +281,12 @@ const (
 )
 
 // sparkCells is how many cells a spark row gets: as many as fit beside its
-// label and value, up to sparkWidth, and never so few the line means nothing.
+// label and value, up to the length of the history, and never so few the line
+// means nothing.
 func (m *model) sparkCells() int {
 	room := contentWidth(m.viewWidth()) - sparkLabelWidth - 2 - sparkValueWidth
 
-	return min(max(room, 8), sparkWidth)
+	return min(max(room, 8), historyLimit)
 }
 
 func (m *model) sparkRow(label string, values []float64, unit string, format func(float64) string) string {
@@ -294,7 +298,7 @@ func (m *model) sparkRow(label string, values []float64, unit string, format fun
 
 func (m *model) gaugeRow(label string, value, limit float64, text string) string {
 	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
-		gauge(m.styles, value, limit, min(gaugeWidth, m.sparkCells())) + m.styles.pad(2) +
+		gauge(m.styles, value, limit, min(max(gaugeWidth, m.sparkCells()/2), m.sparkCells())) + m.styles.pad(2) +
 		m.styles.value.Render(text)
 }
 
@@ -321,7 +325,7 @@ func (m *model) help() string {
 	return b.String()
 }
 
-func (m *model) footer() string {
+func (m *model) footerHints() string {
 	if stage := m.hintStage(); stage >= 0 {
 		// Fades by stepping down the text colours: a terminal has no opacity.
 		fade := []lipgloss.Style{m.styles.value, m.styles.muted, m.styles.faint}
@@ -627,4 +631,19 @@ func RunLive(view LiveView, run func() error, cancel func()) error {
 	}
 
 	return runErr
+}
+
+// footer is the key hints with the project name at the right edge, where it
+// signs the view without taking the header from the run. It is left out when
+// the hints need the room.
+func (m *model) footer() string {
+	hints := m.footerHints()
+	name := m.styles.faint.Render("grpc-loadgen")
+
+	gap := contentWidth(m.viewWidth()) - lipgloss.Width(hints) - lipgloss.Width(name)
+	if gap < 2 {
+		return hints
+	}
+
+	return hints + m.styles.pad(gap) + name
 }

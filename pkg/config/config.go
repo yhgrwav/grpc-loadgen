@@ -31,12 +31,15 @@ var (
 	ErrInvalidRPS      = errors.New("rps must be positive")
 	ErrInvalidDuration = errors.New("duration must be positive")
 	ErrInvalidWarmup   = errors.New("warmup must not be negative")
+	ErrEmptyName       = errors.New("name must not be empty: leave it out to use the service or file name")
 	ErrInvalidTimeout  = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
 )
 
 type MasterConfig struct {
-	App  App  `yaml:"app"`
-	Load Load `yaml:"load"`
+	// Name is what the header calls the run; nil leaves it to the service or file.
+	Name *string `yaml:"name"`
+	App  App     `yaml:"app"`
+	Load Load    `yaml:"load"`
 }
 
 type App struct {

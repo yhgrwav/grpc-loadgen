@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -67,5 +68,14 @@ func (m *MasterConfig) resolve() error {
 }
 
 func (m *MasterConfig) Validate() error {
-	return m.Load.Validate()
+	var errs []error
+
+	if m.Name != nil && strings.TrimSpace(*m.Name) == "" {
+		errs = append(errs, ErrEmptyName)
+	}
+	if err := m.Load.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
 }

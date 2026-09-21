@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
@@ -45,4 +46,25 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 // the gRPC path, which differs only by the leading slash.
 func displayMethod(method string) string {
 	return strings.TrimPrefix(method, "/")
+}
+
+// ServiceLabel is what the header calls the run: the name the config gives it;
+// otherwise the one service all its methods belong to, by its short name;
+// otherwise the config file's name, which is the collection name by default.
+func ServiceLabel(cfg *config.MasterConfig, configPath string) string {
+	if cfg.Name != nil {
+		return *cfg.Name
+	}
+
+	service := ""
+
+	for _, call := range cfg.Load.Calls {
+		full, _, _ := strings.Cut(call.Method, "/")
+		if service != "" && full != service {
+			return strings.TrimSuffix(filepath.Base(configPath), filepath.Ext(configPath))
+		}
+		service = full
+	}
+
+	return service[strings.LastIndex(service, ".")+1:]
 }

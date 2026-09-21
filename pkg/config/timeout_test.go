@@ -65,3 +65,20 @@ func TestParse_TimeoutCannotBeSwitchedOff(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_NameIsOptional(t *testing.T) {
+	cfg, err := Parse(withTimeout(""))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.Name != nil {
+		t.Errorf("name = %q, want nil when the field is absent", *cfg.Name)
+	}
+}
+
+func TestParse_EmptyNameIsRejected(t *testing.T) {
+	raw := append([]byte("name: \"\"\n"), withTimeout("")...)
+	if _, err := Parse(raw); !errors.Is(err, ErrEmptyName) {
+		t.Errorf("err = %v, want ErrEmptyName: an empty name names nothing in the header", err)
+	}
+}
