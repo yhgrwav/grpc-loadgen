@@ -214,7 +214,7 @@ func TestHeaderPutsStatusAndTargetOnOneLine(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
 
 	for line := range strings.Lines(m.View()) {
-		if !strings.Contains(line, "grpc-loadgen") {
+		if !strings.Contains(line, m.text.Running()) {
 			continue
 		}
 		for _, want := range []string{m.text.Running(), "localhost:50051"} {

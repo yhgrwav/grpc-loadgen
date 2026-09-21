@@ -72,14 +72,18 @@ func TestProjectNameMovesToTheFooter(t *testing.T) {
 	}
 }
 
+// oldSparkWidth is the fixed width sparklines had before they followed the
+// terminal: the view looked right only at half a screen.
+const oldSparkWidth = 48
+
 func TestWideTerminalGetsLongerSparklines(t *testing.T) {
 	narrow, wide := testModel(t), testModel(t)
 	narrow.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
 	wide.Update(tea.WindowSizeMsg{Width: 200, Height: 40})
 
-	if n, w := narrow.sparkCells(), wide.sparkCells(); w <= n || w <= sparkWidth {
+	if n, w := narrow.sparkCells(), wide.sparkCells(); w <= n || w <= oldSparkWidth {
 		t.Errorf("cells: %d at 80 columns, %d at 200, want the wide terminal to use its width past %d",
-			n, w, sparkWidth)
+			n, w, oldSparkWidth)
 	}
 }
 

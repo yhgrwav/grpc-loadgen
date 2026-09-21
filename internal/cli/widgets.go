@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	spinnerFrames = []string{"◜", "◝", "◞", "◟"}
+	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	sparkLevels   = []rune("▁▂▃▄▅▆▇█")
 )
 

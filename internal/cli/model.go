@@ -29,7 +29,6 @@ const (
 	refresh      = 120 * time.Millisecond
 	historyLimit = 240
 	gaugeWidth   = 24
-	sparkWidth   = 48
 )
 
 type tickMsg time.Time

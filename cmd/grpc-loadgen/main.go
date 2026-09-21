@@ -139,7 +139,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var runErr error
 
 	if interactive {
-		program := cli.NewProgram(target, eng, cfg.Load.Warmup, settings, cancel)
+		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, cancel)
 		runErr = cli.RunLive(program, start, cancel)
 	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
