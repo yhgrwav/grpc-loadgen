@@ -10,16 +10,6 @@
 /go.mod                 @yhgrwav
 /go.sum                 @yhgrwav
 
-# Эталонный стенд и тесты корректности измерений — QA/AQA.
-# TODO: заменить на GitHub-логин QA.
-/test/                  @yhgrwav
-
-# Сборка, релизы, инфраструктура — DevOps.
-# TODO: заменить на GitHub-логин DevOps.
-/.github/workflows/     @yhgrwav
-/.goreleaser.yaml       @yhgrwav
-/Dockerfile             @yhgrwav
-
 # Лицензирование и юридическая часть — только владелец проекта.
 /LICENSE                @yhgrwav
 /NOTICE                 @yhgrwav

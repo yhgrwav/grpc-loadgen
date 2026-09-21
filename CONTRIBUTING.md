@@ -60,21 +60,7 @@ cannot be merged.
 - Commit messages are written in English, in the imperative mood, explaining
   what changes and why.
 
-## For the team
-
-The repository is worked on by three people in parallel, in different areas. The split exists to
-keep two people out of the same files, not as bureaucracy.
-
-| Area | Paths | Owner |
-|---|---|---|
-| Engine and CLI | `pkg/`, `cmd/`, `internal/` | project owner |
-| Reference stand and measurement tests | `test/` | QA/AQA |
-| Build, releases, infrastructure | `.github/`, `.goreleaser.yaml`, `Dockerfile` | DevOps |
-
-**Do not change another area without agreeing it first.** If your change needs an edit outside
-your own, say so in the pull request and get the owner of that area to look at it. `CODEOWNERS`
-requests their review automatically; the rule is there so the request is expected rather than a
-surprise.
+## Working on the repository
 
 ### Branches
 
