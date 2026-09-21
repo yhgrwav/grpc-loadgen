@@ -33,7 +33,7 @@ You sign once, and the signature covers your future contributions.
 
 ## Working on a change
 
-Requirements: Go 1.24 or newer, and [golangci-lint](https://golangci-lint.run)
+Requirements: Go 1.25 or newer, and [golangci-lint](https://golangci-lint.run)
 v2 for linting.
 
 ```console
@@ -41,7 +41,7 @@ $ go test ./...
 $ golangci-lint run ./...
 ```
 
-Both must pass before you open a pull request; CI runs them on Go 1.24 and on
+Both must pass before you open a pull request; CI runs them on Go 1.25 and on
 the latest release.
 
 Dependencies are restricted to permissive licenses (Apache-2.0, MIT, BSD, ISC).
@@ -60,21 +60,7 @@ cannot be merged.
 - Commit messages are written in English, in the imperative mood, explaining
   what changes and why.
 
-## For the team
-
-The repository is worked on by three people in parallel, in different areas. The split exists to
-keep two people out of the same files, not as bureaucracy.
-
-| Area | Paths | Owner |
-|---|---|---|
-| Engine and CLI | `pkg/`, `cmd/`, `internal/` | project owner |
-| Reference stand and measurement tests | `test/` | QA/AQA |
-| Build, releases, infrastructure | `.github/`, `.goreleaser.yaml`, `Dockerfile` | DevOps |
-
-**Do not change another area without agreeing it first.** If your change needs an edit outside
-your own, say so in the pull request and get the owner of that area to look at it. `CODEOWNERS`
-requests their review automatically; the rule is there so the request is expected rather than a
-surprise.
+## Working on the repository
 
 ### Branches
 
@@ -122,7 +108,7 @@ $ go test ./...
 $ golangci-lint run ./...
 ```
 
-Both run in CI on Go 1.24 and on the latest release. Run them before pushing — it is faster than
+Both run in CI on Go 1.25 and on the latest release. Run them before pushing — it is faster than
 waiting for the pipeline.
 
 ### The CLA comes first
