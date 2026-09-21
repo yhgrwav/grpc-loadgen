@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -30,10 +31,12 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/stats"
 
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
@@ -48,12 +51,20 @@ type health struct {
 
 	calls atomic.Int64
 	delay time.Duration
+
+	// service is the field of the last request, to compare with the config.
+	mu      sync.Mutex
+	service string
 }
 
-func (h *health) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (
+func (h *health) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (
 	*grpc_health_v1.HealthCheckResponse, error,
 ) {
 	h.calls.Add(1)
+
+	h.mu.Lock()
+	h.service = req.GetService()
+	h.mu.Unlock()
 
 	if h.delay > 0 {
 		select {
@@ -93,11 +104,25 @@ type liveTarget struct {
 func startTarget(t *testing.T) liveTarget {
 	t.Helper()
 
-	return startSlowTarget(t, 0)
+	return startServer(t, 0, false)
 }
 
 // startSlowTarget is startTarget with every answer held back by delay.
 func startSlowTarget(t *testing.T, delay time.Duration) liveTarget {
+	t.Helper()
+
+	return startServer(t, delay, false)
+}
+
+// startReflectingTarget is startTarget with server reflection on, so the CLI
+// can learn the request schema from it.
+func startReflectingTarget(t *testing.T) liveTarget {
+	t.Helper()
+
+	return startServer(t, 0, true)
+}
+
+func startServer(t *testing.T, delay time.Duration, withReflection bool) liveTarget {
 	t.Helper()
 
 	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
@@ -109,6 +134,9 @@ func startSlowTarget(t *testing.T, delay time.Duration) liveTarget {
 	ends := &connEnds{done: make(chan struct{})}
 	srv := grpc.NewServer(grpc.StatsHandler(ends))
 	grpc_health_v1.RegisterHealthServer(srv, h)
+	if withReflection {
+		reflection.Register(srv)
+	}
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -485,5 +513,132 @@ func TestExampleConfigFitsTheDefaultInFlightCap(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("the shipped example is rejected with the default cap: %v", err)
+	}
+}
+
+// --- request data -------------------------------------------------------
+
+// dataConfig is a config whose calls are given in full, data included.
+func dataConfig(t *testing.T, addr, calls string) string {
+	t.Helper()
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("split %q: %v", addr, err)
+	}
+
+	cfg := fmt.Sprintf("app:\n  target:\n    ip: %s\n    port: %s\n  tls: false\nload:\n  calls:\n%s", host, port, calls)
+
+	path := filepath.Join(t.TempDir(), "loadgen.yaml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	return path
+}
+
+func checkCall(data string) string {
+	return "    - method: " + checkMethod + "\n      rps: 50\n      duration: 300ms\n" + data
+}
+
+func TestRun_DataReachesTheTarget(t *testing.T) {
+	target := startReflectingTarget(t)
+	cfg := dataConfig(t, target.addr, checkCall("      data:\n        service: wallet\n"))
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	if res.err != nil {
+		t.Fatalf("run: %v\nstderr:\n%s", res.err, res.stderr)
+	}
+
+	target.health.mu.Lock()
+	got := target.health.service
+	target.health.mu.Unlock()
+
+	if got != "wallet" {
+		t.Errorf("target received service = %q, want the %q from data", got, "wallet")
+	}
+}
+
+func TestRun_EmptyDataIsAValidBody(t *testing.T) {
+	target := startReflectingTarget(t)
+	cfg := dataConfig(t, target.addr, checkCall("      data: {}\n"))
+
+	if res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg); res.err != nil {
+		t.Errorf("run with empty data: %v", res.err)
+	}
+}
+
+func TestRun_UnknownDataFieldFailsBeforeTheRun(t *testing.T) {
+	target := startReflectingTarget(t)
+	cfg := dataConfig(t, target.addr, checkCall("      data:\n        no_such_field: 1\n"))
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	// The YAML parser quotes the config in its errors, so a message check
+	// alone would pass on a config that was never read. The type says which
+	// step failed.
+	if !errors.Is(res.err, cli.ErrRequestData) {
+		t.Fatalf("err = %v, want cli.ErrRequestData", res.err)
+	}
+	for _, want := range []string{checkMethod, "no_such_field"} {
+		if !strings.Contains(res.err.Error(), want) {
+			t.Errorf("error %q does not name %q", res.err, want)
+		}
+	}
+	if n := target.health.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls, want none before a config error", n)
+	}
+}
+
+func TestRun_WrongDataTypeFailsBeforeTheRun(t *testing.T) {
+	target := startReflectingTarget(t)
+	cfg := dataConfig(t, target.addr, checkCall("      data:\n        service: [1, 2]\n"))
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	if !errors.Is(res.err, cli.ErrRequestData) || !strings.Contains(res.err.Error(), "service") {
+		t.Errorf("err = %v, want cli.ErrRequestData naming the field service", res.err)
+	}
+	if n := target.health.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls, want none before a config error", n)
+	}
+}
+
+func TestRun_DataWithoutReflectionSaysSo(t *testing.T) {
+	target := startTarget(t)
+	cfg := dataConfig(t, target.addr, checkCall("      data:\n        service: wallet\n"))
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	if !errors.Is(res.err, descriptor.ErrReflectionUnsupported) {
+		t.Fatalf("err = %v, want descriptor.ErrReflectionUnsupported", res.err)
+	}
+	for _, want := range []string{checkMethod, "reflection"} {
+		if !strings.Contains(res.err.Error(), want) {
+			t.Errorf("error %q does not name %q", res.err, want)
+		}
+	}
+}
+
+func TestRun_DataForAMissingMethodFailsBeforeTheRun(t *testing.T) {
+	target := startReflectingTarget(t)
+	calls := "    - method: " + missingMethod + "\n      rps: 50\n      duration: 300ms\n      data:\n        service: x\n"
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", dataConfig(t, target.addr, calls))
+	if !errors.Is(res.err, descriptor.ErrMethodNotFound) || !strings.Contains(res.err.Error(), missingMethod) {
+		t.Errorf("err = %v, want descriptor.ErrMethodNotFound naming %s", res.err, missingMethod)
+	}
+}
+
+func TestRun_EveryDataErrorAtOnce(t *testing.T) {
+	target := startReflectingTarget(t)
+	calls := checkCall("      data:\n        first_bad: 1\n") +
+		"    - method: grpc.health.v1.Health/Watch\n      rps: 5\n      duration: 300ms\n      data:\n        second_bad: 1\n"
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", dataConfig(t, target.addr, calls))
+	if !errors.Is(res.err, cli.ErrRequestData) {
+		t.Fatalf("err = %v, want cli.ErrRequestData", res.err)
+	}
+	for _, want := range []string{"first_bad", "grpc.health.v1.Health/Watch"} {
+		if !strings.Contains(res.err.Error(), want) {
+			t.Errorf("error %q misses %q: every problem should be reported at once", res.err, want)
+		}
 	}
 }

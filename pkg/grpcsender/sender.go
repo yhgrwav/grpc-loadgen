@@ -259,3 +259,12 @@ func responseTarget(keep bool) (body *[]byte, decodeInto any) {
 
 	return body, body
 }
+
+// Conn is the connection calls go through, for resolving method schemas over
+// it before the run. Nil before Connect.
+func (s *Sender) Conn() grpc.ClientConnInterface {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.conn
+}

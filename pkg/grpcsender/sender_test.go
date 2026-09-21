@@ -27,9 +27,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
@@ -65,7 +67,7 @@ func (t *target) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest
 
 // dialTarget starts a health service on an in-process listener and returns a
 // sender already connected to it.
-func dialTarget(t *testing.T, srvTarget *target) *Sender {
+func dialTarget(t testing.TB, srvTarget *target) *Sender {
 	t.Helper()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -698,5 +700,37 @@ func TestSend_IsSafeUnderConcurrentUse(t *testing.T) {
 
 	if len(failures) > 0 {
 		t.Errorf("%d of %d concurrent calls failed, first: %v", len(failures), callers, failures[0])
+	}
+}
+
+// --- reflection over the same connection ---------------------------------
+
+func TestConn_ServesReflection(t *testing.T) {
+	// The request body is built from the schema the target reports, over the
+	// connection the load goes through. A codec set on the connection would
+	// be forced on the reflection stream too and break it.
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(srv, &target{})
+	reflection.Register(srv)
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	sender := New(Options{
+		Target: "passthrough:///bufnet",
+		DialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+		},
+	})
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	if _, err := descriptor.NewReflectionResolver(sender.Conn()).Resolve(bounded(t), "grpc.health.v1.Health/Check"); err != nil {
+		t.Errorf("reflection over the sender's connection: %v", err)
 	}
 }
