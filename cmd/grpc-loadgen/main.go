@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -123,6 +124,8 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	flags.SetOutput(stderr)
 
 	interactive := stderr == io.Writer(os.Stderr) && cli.Interactive()
+	// The stopper writes from the signal goroutine while run writes too.
+	stderr = &lockedWriter{w: stderr}
 
 	var (
 		configPath     = flags.String("c", "", "path to the config file")
@@ -228,14 +231,15 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	}
 
 	s := cli.NewStopper(
+		// Each message goes out before its action: once the action lets run
+		// return, nothing may write to stderr any more.
 		func() {
-			eng.Stop()
 			if !interactive {
 				fmt.Fprintln(stderr, "stopping: no new requests; waiting for those in flight. Ctrl+C again to cut them off")
 			}
+			eng.Stop()
 		},
 		func() {
-			abort()
 			if !interactive {
 				fmt.Fprint(stderr, "aborting: requests in flight are cut off and counted as aborted")
 				if !terminated.Load() {
@@ -243,6 +247,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 				}
 				fmt.Fprintln(stderr)
 			}
+			abort()
 		},
 		exit,
 		time.Second,
@@ -342,4 +347,16 @@ func connect(ctx context.Context, stderr io.Writer, sender *grpcsender.Sender, a
 	default:
 		return fmt.Errorf("%w (%s)", err, mode)
 	}
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.w.Write(p)
 }
