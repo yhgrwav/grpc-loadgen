@@ -36,7 +36,7 @@ const ceiling = 30 * time.Second
 // number stops being believable. It covers scheduling on a loaded runner, not
 // a measurement error: the tool is expected to report the delay it was given
 // plus the little the generator itself costs.
-const slack = 250 * time.Millisecond
+const slack = 100 * time.Millisecond
 
 // load describes a run at a constant rate against one method.
 func load(method string, rps int, duration, timeout time.Duration) engine.Call {
@@ -395,5 +395,99 @@ func TestReport_CallsAreSpreadEvenlyOverTheRun(t *testing.T) {
 			t.Errorf("%d calls arrived in the window at %v, a tenth of the run is %d..%d",
 				got, from, least, most)
 		}
+	}
+}
+
+// --- the target stops and resumes ---------------------------------------
+
+// freeze is the stage 0a criterion: the target stops answering for a second in
+// the middle of the run and then lets every held call go. The report must show
+// about a second, not the few milliseconds each call took once released.
+const (
+	freezeFrom   = time.Second
+	freezeLength = time.Second
+	freezeDelay  = 5 * time.Millisecond
+	freezeRPS    = 100
+	freezeRun    = 3 * time.Second
+	// A call scheduled at the start of the stop waited the whole second; the
+	// top percent of three hundred calls all came in within its first 100ms.
+	freezeTop = freezeLength * 9 / 10
+)
+
+// TestReport_AStopInTheMiddleIsReportedAsItsLength keeps the path simple: every
+// call is sent on time and held by the target, so the stop is visible in the
+// target's own service time.
+func TestReport_AStopInTheMiddleIsReportedAsItsLength(t *testing.T) {
+	target := stand.Start(stand.Frozen(freezeFrom, freezeLength, freezeDelay))
+	t.Cleanup(target.Stop)
+
+	_, method := run(t, target, load(target.Method(), freezeRPS, freezeRun, 3*time.Second), 4*freezeRPS)
+	sent := checkArrivals(t, target.Arrivals(), freezeRPS, freezeRun)
+
+	checkCounts(t, method, sent)
+	checkFreeze(t, method, freezeLength)
+}
+
+// TestReport_AStopBehindTheStreamQuotaIsReportedAsItsLength is where
+// coordinated omission lives. The stand allows two streams, so during the stop
+// the first two calls occupy them and every later one waits inside the
+// generator, not at the target. Once released, each is sent and answered in
+// milliseconds. Only latency counted from the scheduled moment sees the second
+// they spent waiting to be sent; counted from the send, p90 would be ~5ms.
+func TestReport_AStopBehindTheStreamQuotaIsReportedAsItsLength(t *testing.T) {
+	const (
+		streams = 2
+		// Two thirds of the run is fast, a third is the stop, and latency in
+		// the stop falls from a second to zero: the 90th percentile is the call
+		// scheduled 300ms into it, ~700ms. An omitting tool shows ~5ms.
+		p90Floor = freezeLength / 2
+	)
+
+	target := stand.StartWith(stand.Frozen(freezeFrom, freezeLength, freezeDelay), grpc.MaxConcurrentStreams(streams))
+	t.Cleanup(target.Stop)
+
+	_, method := run(t, target, load(target.Method(), freezeRPS, freezeRun, 3*time.Second), 4*freezeRPS)
+
+	arrivals := target.Arrivals()
+	checkCounts(t, method, checkArrivals(t, arrivals, freezeRPS, freezeRun))
+
+	// Proof the path under test was taken: while the target held its two
+	// streams, nothing else reached it.
+	if got := arrivalsWithin(arrivals, freezeFrom, freezeFrom+freezeLength); got > streams {
+		t.Fatalf("%d calls reached the stand during the stop, the quota lets through %d", got, streams)
+	}
+
+	// Released calls then drain through the two streams: about a hundred of
+	// them at 5ms each over two streams adds a quarter second to the longest
+	// wait. Counting the stop twice, the nearest wrong answer above, is 2s.
+	drain := time.Duration(freezeRPS) * freezeLength / time.Second * freezeDelay / streams
+	checkFreeze(t, method, freezeLength+drain)
+
+	if !method.P90.Defined || method.P90.Value < p90Floor {
+		t.Errorf("p90 is %v, calls waiting for a stream through the stop must count it; want at least %v",
+			method.P90.Value, p90Floor)
+	}
+}
+
+// checkFreeze asserts what both stops must show: the tail is the stop, and the
+// fast two thirds of the run are untouched by it.
+func checkFreeze(t *testing.T, method engine.MethodReport, longest time.Duration) {
+	t.Helper()
+
+	if method.Failed != 0 {
+		t.Errorf("%d calls failed; the stand answered every one after the stop", method.Failed)
+	}
+	if !method.P99.Defined {
+		t.Fatal("p99 is undefined although every call was answered")
+	}
+	if method.P99.Value < freezeTop {
+		t.Errorf("p99 is %v, the stand held calls for %v; a report of milliseconds left the stop out",
+			method.P99.Value, freezeLength)
+	}
+	if method.P99.Value > longest+slack {
+		t.Errorf("p99 is %v, no call waited longer than %v", method.P99.Value, longest)
+	}
+	if method.P50.Value > freezeDelay+slack {
+		t.Errorf("p50 is %v, two thirds of the calls were answered in %v", method.P50.Value, freezeDelay)
 	}
 }

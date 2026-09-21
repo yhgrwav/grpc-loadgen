@@ -100,6 +100,22 @@ func Slowing(n int, fast, slow time.Duration) Answer {
 	}
 }
 
+// Frozen answers after delay, except that every call arriving in the window
+// [from, from+length) after the first arrival is held until the window ends:
+// the target stops in the middle of the run and then lets everything go. The
+// call that arrived first in the window waited length; a report showing the
+// delay for it has left the stop out.
+func Frozen(from, length, delay time.Duration) Answer {
+	return func(c Call) Behavior {
+		end := from + length
+		if c.Since >= from && c.Since < end {
+			return Behavior{Delay: end - c.Since + delay}
+		}
+
+		return Behavior{Delay: delay}
+	}
+}
+
 // Stand serves the gRPC health service and answers the way it was told to.
 type Stand struct {
 	grpc_health_v1.UnimplementedHealthServer
@@ -117,14 +133,19 @@ type Stand struct {
 
 // Start serves a stand on an in-process listener until Stop. A nil answer
 // means every call is answered at once.
-func Start(answer Answer) *Stand {
+func Start(answer Answer) *Stand { return StartWith(answer) }
+
+// StartWith is Start with server options, such as grpc.MaxConcurrentStreams:
+// a stream quota makes calls wait inside the generator before they are sent,
+// which is where coordinated omission hides.
+func StartWith(answer Answer, opts ...grpc.ServerOption) *Stand {
 	if answer == nil {
 		answer = Constant(0)
 	}
 
 	s := &Stand{
 		answer:  answer,
-		srv:     grpc.NewServer(),
+		srv:     grpc.NewServer(opts...),
 		lis:     bufconn.Listen(bufSize),
 		stopped: make(chan struct{}),
 	}
