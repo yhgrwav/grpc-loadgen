@@ -2,6 +2,8 @@
 
 [← Zur Übersicht](README.md)
 
+> Diese Übersetzung kann hinter dem [russischen Original](../ru/commercial.md) zurückliegen.
+
 > Diese Seite beschreibt ein **beabsichtigtes** Modell. Nichts vom kostenpflichtigen Teil
 > existiert bisher, und es gibt keinen Zeitplan. Es steht hier, damit es später niemanden
 > überrascht.

@@ -2,93 +2,126 @@
 
 [← Zur Übersicht](README.md)
 
-Womit Lastwerkzeuge lügen oder im Weg stehen — und wie es bei uns darum steht.
+> Diese Übersetzung kann hinter dem [russischen Original](../ru/pitfalls.md) zurückliegen.
 
-Die Angaben sind ehrlich: `fertig` funktioniert heute; `in Arbeit` entsteht gerade; `geplant`
-heißt, die Entscheidung steht, der Code kommt noch.
+Eine Liste der Stellen, an denen Lastwerkzeuge lügen oder im Weg stehen, und wo wir jeweils stehen.
+
+Die Status sind ehrlich: `fertig` — funktioniert; `geplant` — die Entscheidung steht, der Code
+kommt noch.
 
 | Problem | Status |
 |---|---|
-| Coordinated Omission: ein Ausfall verschwindet aus dem Bericht | in Arbeit |
-| Eine Methode pro Lauf: eine Lastmischung ist nicht ausdrückbar | in Arbeit |
-| Ein Closed Model drosselt genau dann, wenn der Dienst schwächelt | in Arbeit |
-| Der Generator stirbt vor dem Ziel an hängenden Anfragen | geplant |
-| Perzentile werden gemittelt und verlieren ihre Bedeutung | geplant |
-| Die Metrik-Erfassung bremst den Generator selbst | geplant |
-| `.proto`-Dateien und Codegen nötig | geplant |
+| Coordinated Omission: Stillstände des Dienstes verschwinden aus dem Bericht | fertig |
+| Eine Methode pro Lauf: gemischte Last lässt sich nicht ausdrücken | fertig |
+| Closed Model senkt die Last genau dann, wenn der Dienst degradiert | fertig |
+| Ein Timeout wird als Zahl erfasst und verdeckt das Ende der Verteilung | fertig |
+| Eine Verbindungsablehnung in Bruchteilen einer Millisekunde „verbessert" die Latenz | fertig |
+| Perzentile werden gemittelt und verlieren ihren Sinn | fertig |
+| Metriken bremsen den Generator selbst | fertig |
+| `.proto`-Dateien und Codegen nötig | fertig |
 | Ein Tippfehler in der Konfiguration ergibt einen leeren grünen Lauf | fertig |
-| Rate Limiting des Ziels zählt als Serverfehler | geplant |
-| Der Kaltstart verzerrt die Perzentile | in Arbeit |
-| Aufrufe lassen sich nicht über Daten verketten | Stufe 1 |
-| Während des Laufs ist unklar, was passiert | geplant |
+| Kaltstart verzerrt Perzentile | fertig |
+| Der Generator stirbt vor dem Ziel an hängenden Anfragen | fertig |
+| Der Generator stößt an seine Grenze, und der Bericht beschuldigt den Dienst | geplant |
+| Rate-Limits des Ziels zählen als Dienstfehler | geplant |
+| Aufrufe lassen sich nicht über Daten verketten | geplant |
+| Unklar, was während des Laufs passiert | fertig |
 
 ## Coordinated Omission
 
-Der teuerste Fehler im Lasttest. Ziel sind 1000 RPS, also eine Anfrage pro Millisekunde. Der
-Dienst friert eine Sekunde ein. In dieser Sekunde wären 1000 Anfragen fällig gewesen.
+Der teuerste Fehler im Lasttest. Ziel sind 1000 RPS, eine Anfrage pro Millisekunde. Der Dienst
+hängt eine Sekunde. In dieser Sekunde hätten 1000 Anfragen rausgehen müssen.
 
-Misst man ab dem tatsächlichen Absenden, gehen sie alle nach dem Auftauen raus, brauchen je 5 ms,
-und der Bericht meldet `p99 = 5ms`. Der ganze Ausfall ist verschwunden: Das Werkzeug meldet
-Bestzustand genau dann, wenn nichts in Ordnung war.
+Zählt man die Latenz ab dem tatsächlichen Senden, gehen alle nach der Erholung raus, brauchen je
+5 ms, und der Bericht zeigt `p99 = 5ms`. Der einsekündige Stillstand ist verschwunden — das
+Werkzeug meldete, alles sei bestens, genau als es das nicht war.
 
-Wir stempeln jede Anfrage bei der Planung mit ihrer Sollzeit und messen ab dieser. Eine für `t=0`
-geplante Anfrage, die um `t=1000ms` rausging und um `t=1005ms` beantwortet wurde, dauerte
-`1005ms`. Das steckt ab der ersten Zeile im Kern — einer fertigen Engine lässt sich das nicht
-nachrüsten.
+Wir geben jeder Anfrage beim Planen ihren geplanten Zeitpunkt und zählen die Latenz ab diesem. Eine
+für `t=0` geplante Anfrage ging bei `t=1000ms` raus, die Antwort kam bei `t=1005ms` — Latenz
+`1005ms`. Das ist von der ersten Zeile an im Kern angelegt: Auf eine fertige Engine lässt es sich
+nicht aufschrauben.
 
 ## Eine Methode pro Lauf
 
-Produktion besteht nicht aus einem Endpunkt. Ein Dienst, der einzeln 800 RPS Lesezugriffe und
-50 RPS Schreibzugriffe verträgt, kann an deren Summe scheitern: gemeinsamer Verbindungspool,
-Sperren, Cache-Konkurrenz. Getrennte Läufe können das nicht zeigen. Wir nehmen eine Liste von
-Methoden mit eigenen Raten — ein Lauf, ein Bericht.
+Produktion ist nicht eine Methode. Ein Dienst, der getrennt 800 RPS Lesen und 50 RPS Schreiben
+hält, kann an ihrer Summe kippen — gemeinsamer Verbindungspool, Sperren, Cache-Konkurrenz.
+Getrennte Läufe zeigen das nie. Bei uns eine Liste von Methoden mit eigener RPS — ein Lauf, ein
+Bericht.
 
-## Das Closed Model
+## Closed Model
 
-„N virtuelle Nutzer, die je auf eine Antwort warten" wirkt natürlich und hat einen eingebauten
-Fehler: Wird der Dienst langsamer, warten die Nutzer länger und die tatsächliche Last sinkt von
-selbst. Das Werkzeug hört genau dann auf zu drücken, wenn das Drücken interessant wird.
+„N virtuelle Nutzer, jeder wartet auf eine Antwort vor der nächsten Anfrage" wirkt natürlich, hat
+aber einen eingebauten Makel: Wird der Dienst langsam, warten die Nutzer länger, und die
+tatsächliche Last sinkt von selbst. Das Werkzeug hört genau dann auf zu drücken, wenn es spannend
+wird, was unter Druck passiert.
 
-Wir arbeiten mit einem Open Model: Die Zielrate ist ein Fahrplan, Anfragen gehen nach der Uhr
-raus, unabhängig davon, ob frühere beantwortet sind.
+Wir arbeiten mit einem Open Model: Die Ziel-RPS ist ein Zeitplan, Anfragen gehen nach der Uhr raus,
+ob die vorigen zurück sind oder nicht.
 
-## Den Generator umbringen
+## Timeouts und Verbindungsfehler
 
-Die Kehrseite des Open Models: Hängt das Ziel, häufen sich offene Anfragen, und der Generator
-stirbt vor dem getesteten Dienst. Das Gegenmittel ist eine explizite Obergrenze gleichzeitiger
-Anfragen. Entscheidend: Das Erreichen dieser Grenze ist ein Lauffehler und keine stille
-Lastreduktion — ein „1000 RPS"-Lauf, der klammheimlich zu „so viel wie ging" wird, ist schlimmer
-als ein fehlgeschlagener.
+Eine nach zwei Sekunden abgebrochene Anfrage sagt eines: Sie dauerte **mehr** als zwei Sekunden.
+Genau zwei zu erfassen unterschätzt das Ende; sie wegzuwerfen tut so, als hätte es sie nie
+gegeben. Wir setzen keine Zahl ein: Könnten abgebrochene Anfragen den Platz eines Perzentils
+einnehmen, druckt der Bericht eine untere Schranke, `p99 >2.0s`. Um das Ende zu sehen, den Timeout
+erhöhen.
+
+Eine abgelehnte Verbindung kommt in Bruchteilen einer Millisekunde zurück. Als Messung erfasst,
+würde sie die Latenz nach unten ziehen — der Dienst liegt, und der Bericht zeigt eine
+Beschleunigung. Solche Anfragen zählen als Fehler, bleiben aber aus den Perzentilen.
 
 ## Perzentile und Metriken
 
-Der Mittelwert zweier p99-Werte ist kein p99 — sie lassen sich nicht mitteln. Zusammenführen kann
-man nur Verteilungen, also wandert ein Histogramm über die Grenze, und die Perzentile werden
-daraus berechnet. Dieselbe Eigenschaft macht später Läufe über mehrere Maschinen möglich.
+Der Mittelwert zweier p99 ist kein p99 — sie dürfen nicht gemittelt werden. Addieren lassen sich
+nur Verteilungen, daher wird die Zusammenfassung über Methoden aus zusammengeführten Histogrammen
+berechnet, nicht aus fertigen Perzentilen. Dasselbe wird nötig, wenn mehrere Maschinen die Last
+erzeugen.
 
-Dazu kommt der Preis der Erfassung. Ein Mutex um ein gemeinsames Slice von Latenzen macht den
-Generator bei hohen Raten zu seinem eigenen Engpass: Er misst dann Sperrkonkurrenz statt den
-Dienst. Daher HDR-Histogramme und Sharded Counters.
+Dazu die Kosten der Metrikerfassung. Ein Mutex um ein gemeinsames Latenz-Slice macht den Generator
+bei hoher RPS zu seinem eigenen Engpass. Wir schreiben in HDR-Histogramme: ein Schreibvorgang
+kostet einige zehn Nanosekunden, bei 5000 RPS ein Hundertstelprozent der Zeit — gemessen, nicht
+angenommen.
 
 ## Vorbereitung und Tippfehler
 
-Kein `.proto`, kein Codegen: Die Methodenbeschreibungen kommen per Reflection vom Dienst.
+Kein `.proto`, kein Codegen: Methodenbeschreibungen kommen per Reflection vom Dienst.
 
-Die Konfiguration wird streng gelesen. `rsp: 800` statt `rps: 800` ist ein Fehler mit
-Ortsangabe, kein stiller Lauf mit Nulllast und grünem Bericht. Auch `rps: 0` ist ein Fehler: ein
-leerer erfolgreicher Lauf ist die schlimmste Lüge, weil er wie Erfolg aussieht.
+Die Konfiguration wird im strikten Modus gelesen. `rsp: 800` statt `rps: 800` ist ein Fehler mit
+Ortsangabe, kein stiller Lauf mit null Last und grünem Bericht. Auch `rps` gleich null ist ein
+Fehler: Ein leerer erfolgreicher Lauf ist die schlimmste Lüge, weil er wie Erfolg aussieht.
 
-## Fehler und Aufwärmen
+## Aufwärmen
 
-Ein `RESOURCE_EXHAUSTED` vom Rate Limiter des Ziels ist nicht dasselbe wie ein Timeout oder ein
-Absturz. Alles zu „Fehler: 12 %" zusammenzuwerfen wirft die Bedeutung weg. Der Bericht hält die
-Kategorien auseinander.
+Die ersten Sekunden eines Laufs sind immer langsam: leere Caches, Verbindungsaufbau, JIT-Aufwärmen.
+Sie verzerren die Perzentile des ganzen Laufs, daher hält `warmup` sie aus den Perzentilen heraus.
 
-Die ersten Sekunden eines Laufs sind immer langsam: leere Caches, Verbindungsaufbau, JIT-Warmlauf.
-Sie verzerren die Perzentile des gesamten Laufs, deshalb hält `warmup` sie aus dem Bericht heraus.
+## Tod des Generators
+
+Die Kehrseite des Open Model: Steht das Ziel, stauen sich hängende Anfragen, und der Generator
+stirbt vor dem getesteten Dienst. Abhilfe ist eine explizite Obergrenze gleichzeitiger Anfragen.
+Die Last an der Grenze still zu senken ist nicht erlaubt: Ein „1000 RPS"-Lauf, der still zu
+„so viel es eben ging" wurde, ist schlimmer als ein abgebrochener. Heute beendet das Erreichen der
+Grenze den Lauf mit einem Fehler. Geplant ist, den Lauf stattdessen mit Bericht und Urteil
+anzuhalten — „der Dienst hält die angeforderte RPS nicht" —, genau die Antwort, für die der Test
+lief.
+
+## Der Generator stößt an seine Grenze
+
+Schafft die Maschine die angeforderte RPS nicht, gehen Anfragen verspätet raus, die Latenz steigt
+— und der Bericht beschuldigt den Dienst, obwohl der Generator schuld ist. Die Verspätung des
+Generators messen wir bereits getrennt von der Antwortzeit des Dienstes. Geplant ist, daraus ein
+Urteil zu machen: Ein Lauf, in dem der Generator an seine Grenze stieß, wird für ungültig erklärt,
+mit Angabe, was zu ändern ist.
+
+## Fehler nach Kategorien
+
+Ein `RESOURCE_EXHAUSTED` vom Rate-Limiter des Ziels ist nicht dasselbe wie ein Timeout oder ein
+Absturz des Dienstes. Alles in „Fehler: 12%" zu werfen, verliert den Sinn. Der Kern unterscheidet
+die Kategorien; im Bericht ist die Aufschlüsselung noch nicht ausgegeben — heute steht dort die
+Gesamtzahl der Fehler.
 
 ## Sichtbarkeit
 
-Ein Lauf darf keine zehnminütige Blackbox sein. Während der Arbeit sind aktuelle Rate, Anzahl
-offener Anfragen, Fehleranteil und aktueller p99 sichtbar — genug, um einen sinnlosen Lauf in der
+Ein Lauf darf keine zehnminütige Blackbox sein. Während er läuft, sieht man aktuelle RPS, laufende
+Anfragen, Fehleranteil und Perzentile — genug, um einen offensichtlich sinnlosen Lauf in der
 zweiten Minute abzubrechen statt in der zehnten.

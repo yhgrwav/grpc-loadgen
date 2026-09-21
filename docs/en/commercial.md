@@ -2,6 +2,8 @@
 
 [← Back to docs](README.md)
 
+> This translation may lag behind the [Russian original](../ru/commercial.md).
+
 > This page describes an **intended** model. None of the paid part exists yet and there is no
 > timeline. It is written down so that it does not come as a surprise later.
 
