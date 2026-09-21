@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"time"
@@ -31,14 +32,23 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc-loadgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+// run is the whole command. The live view is used only when stderr is the
+// process terminal, so tests passing their own writers always get plain output.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("grpc-loadgen", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+
+	interactive := stderr == io.Writer(os.Stderr) && cli.Interactive()
 
 	var (
 		configPath  = flags.String("c", "", "path to the config file")
@@ -78,7 +88,7 @@ func run(args []string) error {
 	}
 
 	if !settings.Configured() {
-		if cli.Interactive() {
+		if interactive {
 			if err := cli.RunSetup(settings); err != nil {
 				return err
 			}
@@ -88,9 +98,6 @@ func run(args []string) error {
 			settings.Palette = cli.Palettes()[0].Name
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -105,16 +112,16 @@ func run(args []string) error {
 		return runErr
 	}
 
-	if cli.Interactive() {
+	if interactive {
 		program := cli.NewProgram(target, eng, cfg.Load.Warmup, settings, start, cancel)
 		if _, err := program.Run(); err != nil {
 			return err
 		}
-	} else if err := cli.RunPlain(os.Stderr, target, eng, start); err != nil && !errors.Is(err, context.Canceled) {
+	} else if err := cli.RunPlain(stderr, target, eng, start); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
 
-	cli.PrintReport(os.Stdout, target, eng.Report())
+	cli.PrintReport(stdout, target, eng.Report())
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr

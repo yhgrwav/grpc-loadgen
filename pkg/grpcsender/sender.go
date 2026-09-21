@@ -224,7 +224,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	payload := req.Payload
 	body, target := responseTarget(req.KeepResponse)
 
-	err := conn.Invoke(callCtx, req.Method, &payload, target)
+	err := conn.Invoke(callCtx, s.path(req.Method), &payload, target)
 
 	// The run was stopped: not a broken sender, but nothing was measured either.
 	// gRPC does not wrap ctx.Err(), so the wrapping happens here — without it the
@@ -246,6 +246,11 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	}
 
 	return outcome, nil
+}
+
+// path turns the method a request names into the path gRPC sends.
+func (s *Sender) path(method string) string {
+	return method
 }
 
 // responseTarget picks what the codec decodes into: a byte slice when the run
