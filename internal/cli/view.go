@@ -26,28 +26,46 @@ import (
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 )
 
-// NewProgram builds the full-screen view of a run.
-func NewProgram(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, run func() error, cancel func()) *tea.Program {
+// NewProgram builds the full-screen view of a run. RunLive drives it together
+// with the run.
+func NewProgram(target string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *tea.Program {
 	m := newModel(target, eng, warmup, settings, cancel)
 
-	program := tea.NewProgram(m,
+	return tea.NewProgram(m,
 		tea.WithAltScreen(),
 		tea.WithOutput(os.Stderr),
 	)
-
-	go func() {
-		program.Send(doneMsg{err: run()})
-	}()
-
-	return program
 }
 
 func (m *model) View() string {
-	width := m.width
-	if width < 40 {
-		width = 72
+	width := m.viewWidth()
+
+	frame := m.styles.frame.Width(width - 4)
+	if m.height > 6 {
+		frame = frame.Height(m.height - 4)
 	}
-	inner := width - 6
+
+	return frame.Render(m.body(width))
+}
+
+func (m *model) viewWidth() int {
+	if m.width < 40 {
+		return 72
+	}
+
+	return m.width
+}
+
+// contentWidth is what the frame leaves for the body on a terminal this wide:
+// the border takes one column a side and the padding two.
+func contentWidth(width int) int {
+	return width - 4 - 4
+}
+
+// body is everything inside the frame. The frame wraps whatever is wider than
+// its content width, so a line laid out too wide breaks in the middle.
+func (m *model) body(width int) string {
+	inner := contentWidth(width)
 
 	var b strings.Builder
 
@@ -64,7 +82,7 @@ func (m *model) View() string {
 	case m.active == 0:
 		b.WriteString(m.summary(inner))
 	case m.active == m.settingsTab():
-		b.WriteString(m.settingsView())
+		b.WriteString(m.settingsView(inner))
 	default:
 		b.WriteString(m.method(inner, m.active-1))
 	}
@@ -72,12 +90,7 @@ func (m *model) View() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.footer())
 
-	frame := m.styles.frame.Width(width - 4)
-	if m.height > 6 {
-		frame = frame.Height(m.height - 4)
-	}
-
-	return frame.Render(b.String())
+	return b.String()
 }
 
 func (m *model) header(width int) string {
@@ -92,23 +105,42 @@ func (m *model) header(width int) string {
 		glyph = "●"
 	}
 
-	left := m.styles.shimmer(glyph+" grpc-loadgen", m.frame) +
-		m.styles.faint.Render("  ·  ") +
-		m.styles.muted.Render(m.text.Target()+" ") +
-		m.styles.value.Render(m.target)
-
-	right := m.styles.muted.Render(status)
-
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	target := m.target
+	if target == FakeTarget {
+		target = m.text.FakeTarget()
 	}
 
-	s := m.snapshot
+	// One line, read left to right: what, doing what, against what. A status
+	// pushed to the right edge read as a stray word and wrapped.
+	sep := m.styles.faint.Render("  ·  ")
+	lead := m.styles.shimmer(glyph+" grpc-loadgen", m.frame) + sep +
+		m.styles.value.Render(status) + sep +
+		m.styles.muted.Render(m.text.Target()+" ")
+	target = truncate(target, width-lipgloss.Width(lead))
 
-	return left + m.styles.pad(gap) + right + "\n" +
-		progress(m.styles, s.Elapsed, s.Total, width) + m.styles.pad(1) +
-		m.styles.muted.Render(formatDuration(s.Elapsed)+" / "+formatDuration(s.Total))
+	s := m.snapshot
+	clock := formatDuration(s.Elapsed) + " / " + formatDuration(s.Total)
+
+	return lead + m.styles.value.Render(target) + "\n" +
+		progress(m.styles, s.Elapsed, s.Total, width-lipgloss.Width(clock)-1) + m.styles.pad(1) +
+		m.styles.muted.Render(clock)
+}
+
+// truncate shortens s to width columns, marking the cut with an ellipsis.
+func truncate(s string, width int) string {
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width < 1 {
+		return ""
+	}
+
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+		runes = runes[:len(runes)-1]
+	}
+
+	return string(runes) + "…"
 }
 
 func (m *model) tabBar(width int) string {
@@ -169,7 +201,7 @@ func (m *model) summary(width int) string {
 
 func (m *model) method(width, index int) string {
 	if index >= len(m.snapshot.Methods) {
-		return m.styles.faint.Render("…")
+		return m.styles.muted.Render("…")
 	}
 
 	method := m.snapshot.Methods[index]
@@ -210,40 +242,59 @@ func (m *model) method(width, index int) string {
 	return b.String()
 }
 
+// latencyChart is three sparkline rows, p50 to p99, on one shared scale: the
+// height of a cell means the same value in every row, so the gap between p50
+// and p99 is visible at a glance. The scale is written once, above the rows.
 func (m *model) latencyChart(points []point) string {
-	const height = 7
+	series := latencySeriesOf(points)
+	low, high, ok := latencyScale(series)
+	width := m.sparkCells()
 
-	rows := chart(m.styles, points, sparkWidth, height)
-	scale := chartScale(m.styles, points, height)
+	scale := "-"
+	if ok {
+		scale = formatDuration(millis(low)) + " – " + formatDuration(millis(high))
+	}
 
 	var b strings.Builder
 
 	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-10s", m.text.Latency())))
-	b.WriteString(m.styles.faint.Render("p50 ") + m.styles.spark.Render("●") +
-		m.styles.faint.Render("   p90/p99 ·"))
-	b.WriteString("\n")
+	b.WriteString(m.styles.muted.Render(scale))
 
-	for i, row := range rows {
-		b.WriteString(scale[i] + m.styles.pad(2) + row)
-
-		if i < len(rows)-1 {
-			b.WriteString("\n")
-		}
+	for _, s := range series {
+		b.WriteString("\n")
+		b.WriteString(m.styles.label.Render(fmt.Sprintf("  %-8s", s.label)))
+		b.WriteString(latencyCells(m.styles, s.values, s.bounds, low, high, width))
+		b.WriteString(m.styles.pad(2))
+		b.WriteString(m.styles.value.Render(latencyValue(s.values, s.bounds)))
 	}
 
 	return b.String()
 }
 
+// Columns a spark row keeps beside its cells: the label and the value after.
+const (
+	sparkLabelWidth = 10
+	sparkValueWidth = 18
+)
+
+// sparkCells is how many cells a spark row gets: as many as fit beside its
+// label and value, up to sparkWidth, and never so few the line means nothing.
+func (m *model) sparkCells() int {
+	room := contentWidth(m.viewWidth()) - sparkLabelWidth - 2 - sparkValueWidth
+
+	return min(max(room, 8), sparkWidth)
+}
+
 func (m *model) sparkRow(label string, values []float64, unit string, format func(float64) string) string {
 	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
-		sparkline(m.styles, values, sparkWidth) +
+		sparkline(m.styles, values, m.sparkCells()) +
 		m.styles.pad(2) +
 		sparkRange(m.styles, values, unit, format)
 }
 
 func (m *model) gaugeRow(label string, value, limit float64, text string) string {
 	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
-		gauge(m.styles, value, limit, gaugeWidth) + m.styles.pad(2) +
+		gauge(m.styles, value, limit, min(gaugeWidth, m.sparkCells())) + m.styles.pad(2) +
 		m.styles.value.Render(text)
 }
 
@@ -254,7 +305,6 @@ func (m *model) help() string {
 		{"esc", m.text.HelpEscape()},
 		{"?", m.text.HelpHelp()},
 		{"q", m.text.HelpQuit()},
-		{"q q", m.text.HelpQuitAgain()},
 	}
 
 	var b strings.Builder
@@ -272,6 +322,13 @@ func (m *model) help() string {
 }
 
 func (m *model) footer() string {
+	if stage := m.hintStage(); stage >= 0 {
+		// Fades by stepping down the text colours: a terminal has no opacity.
+		fade := []lipgloss.Style{m.styles.value, m.styles.muted, m.styles.faint}
+
+		return fade[stage].Render(m.text.UnknownKey(m.hintKey))
+	}
+
 	if m.done {
 		return keyHint(m.styles, m.text.HintTabs(), m.text.PressToExit())
 	}
@@ -282,10 +339,10 @@ func (m *model) footer() string {
 
 	if m.active == m.settingsTab() {
 		if !m.editing {
-			return m.styles.faint.Render(m.text.SettingsLocked())
+			return m.styles.muted.Render(m.text.SettingsLocked())
 		}
 
-		return m.styles.faint.Render(m.text.SettingsHint())
+		return m.styles.muted.Render(m.text.SettingsHint())
 	}
 
 	if m.showHelp {
@@ -295,7 +352,7 @@ func (m *model) footer() string {
 	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
 }
 
-func (m *model) settingsView() string {
+func (m *model) settingsView(width int) string {
 	rows := []struct {
 		label   string
 		options []string
@@ -313,16 +370,60 @@ func (m *model) settingsView() string {
 			marker = " ▸ "
 		}
 
-		b.WriteString(m.styles.pickOn.Render(marker))
-		b.WriteString(m.styles.label.Render(fmt.Sprintf("%-12s", row.label)))
-		b.WriteString(strings.Join(row.options, m.styles.faint.Render("  ")))
+		lead := m.styles.pickOn.Render(marker) + m.styles.label.Render(fmt.Sprintf("%-12s", row.label))
+		b.WriteString(lead)
+		b.WriteString(m.flow(row.options, lipgloss.Width(lead), width))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(m.styles.faint.Render(m.settings.Path()))
+	b.WriteString(m.styles.muted.Render(truncateLeft(m.settings.Path(), width)))
 
 	return b.String()
+}
+
+// flow lays options out after a lead of indent columns, starting a new line,
+// indented the same, where the next option would not fit in width.
+func (m *model) flow(options []string, indent, width int) string {
+	var b strings.Builder
+
+	used := indent
+
+	for i, option := range options {
+		w := lipgloss.Width(option)
+
+		if i > 0 {
+			if used+2+w > width {
+				b.WriteString("\n" + m.styles.pad(indent))
+				used = indent
+			} else {
+				b.WriteString(m.styles.pad(2))
+				used += 2
+			}
+		}
+
+		b.WriteString(option)
+		used += w
+	}
+
+	return b.String()
+}
+
+// truncateLeft keeps the end of s, where a path keeps its file name.
+func truncateLeft(s string, width int) string {
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width < 1 {
+		return ""
+	}
+
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+		runes = runes[1:]
+	}
+
+	return "…" + string(runes)
 }
 
 func (m *model) option(text string, selected bool) string {
@@ -399,23 +500,46 @@ func (m *model) finalReport(width int) string {
 	))
 	b.WriteString("\n" + "\n")
 
-	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-32s %8s %8s %9s %9s %9s",
-		m.text.ColumnMethod(), m.text.Sent(), m.text.Errors(), "p50", "p90", "p99")))
+	// Sent, errors and p99 always fit; p50 and p90 go first when the terminal
+	// is narrow, and the method name takes whatever is left.
+	const (
+		coreColumns = 1 + 9 + 1 + 8 + 1 + 9
+		midColumns  = 1 + 9 + 1 + 9
+		minName     = 12
+	)
+
+	wide := width-coreColumns-midColumns >= minName
+
+	nameWidth := width - coreColumns
+	if wide {
+		nameWidth -= midColumns
+	}
+	nameWidth = min(max(nameWidth, minName), 40)
+
+	header := fmt.Sprintf("%-*s %9s %8s", nameWidth, m.text.ColumnMethod(), m.text.Sent(), m.text.Errors())
+	if wide {
+		header += fmt.Sprintf(" %9s %9s", "p50", "p90")
+	}
+	header += fmt.Sprintf(" %9s", "p99")
+
+	b.WriteString(m.styles.label.Render(header))
 	b.WriteString("\n")
 
 	for i := range report.Methods {
 		method := &report.Methods[i]
-		name := shortMethod(method.Method)
+		name := truncate(shortMethod(method.Method), nameWidth)
 
 		errors := m.styles.value
 		if method.Failed > 0 {
 			errors = m.styles.bad
 		}
 
-		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-32s", name)))
-		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %8s", formatCount(method.Sent))))
+		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-*s", nameWidth, name)))
+		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatCount(method.Sent))))
 		b.WriteString(errors.Render(fmt.Sprintf(" %8s", m.errorShare(method.Sent, method.Failed))))
-		b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatQuantile(method.P50), formatQuantile(method.P90))))
+		if wide {
+			b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatQuantile(method.P50), formatQuantile(method.P90))))
+		}
 		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatQuantile(method.P99))))
 		b.WriteString("\n")
 	}
@@ -469,4 +593,38 @@ func (m *model) totalTarget() float64 {
 	}
 
 	return total
+}
+
+// FakeTarget is the target name the CLI passes when -fake is on.
+const FakeTarget = "fake target"
+
+// LiveView is the part of a tea program RunLive drives.
+type LiveView interface {
+	Run() (tea.Model, error)
+	Send(msg tea.Msg)
+}
+
+// RunLive runs the view and the load side by side and returns the run's error.
+// It returns only after the run has: the view can close first, on q, and a
+// report built while requests are still being recorded would be a snapshot of
+// a moving engine.
+func RunLive(view LiveView, run func() error, cancel func()) error {
+	finished := make(chan error, 1)
+
+	go func() {
+		err := run()
+		finished <- err
+		view.Send(doneMsg{err: err})
+	}()
+
+	_, viewErr := view.Run()
+
+	cancel()
+	runErr := <-finished
+
+	if viewErr != nil {
+		return viewErr
+	}
+
+	return runErr
 }

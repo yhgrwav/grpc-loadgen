@@ -103,14 +103,13 @@ func TestEveryLanguageTranslatesTheBasics(t *testing.T) {
 		text := NewText(option.Lang)
 
 		for name, got := range map[string]string{
-			"summary":   text.Summary(),
-			"running":   text.Running(),
-			"sent":      text.Sent(),
-			"errors":    text.Errors(),
-			"inflight":  text.InFlight(),
-			"helptabs":  text.HelpTabs(),
-			"helpquit":  text.HelpQuit(),
-			"quitagain": text.HelpQuitAgain(),
+			"summary":  text.Summary(),
+			"running":  text.Running(),
+			"sent":     text.Sent(),
+			"errors":   text.Errors(),
+			"inflight": text.InFlight(),
+			"helptabs": text.HelpTabs(),
+			"helpquit": text.HelpQuit(),
 		} {
 			if got == "" {
 				t.Errorf("%s is empty in %s", name, option.Lang)
@@ -229,51 +228,6 @@ func TestSparklineUsesTheValueRange(t *testing.T) {
 	rising := []float64{10, 20, 30, 40, 50}
 	if got := lipglossWidth(sparkline(s, rising, 20)); got != 20 {
 		t.Errorf("sparkline width = %d, want 20", got)
-	}
-}
-
-func TestChartPlotsMedianAndSpread(t *testing.T) {
-	s := newStyles(ThemeFor("mono", ModeDark))
-
-	points := []point{
-		{p50: 10, p90: 20, p99: 30},
-		{p50: 12, p90: 25, p99: 60},
-		{p50: 11, p90: 22, p99: 45},
-	}
-
-	rows := chart(s, points, 12, 7)
-
-	if len(rows) != 7 {
-		t.Fatalf("rows = %d, want 7", len(rows))
-	}
-
-	joined := strings.Join(rows, "")
-	if !strings.Contains(joined, "●") {
-		t.Error("the chart does not plot the median")
-	}
-	if !strings.Contains(joined, "·") {
-		t.Error("the chart does not plot the spread")
-	}
-
-	for i, row := range rows {
-		if got := lipglossWidth(row); got != 12 {
-			t.Errorf("row %d width = %d, want 12", i, got)
-		}
-	}
-}
-
-func TestChartOfNothingIsBlank(t *testing.T) {
-	s := newStyles(ThemeFor("mono", ModeDark))
-
-	rows := chart(s, nil, 10, 5)
-
-	if len(rows) != 5 {
-		t.Fatalf("rows = %d, want 5", len(rows))
-	}
-	for _, row := range rows {
-		if got := lipglossWidth(row); got != 10 {
-			t.Errorf("row width = %d, want 10", got)
-		}
 	}
 }
 
@@ -473,22 +427,6 @@ func TestQuitKeysStillLeaveTheReport(t *testing.T) {
 	}
 }
 
-func TestSecondQuitLeavesWhileStopping(t *testing.T) {
-	m := testModel(t)
-
-	if _, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("q")})); cmd != nil {
-		t.Fatal("first q quit outright, want a graceful stop")
-	}
-
-	if !m.stopping {
-		t.Fatal("first q did not start the stop")
-	}
-
-	if _, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("q")})); cmd == nil {
-		t.Fatal("second q did nothing while stopping")
-	}
-}
-
 func TestSetupQuitKeys(t *testing.T) {
 	keys := map[string]tea.Key{
 		"q":      {Type: tea.KeyRunes, Runes: []rune("q")},
@@ -511,14 +449,30 @@ func TestSetupQuitKeys(t *testing.T) {
 	}
 }
 
-func TestHelpListsTabAndSecondQuit(t *testing.T) {
+func TestHelpListsTabAndQuit(t *testing.T) {
 	m := testModel(t)
 	help := m.help()
 
-	for _, want := range []string{"tab", m.text.HelpQuitAgain()} {
+	for _, want := range []string{"tab", m.text.HelpQuit()} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help does not mention %q", want)
 		}
+	}
+}
+
+func TestHelpOffersNoSecondQuit(t *testing.T) {
+	// One q leaves now; a line about pressing it again describes a stop that
+	// no longer exists.
+	m := testModel(t)
+	if strings.Contains(m.help(), "q q") {
+		t.Error("help still tells to press q again")
+	}
+}
+
+func TestFooterSaysQLeaves(t *testing.T) {
+	m := testModel(t)
+	if footer := m.footer(); !strings.Contains(footer, "q quit") {
+		t.Errorf("footer = %q, want q described as quitting, not stopping", footer)
 	}
 }
 

@@ -57,64 +57,64 @@ func Palettes() []Palette {
 		{
 			Name: "aurora",
 			Dark: Theme{
-				Bg: darkBg, Accent: "81", Text: "252", Muted: "245", Faint: "240",
+				Bg: darkBg, Accent: "81", Text: "252", Muted: "247", Faint: "240",
 				Good: "114", Warn: "179", Bad: "203", Border: "238",
 				Shimmer: shades("39", "45", "51", "87", "123"),
 			},
 			Light: Theme{
-				Bg: lightBg, Accent: "31", Text: "236", Muted: "241", Faint: "247",
-				Good: "28", Warn: "130", Bad: "160", Border: "251",
+				Bg: lightBg, Accent: "25", Text: "236", Muted: "241", Faint: "247",
+				Good: "22", Warn: "94", Bad: "124", Border: "251",
 				Shimmer: shades("25", "31", "38", "44", "37"),
 			},
 		},
 		{
 			Name: "ember",
 			Dark: Theme{
-				Bg: darkBg, Accent: "209", Text: "252", Muted: "245", Faint: "240",
+				Bg: darkBg, Accent: "209", Text: "252", Muted: "247", Faint: "240",
 				Good: "150", Warn: "215", Bad: "203", Border: "238",
 				Shimmer: shades("166", "173", "180", "215", "222"),
 			},
 			Light: Theme{
-				Bg: lightBg, Accent: "166", Text: "236", Muted: "241", Faint: "247",
-				Good: "28", Warn: "130", Bad: "124", Border: "251",
+				Bg: lightBg, Accent: "94", Text: "236", Muted: "241", Faint: "247",
+				Good: "22", Warn: "58", Bad: "124", Border: "251",
 				Shimmer: shades("130", "166", "172", "208", "214"),
 			},
 		},
 		{
 			Name: "forest",
 			Dark: Theme{
-				Bg: darkBg, Accent: "114", Text: "252", Muted: "245", Faint: "240",
+				Bg: darkBg, Accent: "114", Text: "252", Muted: "247", Faint: "240",
 				Good: "119", Warn: "179", Bad: "203", Border: "238",
 				Shimmer: shades("22", "28", "35", "71", "114"),
 			},
 			Light: Theme{
-				Bg: lightBg, Accent: "28", Text: "236", Muted: "241", Faint: "247",
-				Good: "22", Warn: "130", Bad: "124", Border: "251",
+				Bg: lightBg, Accent: "22", Text: "236", Muted: "241", Faint: "247",
+				Good: "22", Warn: "94", Bad: "124", Border: "251",
 				Shimmer: shades("22", "28", "34", "64", "70"),
 			},
 		},
 		{
 			Name: "violet",
 			Dark: Theme{
-				Bg: darkBg, Accent: "141", Text: "252", Muted: "245", Faint: "240",
+				Bg: darkBg, Accent: "141", Text: "252", Muted: "247", Faint: "240",
 				Good: "114", Warn: "179", Bad: "204", Border: "238",
 				Shimmer: shades("55", "92", "98", "141", "183"),
 			},
 			Light: Theme{
 				Bg: lightBg, Accent: "91", Text: "236", Muted: "241", Faint: "247",
-				Good: "28", Warn: "130", Bad: "161", Border: "251",
+				Good: "22", Warn: "94", Bad: "125", Border: "251",
 				Shimmer: shades("54", "91", "97", "104", "134"),
 			},
 		},
 		{
 			Name: "mono",
 			Dark: Theme{
-				Bg: darkBg, Accent: "255", Text: "252", Muted: "245", Faint: "239",
+				Bg: darkBg, Accent: "255", Text: "252", Muted: "247", Faint: "239",
 				Good: "252", Warn: "248", Bad: "231", Border: "237",
 				Shimmer: shades("240", "244", "248", "252", "255"),
 			},
 			Light: Theme{
-				Bg: lightBg, Accent: "235", Text: "236", Muted: "242", Faint: "250",
+				Bg: lightBg, Accent: "235", Text: "236", Muted: "240", Faint: "250",
 				Good: "238", Warn: "240", Bad: "232", Border: "252",
 				Shimmer: shades("250", "246", "242", "238", "235"),
 			},
