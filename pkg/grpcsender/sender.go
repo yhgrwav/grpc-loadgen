@@ -147,13 +147,13 @@ const probeMethod = "/grpc.loadgen.v0.Probe/DoesNotExist"
 // a call that does not wait for readiness fails at once with that error's text.
 func transportCause(ctx context.Context, conn *grpc.ClientConn) error {
 	empty := []byte{}
+	probe := &callStats{}
 
-	err := conn.Invoke(ctx, probeMethod, &empty, &discarded{})
-	if status.Code(err) == codes.Unimplemented || conn.GetState() == connectivity.Ready {
-		// The connection came up between the failure and the probe.
-		return nil
-	}
-	if err == nil {
+	err := conn.Invoke(context.WithValue(ctx, callKey{}, probe), probeMethod, &empty, &discarded{})
+	if err == nil || probe.answered {
+		// The connection came up between the failure and the probe. Any status
+		// from the target proves it, not only Unimplemented: a service that
+		// checks credentials before routing says Unauthenticated instead.
 		return nil
 	}
 	if ctx.Err() != nil {

@@ -212,6 +212,40 @@ func TestTransportCause_ProbeThatReachesATargetHasNoEffect(t *testing.T) {
 	}
 }
 
+func TestTransportCause_AnyServedStatusMeansTheConnectionWorks(t *testing.T) {
+	// Many services check credentials before routing, so an unknown method
+	// comes back as whatever the interceptor says, not Unimplemented. A status
+	// from the target proves the connection works whatever the code.
+	for _, code := range []codes.Code{codes.Unauthenticated, codes.PermissionDenied, codes.Unavailable} {
+		t.Run(code.String(), func(t *testing.T) {
+			lis := bufconn.Listen(1024 * 1024)
+			srv := grpc.NewServer(grpc.UnknownServiceHandler(func(any, grpc.ServerStream) error {
+				return status.Error(code, "rejected before routing")
+			}))
+
+			go func() { _ = srv.Serve(lis) }()
+			t.Cleanup(srv.Stop)
+
+			sender := New(Options{
+				Target: "passthrough:///bufnet",
+				DialOptions: []grpc.DialOption{
+					grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+						return lis.DialContext(ctx)
+					}),
+				},
+			})
+			if err := sender.Connect(bounded(t)); err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			t.Cleanup(func() { _ = sender.Close() })
+
+			if cause := transportCause(bounded(t), sender.conn); cause != nil {
+				t.Errorf("cause = %v, want nil: the target answered %s", cause, code)
+			}
+		})
+	}
+}
+
 func TestConnect_CallerDeadlineBoundsASilentTarget(t *testing.T) {
 	// Accepts TCP and never speaks: the handshake neither completes nor fails,
 	// so only the caller's deadline can end the wait.
