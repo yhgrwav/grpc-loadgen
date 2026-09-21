@@ -239,10 +239,13 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 		return engine.Outcome{}, fmt.Errorf("call aborted with %s: %w", status.Code(err), ctx.Err())
 	}
 
+	category := categorize(err, call.answered)
+	sentAt, doneAt := timestamps(call, category)
+
 	outcome := engine.Outcome{
-		SentAt:   call.sentAt,
-		DoneAt:   call.doneAt,
-		Category: categorize(err, call.answered),
+		SentAt:   sentAt,
+		DoneAt:   doneAt,
+		Category: category,
 		Code:     status.Code(err).String(),
 		Err:      err,
 	}
@@ -272,4 +275,27 @@ func (s *Sender) Conn() grpc.ClientConnInterface {
 	defer s.mu.RUnlock()
 
 	return s.conn
+}
+
+// timestamps picks the outcome's SentAt and DoneAt. A timeout whose body never
+// went out gets a SentAt anyway: left zero, the pool would fall back to the
+// moment Send was called and book the whole wait as the target's service time.
+// Without headers the stream was never opened and the deadline expired waiting
+// for stream quota, so nothing counts as service; with headers the target saw
+// the stream and the rest is its own doing, such as a closed flow-control
+// window.
+func timestamps(call *callStats, category engine.Category) (sentAt, doneAt time.Time) {
+	sentAt, doneAt = call.sentAt, call.doneAt
+	if category != engine.CategoryTimeout || !sentAt.IsZero() {
+		return sentAt, doneAt
+	}
+
+	if doneAt.IsZero() {
+		doneAt = time.Now()
+	}
+	if !call.headerAt.IsZero() {
+		return call.headerAt, doneAt
+	}
+
+	return doneAt, doneAt
 }
