@@ -29,6 +29,7 @@ import (
 
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
 	"github.com/yhgrwav/grpc-loadgen/pkg/grpcsender"
 )
@@ -96,13 +97,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		sender = grpcSender
 	}
 
-	eng, err := engine.New(engine.Options{
+	opts := engine.Options{
 		Calls:       cli.CallsFromConfig(cfg),
 		Sender:      sender,
 		MaxInFlight: *maxInFlight,
 		Warmup:      cfg.Load.Warmup,
-	})
-	if err != nil {
+	}
+
+	// A config error does not wait for the network: checked before connecting.
+	if err = engine.CheckOptions(opts); err != nil {
 		return withBudgetAdvice(err)
 	}
 
@@ -112,6 +115,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if connErr := connect(ctx, stderr, grpcSender, &cfg.App, *connectTimeout); connErr != nil {
 			return connErr
 		}
+
+		// Bodies need the schema, and the schema needs the connection.
+		dataCtx, cancelData := context.WithTimeout(ctx, *connectTimeout)
+		dataErr := cli.AttachData(dataCtx, descriptor.NewReflectionResolver(grpcSender.Conn()), cfg, opts.Calls)
+		cancelData()
+
+		if dataErr != nil {
+			return dataErr
+		}
+	}
+
+	eng, err := engine.New(opts)
+	if err != nil {
+		return err
 	}
 
 	settings, err := cli.LoadSettings()

@@ -30,9 +30,12 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	channelzpb "google.golang.org/grpc/channelz/grpc_channelz_v1"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	testgrpc "google.golang.org/grpc/interop/grpc_testing"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
@@ -93,10 +96,53 @@ func (c *connEnds) HandleConn(_ context.Context, s stats.ConnStats) {
 	}
 }
 
+// recorder keeps the last request of the interop test service and of channelz:
+// between them they carry a nested message, bytes, an enum, a JSON-named field
+// and an int64, with no code generated here.
+type recorder struct {
+	testgrpc.UnimplementedTestServiceServer
+	channelzpb.UnimplementedChannelzServer
+
+	mu     sync.Mutex
+	simple *testgrpc.SimpleRequest
+	socket *channelzpb.GetSocketRequest
+}
+
+func (r *recorder) UnaryCall(_ context.Context, req *testgrpc.SimpleRequest) (*testgrpc.SimpleResponse, error) {
+	r.mu.Lock()
+	r.simple = proto.Clone(req).(*testgrpc.SimpleRequest)
+	r.mu.Unlock()
+
+	return &testgrpc.SimpleResponse{}, nil
+}
+
+func (r *recorder) GetSocket(_ context.Context, req *channelzpb.GetSocketRequest) (*channelzpb.GetSocketResponse, error) {
+	r.mu.Lock()
+	r.socket = proto.Clone(req).(*channelzpb.GetSocketRequest)
+	r.mu.Unlock()
+
+	return &channelzpb.GetSocketResponse{}, nil
+}
+
+func (r *recorder) lastSimple() *testgrpc.SimpleRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.simple
+}
+
+func (r *recorder) lastSocket() *channelzpb.GetSocketRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.socket
+}
+
 type liveTarget struct {
-	addr   string
-	health *health
-	ended  <-chan struct{}
+	addr     string
+	health   *health
+	recorder *recorder
+	ended    <-chan struct{}
 }
 
 // startTarget runs a plaintext health service on a real TCP port, because the
@@ -134,6 +180,11 @@ func startServer(t *testing.T, delay time.Duration, withReflection bool) liveTar
 	ends := &connEnds{done: make(chan struct{})}
 	srv := grpc.NewServer(grpc.StatsHandler(ends))
 	grpc_health_v1.RegisterHealthServer(srv, h)
+
+	rec := &recorder{}
+	testgrpc.RegisterTestServiceServer(srv, rec)
+	channelzpb.RegisterChannelzServer(srv, rec)
+
 	if withReflection {
 		reflection.Register(srv)
 	}
@@ -141,7 +192,7 @@ func startServer(t *testing.T, delay time.Duration, withReflection bool) liveTar
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 
-	return liveTarget{addr: lis.Addr().String(), health: h, ended: ends.done}
+	return liveTarget{addr: lis.Addr().String(), health: h, recorder: rec, ended: ends.done}
 }
 
 // silentTarget accepts TCP and never speaks.
@@ -591,7 +642,7 @@ func TestRun_UnknownDataFieldFailsBeforeTheRun(t *testing.T) {
 
 func TestRun_WrongDataTypeFailsBeforeTheRun(t *testing.T) {
 	target := startReflectingTarget(t)
-	cfg := dataConfig(t, target.addr, checkCall("      data:\n        service: [1, 2]\n"))
+	cfg := dataConfig(t, target.addr, checkCall("      data:\n        service: 5\n"))
 
 	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
 	if !errors.Is(res.err, cli.ErrRequestData) || !strings.Contains(res.err.Error(), "service") {
@@ -615,6 +666,9 @@ func TestRun_DataWithoutReflectionSaysSo(t *testing.T) {
 			t.Errorf("error %q does not name %q", res.err, want)
 		}
 	}
+	if n := target.health.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls, want none before a config error", n)
+	}
 }
 
 func TestRun_DataForAMissingMethodFailsBeforeTheRun(t *testing.T) {
@@ -625,20 +679,103 @@ func TestRun_DataForAMissingMethodFailsBeforeTheRun(t *testing.T) {
 	if !errors.Is(res.err, descriptor.ErrMethodNotFound) || !strings.Contains(res.err.Error(), missingMethod) {
 		t.Errorf("err = %v, want descriptor.ErrMethodNotFound naming %s", res.err, missingMethod)
 	}
+	if n := target.health.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls, want none before a config error", n)
+	}
 }
 
 func TestRun_EveryDataErrorAtOnce(t *testing.T) {
 	target := startReflectingTarget(t)
 	calls := checkCall("      data:\n        first_bad: 1\n") +
-		"    - method: grpc.health.v1.Health/Watch\n      rps: 5\n      duration: 300ms\n      data:\n        second_bad: 1\n"
+		callWithData(unaryCallMethod, "        second_bad: 1\n")
 
 	res := runCLI(t.Context(), t, 10*time.Second, "-c", dataConfig(t, target.addr, calls))
 	if !errors.Is(res.err, cli.ErrRequestData) {
 		t.Fatalf("err = %v, want cli.ErrRequestData", res.err)
 	}
-	for _, want := range []string{"first_bad", "grpc.health.v1.Health/Watch"} {
+	for _, want := range []string{checkMethod, "first_bad", unaryCallMethod, "second_bad"} {
 		if !strings.Contains(res.err.Error(), want) {
 			t.Errorf("error %q misses %q: every problem should be reported at once", res.err, want)
 		}
+	}
+}
+
+// --- values that must arrive unchanged ------------------------------------
+
+const (
+	unaryCallMethod = "grpc.testing.TestService/UnaryCall"
+	getSocketMethod = "grpc.channelz.v1.Channelz/GetSocket"
+)
+
+func callWithData(method, data string) string {
+	return "    - method: " + method + "\n      rps: 20\n      duration: 200ms\n      data:\n" + data
+}
+
+func runData(t *testing.T, target liveTarget, method, data string) result {
+	t.Helper()
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", dataConfig(t, target.addr, callWithData(method, data)))
+	if res.err != nil {
+		t.Fatalf("run: %v\nstderr:\n%s", res.err, res.stderr)
+	}
+
+	return res
+}
+
+func TestRun_Int64AboveTwoToTheFiftyThreeArrivesExactly(t *testing.T) {
+	// 2^53 + 1. Any float64 on the way from YAML to protobuf rounds it to 2^53,
+	// protojson accepts the rounded number without complaint, and the target
+	// gets another ID. Snowflake IDs and amounts in satoshi or wei live here.
+	const id int64 = 9_007_199_254_740_993
+
+	target := startReflectingTarget(t)
+	runData(t, target, getSocketMethod, "        socket_id: 9007199254740993\n")
+
+	got := target.recorder.lastSocket()
+	if got == nil || got.GetSocketId() != id {
+		t.Errorf("target received socket_id = %v, want exactly %d", got.GetSocketId(), id)
+	}
+}
+
+func TestRun_NestedMessageArrives(t *testing.T) {
+	target := startReflectingTarget(t)
+	runData(t, target, unaryCallMethod, "        response_size: 7\n        payload:\n          body: YWJjZA==\n")
+
+	got := target.recorder.lastSimple()
+	if got == nil || got.GetResponseSize() != 7 || string(got.GetPayload().GetBody()) != "abcd" {
+		t.Errorf("target received %v, want response_size 7 and payload.body abcd", got)
+	}
+}
+
+func TestRun_JSONFieldNameIsAccepted(t *testing.T) {
+	target := startReflectingTarget(t)
+	runData(t, target, unaryCallMethod, "        fillUsername: true\n")
+
+	if got := target.recorder.lastSimple(); got == nil || !got.GetFillUsername() {
+		t.Errorf("target received %v, want fill_username set through its JSON name", got)
+	}
+}
+
+func TestRun_BytesAreBase64(t *testing.T) {
+	// The protojson rule, pinned so the README stays true: bytes are written
+	// in base64, and plain text that happens to be valid base64 decodes into
+	// other bytes without an error. "abcd" is four characters of base64 and
+	// three bytes of data.
+	target := startReflectingTarget(t)
+	runData(t, target, unaryCallMethod, "        payload:\n          body: abcd\n")
+
+	got := target.recorder.lastSimple().GetPayload().GetBody()
+	if want := []byte{0x69, 0xb7, 0x1d}; !bytes.Equal(got, want) {
+		t.Errorf("body = %x, want %x: the base64 reading of abcd", got, want)
+	}
+}
+
+func TestRun_UnknownEnumNameFailsBeforeTheRun(t *testing.T) {
+	target := startReflectingTarget(t)
+	cfg := dataConfig(t, target.addr, callWithData(unaryCallMethod, "        response_type: NO_SUCH_TYPE\n"))
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", cfg)
+	if !errors.Is(res.err, cli.ErrRequestData) || !strings.Contains(res.err.Error(), "response_type") {
+		t.Errorf("err = %v, want cli.ErrRequestData naming response_type", res.err)
 	}
 }

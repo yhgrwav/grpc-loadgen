@@ -15,7 +15,6 @@
 package cli
 
 import (
-	"errors"
 	"path/filepath"
 	"strings"
 
@@ -69,6 +68,3 @@ func ServiceLabel(cfg *config.MasterConfig, configPath string) string {
 
 	return service[strings.LastIndex(service, ".")+1:]
 }
-
-// ErrRequestData says a call's data does not fit its method's request message.
-var ErrRequestData = errors.New("request data does not fit the method")
