@@ -75,6 +75,13 @@ type Outcome struct {
 	// Response is the raw, undecoded response body, filled in only when
 	// Request.KeepResponse is set.
 	Response []byte
+	// Code is the transport's own name for the outcome, carried through so the
+	// report can print the fact next to the category. Category is a judgement
+	// and sometimes a guess — gRPC's UNAVAILABLE covers overload, a failed
+	// dependency and a rolling deploy alike — while this is what actually came
+	// back. A string rather than a transport type: the engine stays independent
+	// of the protocol.
+	Code string
 }
 
 // Sender delivers one call to the target and reports what happened to it.
