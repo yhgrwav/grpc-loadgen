@@ -25,7 +25,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yhgrwav/grpc-loadgen/internal/cli"
 	"github.com/yhgrwav/grpc-loadgen/pkg/config"
@@ -36,10 +41,39 @@ import (
 
 const defaultMaxInFlight = 5000
 
+// ErrIncomplete says the run ended before its plan. The report is printed and
+// honest, but it covers less than was asked for, so the exit code is not zero:
+// a pipeline must not pass on a three-minute run of a ten-minute plan.
+var ErrIncomplete = errors.New("the run stopped before its planned end; the report covers only the part that ran")
+
+// exitNow is the way out that depends on nothing: the third stop, or an abort
+// that has not finished in time.
+var exitNow = func() {
+	fmt.Fprintln(os.Stderr, "grpc-loadgen: aborted without a report")
+	os.Exit(130)
+}
+
+// runStarting is called once presses go to the stopper; tests use it to press
+// during the run rather than during the connection.
+var runStarting = func(*engine.Engine) {}
+
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
-	stop()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+
+	stops, aborts := make(chan struct{}), make(chan struct{})
+	go func() {
+		for sig := range signals {
+			if sig == syscall.SIGTERM {
+				aborts <- struct{}{}
+			} else {
+				stops <- struct{}{}
+			}
+		}
+	}()
+
+	err := run(context.Background(), stops, aborts, os.Args[1:], os.Stdout, os.Stderr)
+	signal.Stop(signals)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc-loadgen: %v\n", err)
@@ -49,11 +83,49 @@ func main() {
 
 // run is the whole command. The live view is used only when stderr is the
 // process terminal, so tests passing their own writers always get plain output.
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+//
+// Each value on stops is one press of Ctrl+C, each value on aborts one SIGTERM.
+// Before the run starts either cancels the connection; during the run they go
+// to the three-stage stopper.
+func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdout, stderr io.Writer) error {
+	ctx, abort := context.WithCancel(ctx)
+	defer abort()
+
+	var stopper atomic.Pointer[cli.Stopper]
+	// SIGTERM comes from an orchestrator, not a keyboard: no Ctrl+C hint then.
+	var terminated atomic.Bool
+
+	finished := make(chan struct{})
+	defer close(finished)
+
+	go func() {
+		for {
+			select {
+			case <-finished:
+				return
+			case <-stops:
+				if s := stopper.Load(); s != nil {
+					s.Press()
+				} else {
+					abort()
+				}
+			case <-aborts:
+				terminated.Store(true)
+				if s := stopper.Load(); s != nil {
+					s.Abort()
+				} else {
+					abort()
+				}
+			}
+		}
+	}()
+
 	flags := flag.NewFlagSet("grpc-loadgen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	interactive := stderr == io.Writer(os.Stderr) && cli.Interactive()
+	// The stopper writes from the signal goroutine while run writes too.
+	stderr = &lockedWriter{w: stderr}
 
 	var (
 		configPath     = flags.String("c", "", "path to the config file")
@@ -148,24 +220,62 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// The live view holds the terminal in raw mode; leaving without restoring it
+	// would leave the user a broken console.
+	var view atomic.Pointer[tea.Program]
+	exit := func() {
+		if p := view.Load(); p != nil {
+			p.Kill()
+		}
+		exitNow()
+	}
+
+	s := cli.NewStopper(
+		// Each message goes out before its action: once the action lets run
+		// return, nothing may write to stderr any more.
+		func() {
+			if !interactive {
+				fmt.Fprintln(stderr, "stopping: no new requests; waiting for those in flight. Ctrl+C again to cut them off")
+			}
+			eng.Stop()
+		},
+		func() {
+			if !interactive {
+				fmt.Fprint(stderr, "aborting: requests in flight are cut off and counted as aborted")
+				if !terminated.Load() {
+					fmt.Fprint(stderr, ". Ctrl+C again to exit without a report")
+				}
+				fmt.Fprintln(stderr)
+			}
+			abort()
+		},
+		exit,
+		time.Second,
+	)
+	stopper.Store(s)
+	runStarting(eng)
 
 	start := func() error { return eng.Run(ctx) }
 
 	var runErr error
 
 	if interactive {
-		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, cancel)
-		runErr = cli.RunLive(program, start, cancel)
+		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
+		view.Store(program)
+		runErr = cli.RunLive(program, start, abort)
 	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
 	}
 
-	cli.PrintReport(stdout, target, eng.Report())
+	report := eng.Report()
+	cli.PrintReport(stdout, target, report)
+	s.Finish()
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
+	}
+	if report.Incomplete {
+		return ErrIncomplete
 	}
 
 	return nil
@@ -237,4 +347,16 @@ func connect(ctx context.Context, stderr io.Writer, sender *grpcsender.Sender, a
 	default:
 		return fmt.Errorf("%w (%s)", err, mode)
 	}
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.w.Write(p)
 }

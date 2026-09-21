@@ -31,27 +31,6 @@ import (
 
 // --- quitting -----------------------------------------------------------
 
-func TestQuitDuringTheRunLeavesAtOnce(t *testing.T) {
-	for _, key := range []tea.Key{
-		{Type: tea.KeyRunes, Runes: []rune("q")},
-		{Type: tea.KeyCtrlC},
-	} {
-		t.Run(key.String(), func(t *testing.T) {
-			cancelled := false
-			m := testModel(t)
-			m.cancel = func() { cancelled = true }
-
-			_, cmd := m.onKey(tea.KeyMsg(key))
-			if cmd == nil {
-				t.Error("the first press did not close the view")
-			}
-			if !cancelled {
-				t.Error("the run was not cancelled")
-			}
-		})
-	}
-}
-
 // fakeView stands in for the tea program: it closes as soon as it runs, the
 // way the view does when q is pressed at the first tick.
 type fakeView struct{}
@@ -446,19 +425,6 @@ func TestLatencyWithNoHistoryStillHasItsRows(t *testing.T) {
 }
 
 // --- supported layouts --------------------------------------------------
-
-func TestRussianLayoutQuits(t *testing.T) {
-	// On ЙЦУКЕН the q key sends й. Russian is an interface language, so its
-	// layout must work without switching.
-	cancelled := false
-	m := testModel(t)
-	m.cancel = func() { cancelled = true }
-
-	_, cmd := m.onKey(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("й")}))
-	if cmd == nil || !cancelled {
-		t.Errorf("й: quit = %v, cancelled = %v, want both, as for q", cmd != nil, cancelled)
-	}
-}
 
 func TestRussianLayoutWalksTabs(t *testing.T) {
 	// l and h sit under д and р.

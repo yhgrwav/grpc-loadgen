@@ -28,8 +28,8 @@ import (
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
 // with the run.
-func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, cancel func()) *tea.Program {
-	m := newModel(target, eng, warmup, settings, cancel)
+func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper) *tea.Program {
+	m := newModel(target, eng, warmup, settings, stopper)
 	m.service = service
 
 	return tea.NewProgram(m,
@@ -99,7 +99,7 @@ func (m *model) header(width int) string {
 	glyph := spinner(m.frame / 2)
 
 	switch {
-	case m.stopping:
+	case m.stopper.Stopping():
 		status = m.text.Stopping()
 	case m.done:
 		status = m.text.Finished()
@@ -488,7 +488,7 @@ func (m *model) finalReport(width int) string {
 	report := m.report
 
 	title := m.text.ReportTitle()
-	if m.stopping {
+	if m.stopper.Stopping() {
 		title = m.text.ReportStopped()
 	}
 
@@ -548,12 +548,12 @@ func (m *model) finalReport(width int) string {
 		b.WriteString("\n")
 	}
 
-	if m.stopping {
+	if m.stopper.Stopping() {
 		b.WriteString("\n")
 		b.WriteString(m.styles.note.Render("› " + m.text.ReportStoppedNote()))
 	}
 
-	if m.err != nil && !m.stopping {
+	if m.err != nil && !m.stopper.Stopping() {
 		b.WriteString("\n")
 		b.WriteString(m.styles.bad.Render("› " + m.err.Error()))
 	}

@@ -258,7 +258,7 @@ func testModel(t *testing.T) *model {
 	settings.Mode = string(ModeDark)
 	settings.Palette = "aurora"
 
-	return newModel("localhost:50051", eng, 0, settings, func() {})
+	return newModel("localhost:50051", eng, 0, settings, NewStopper(func() {}, func() {}, func() {}, time.Hour))
 }
 
 func press(m *model, keys ...string) {
@@ -495,5 +495,15 @@ func TestSparklineGapsInsteadOfZeroes(t *testing.T) {
 
 	if got := lipglossWidth(sparkline(s, []float64{math.NaN(), math.NaN()}, 20)); got != 20 {
 		t.Errorf("all-gap sparkline width = %d, want 20", got)
+	}
+}
+
+func TestModel_TerminateDuringTheRunQuitsWhenTheRunReturns(t *testing.T) {
+	m := testModel(t)
+
+	// SIGTERM reaches the stopper, not the model: no key was pressed.
+	m.stopper.Abort()
+	if _, cmd := m.Update(doneMsg{}); cmd == nil || cmd() != tea.Quit() {
+		t.Fatal("the view waits for q after SIGTERM; the stopper's grace then exits without a report")
 	}
 }

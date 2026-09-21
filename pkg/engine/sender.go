@@ -40,6 +40,10 @@ const (
 	// microseconds — so it is counted apart from the distribution rather than
 	// recorded as a fast response.
 	CategoryUnreachable
+	// CategoryAborted means the run was aborted while the call was in flight.
+	// It is no fault of the target: the call is known only to have lasted at
+	// least until the abort, and is recorded as censored at that moment.
+	CategoryAborted
 )
 
 func (c Category) String() string {
@@ -56,6 +60,8 @@ func (c Category) String() string {
 		return "overload"
 	case CategoryUnreachable:
 		return "unreachable"
+	case CategoryAborted:
+		return "aborted"
 	default:
 		return "unknown"
 	}

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,6 +47,11 @@ type Engine struct {
 	opts  Options
 	stats *Stats
 	pool  *WorkerPool
+
+	stopOnce sync.Once
+	stopped  chan struct{}
+	// incomplete is set when the run ended before its plan: stopped or aborted.
+	incomplete atomic.Bool
 }
 
 // CheckOptions validates everything about the calls and limits that New does,
@@ -71,10 +77,19 @@ func New(opts Options) (*Engine, error) {
 	}
 
 	return &Engine{
-		opts:  opts,
-		stats: NewStats(),
-		pool:  NewWorkerPool(opts.Sender, opts.MaxInFlight),
+		opts:    opts,
+		stats:   NewStats(),
+		pool:    NewWorkerPool(opts.Sender, opts.MaxInFlight),
+		stopped: make(chan struct{}),
 	}, nil
+}
+
+// Stop ends the run gently: nothing new is scheduled, and calls in flight run
+// to their own deadline and are recorded as usual. Run then returns nil, but
+// the report is marked incomplete. Cancelling Run's context aborts instead.
+// Safe to call at any time and more than once.
+func (e *Engine) Stop() {
+	e.stopOnce.Do(func() { close(e.stopped) })
 }
 
 func (e *Engine) Snapshot() Snapshot {
@@ -126,9 +141,14 @@ func (e *Engine) plannedDuration() time.Duration {
 }
 
 func (e *Engine) Report() Report {
-	return e.stats.Report()
+	report := e.stats.Report()
+	report.Incomplete = e.incomplete.Load()
+
+	return report
 }
 
+// Run executes the plan once; an Engine is not reused. Cancelling ctx aborts
+// the run, Stop ends it gently.
 func (e *Engine) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -137,6 +157,17 @@ func (e *Engine) Run(ctx context.Context) error {
 	results := make(chan Result, e.opts.MaxInFlight)
 
 	e.stats.Start(time.Now(), e.opts.Warmup)
+
+	scheduleCtx, stopScheduling := context.WithCancel(runCtx)
+	defer stopScheduling()
+
+	go func() {
+		select {
+		case <-e.stopped:
+			stopScheduling()
+		case <-scheduleCtx.Done():
+		}
+	}()
 
 	var (
 		schedulers  sync.WaitGroup
@@ -150,7 +181,13 @@ func (e *Engine) Run(ctx context.Context) error {
 		go func() {
 			defer schedulers.Done()
 
-			if err := NewScheduler(call).Run(runCtx, requests); err != nil {
+			err := NewScheduler(call).Run(scheduleCtx, requests)
+			if err != nil && ctx.Err() == nil && isStopped(e.stopped) {
+				// Stopped by Stop, not by a failure: the plan was cut short.
+				e.incomplete.Store(true)
+				return
+			}
+			if err != nil {
 				scheduleMu.Lock()
 				if scheduleErr == nil {
 					scheduleErr = fmt.Errorf("%s: %w", call.Method, err)
@@ -184,6 +221,10 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	e.stats.Finish(time.Now())
 
+	if ctx.Err() != nil {
+		e.incomplete.Store(true)
+	}
+
 	if sendErr != nil {
 		return sendErr
 	}
@@ -192,4 +233,13 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer scheduleMu.Unlock()
 
 	return scheduleErr
+}
+
+func isStopped(stopped <-chan struct{}) bool {
+	select {
+	case <-stopped:
+		return true
+	default:
+		return false
+	}
 }
