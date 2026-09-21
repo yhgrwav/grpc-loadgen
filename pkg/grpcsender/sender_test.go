@@ -334,36 +334,6 @@ func TestSend_EmptyPayloadIsValid(t *testing.T) {
 	}
 }
 
-func TestSend_AcceptsTheMethodAsWrittenInTheConfig(t *testing.T) {
-	// The config names a method without the leading slash of a gRPC path.
-	sender := dialTarget(t, &target{})
-
-	out, err := sender.Send(bounded(t), engine.Request{
-		Method: strings.TrimPrefix(checkMethod, "/"), ScheduledAt: time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	if out.Category != engine.CategorySuccess {
-		t.Errorf("category = %v (%v), want success", out.Category, out.Err)
-	}
-}
-
-func TestSend_MethodPathCostsNoAllocationPerRequest(t *testing.T) {
-	sender := New(Options{})
-
-	for _, method := range []string{checkMethod, strings.TrimPrefix(checkMethod, "/")} {
-		sender.path(method)
-
-		if allocs := testing.AllocsPerRun(100, func() { _ = sender.path(method) }); allocs != 0 {
-			t.Errorf("path(%q) allocates %.0f times per call, want 0 on the hot path", method, allocs)
-		}
-		if got := sender.path(method); got != checkMethod {
-			t.Errorf("path(%q) = %q, want %q", method, got, checkMethod)
-		}
-	}
-}
-
 func TestSend_KeepsResponseOnlyWhenAsked(t *testing.T) {
 	sender := dialTarget(t, &target{})
 

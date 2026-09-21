@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"strings"
 	"time"
 )
 
@@ -29,39 +30,64 @@ var ErrInFlightBudget = errors.New("calls can outgrow the in-flight cap before a
 // stopped answering the wait is the timeout: when the sum exceeds the cap, the
 // cap is hit before the first timeout, and the run ends with a cap error
 // instead of a single censored observation.
+//
+// A call without a timeout waits forever, and forever times any rate exceeds
+// any cap: such calls are named in Unbounded and Need is MaxInt.
 type InFlightBudgetError struct {
-	// Need is Σ ⌈RPS × timeout⌉ over the calls that have a timeout.
+	// Need bounds Σ in flight from above: each call counts at its busiest
+	// stage, ⌈peak RPS × timeout⌉. Stages shorter than the timeout overlap in
+	// flight, and the peak covers that; a spike shorter than the timeout is
+	// overcounted.
 	Need int
 	Cap  int
-	// TotalRPS is the summed peak rate of those calls, so the caller can say
-	// which timeout would fit: Cap / TotalRPS.
-	TotalRPS int
+	// PeakRPS is the summed peak rate, so the caller can say which timeout
+	// would fit: Cap / PeakRPS.
+	PeakRPS   int
+	Unbounded []string
 }
 
 func (e *InFlightBudgetError) Error() string {
-	return fmt.Sprintf("%v: a target that stops answering would hold %d requests in flight "+
+	if len(e.Unbounded) > 0 {
+		return fmt.Sprintf("%v: %s without a timeout would hold its requests forever if the target "+
+			"stops answering, past any in-flight cap", ErrInFlightBudget, strings.Join(e.Unbounded, ", "))
+	}
+
+	return fmt.Sprintf("%v: a target that stops answering could hold up to %d requests in flight "+
 		"(rps × timeout), and the cap is %d", ErrInFlightBudget, e.Need, e.Cap)
 }
 
 func (e *InFlightBudgetError) Unwrap() error { return ErrInFlightBudget }
 
 // checkInFlightBudget rejects calls that a hung target would push past the cap.
-// A call without a timeout has no bound to check and is left out.
 func checkInFlightBudget(calls []Call, maxInFlight int) error {
-	need, totalRPS := 0, 0
+	var (
+		need, peak int
+		unbounded  []string
+	)
 
 	for _, call := range calls {
-		if call.Timeout <= 0 {
+		rps := peakRPS(call)
+		if rps == 0 {
 			continue
 		}
 
-		rps := peakRPS(call)
+		// Zero means no deadline, as with Request.Deadline; a negative timeout
+		// sets none either.
+		if call.Timeout <= 0 {
+			unbounded = append(unbounded, call.Method)
+
+			continue
+		}
+
 		need = saturatingAdd(need, inFlightFor(rps, call.Timeout))
-		totalRPS = saturatingAdd(totalRPS, rps)
+		peak = saturatingAdd(peak, rps)
 	}
 
+	if len(unbounded) > 0 {
+		return &InFlightBudgetError{Need: math.MaxInt, Cap: maxInFlight, PeakRPS: peak, Unbounded: unbounded}
+	}
 	if need > maxInFlight {
-		return &InFlightBudgetError{Need: need, Cap: maxInFlight, TotalRPS: totalRPS}
+		return &InFlightBudgetError{Need: need, Cap: maxInFlight, PeakRPS: peak}
 	}
 
 	return nil

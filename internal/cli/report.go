@@ -40,7 +40,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		unanswered += m.Unanswered
 
 		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
-			m.Method, m.Sent, m.Failed, m.RPS,
+			displayMethod(m.Method), m.Sent, m.Failed, m.RPS,
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 	}
 

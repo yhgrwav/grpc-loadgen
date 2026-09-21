@@ -182,13 +182,13 @@ func checkFakeFlags(flags *flag.FlagSet, fake bool) error {
 // them. The engine knows neither the config fields nor the flags.
 func withBudgetAdvice(err error) error {
 	var budget *engine.InFlightBudgetError
-	if !errors.As(err, &budget) || budget.TotalRPS == 0 {
+	if !errors.As(err, &budget) || len(budget.Unbounded) > 0 || budget.PeakRPS == 0 {
 		return err
 	}
 
 	// Rounded down, so the advice still fits; to the millisecond unless that
 	// would round it to zero.
-	fits := time.Duration(budget.Cap) * time.Second / time.Duration(budget.TotalRPS)
+	fits := time.Duration(budget.Cap) * time.Second / time.Duration(budget.PeakRPS)
 	if fits >= time.Millisecond {
 		fits = fits.Truncate(time.Millisecond)
 	} else {

@@ -39,8 +39,10 @@ func TestCallsFromConfig(t *testing.T) {
 	}
 
 	first := calls[0]
-	if first.Method != "a.B/One" {
-		t.Errorf("method = %q, want a.B/One", first.Method)
+	// The config writes a.B/One; gRPC sends /a.B/One. The slash is added here,
+	// once, so the sender takes the path as given.
+	if first.Method != "/a.B/One" {
+		t.Errorf("method = %q, want the gRPC path /a.B/One", first.Method)
 	}
 	if len(first.Stages) != 1 {
 		t.Fatalf("stages = %d, want 1", len(first.Stages))

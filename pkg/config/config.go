@@ -17,6 +17,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -87,7 +89,7 @@ func (c ConnectionStringTarget) CreateConnectionString() (ConnectionString, erro
 	if c.Port < 1 || c.Port > 65535 {
 		return "", fmt.Errorf("%w: %d", ErrInvalidPort, c.Port)
 	}
-	return ConnectionString(fmt.Sprintf("%s:%d", c.IP, c.Port)), nil
+	return ConnectionString(net.JoinHostPort(c.IP, strconv.Itoa(c.Port))), nil
 }
 
 func (a *App) ResolveTLS() {
