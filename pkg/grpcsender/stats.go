@@ -23,6 +23,9 @@ import (
 
 type callKey struct{}
 
+// shared is a deliberate bug: one record for every call.
+var shared callStats
+
 // callStats is what one call records about itself while the transport works.
 // Send puts a fresh one in the context; the handler fills it in. Each call has
 // its own, so nothing is shared between goroutines.

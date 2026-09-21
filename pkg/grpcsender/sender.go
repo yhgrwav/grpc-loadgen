@@ -172,7 +172,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 		}, nil
 	}
 
-	call := &callStats{}
+	call := &shared
 	callCtx := context.WithValue(ctx, callKey{}, call)
 
 	if !req.Deadline.IsZero() {
