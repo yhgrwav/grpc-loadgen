@@ -2,6 +2,8 @@
 
 [← Back to docs](README.md)
 
+> This translation may lag behind the [Russian original](../ru/feedback.md).
+
 The project is early, and right now feedback is worth more than code: while the interface is
 still unsettled, a bad idea is cheap to change.
 

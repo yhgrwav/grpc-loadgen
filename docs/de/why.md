@@ -2,6 +2,8 @@
 
 [← Zur Übersicht](README.md)
 
+> Diese Übersetzung kann hinter dem [russischen Original](../ru/why.md) zurückliegen.
+
 grpc-loadgen ruht auf einem Grundsatz: Ein Lasttest ist nur dann etwas wert, wenn man seinem
 Ergebnis ohne Einschränkung vertrauen kann. Alles andere im Werkzeug folgt daraus.
 
@@ -9,61 +11,61 @@ Die Prioritäten sind geordnet: **Korrektheit der Messung**, dann **Bedienbarkei
 **Geschwindigkeit**. Im Konflikt gewinnt die erste — eine Optimierung, die die Genauigkeit
 verschlechtert, wird abgelehnt.
 
-## Last, die die Produktion abbildet
+## Last wie in der Produktion
 
-Das Werkzeug beschreibt Last so, wie sie tatsächlich auftritt: mehrere Methoden gleichzeitig,
-jede mit eigener Rate und eigener Dauer, in einem Lauf und einem Bericht. Erst die Mischung der
-Aufrufe bringt Konkurrenz um den Verbindungspool, Datenbanksperren und Cache-Wettbewerb zum
-Vorschein — Effekte, die unsichtbar bleiben, solange Methoden einzeln gemessen werden.
+Das Werkzeug beschreibt Last so, wie sie wirklich auftritt: mehrere Methoden gleichzeitig, jede
+mit eigener Rate und Dauer, alles in einem Lauf und einem Bericht. Gerade an der Mischung zeigen
+sich Konkurrenz um den Verbindungspool, Datenbanksperren und Kämpfe um den Cache — Effekte, die man
+nie sieht, solange Methoden einzeln gemessen werden.
 
-## Messung, die Verzerrung widersteht
+## Messung, die sich nicht verzerren lässt
 
-Die Latenz wird ab dem geplanten Zeitpunkt einer Anfrage gezählt, nicht ab dem Moment, in dem sie
-tatsächlich hinausging. Damit ist die Verzögerung vollständig erfasst, einschließlich der Wartezeit
-in der Warteschlange des Generators. Friert das Ziel eine Sekunde ein, meldet das Werkzeug
-`1005ms` — die Verzögerung, die ein Nutzer erlebt hätte — statt der `5ms`, die lediglich
-beschreiben, wie schnell der Dienst nach seiner Erholung antwortete.
+Die Latenz zählt ab dem Zeitpunkt, für den die Anfrage geplant war, nicht ab dem, zu dem sie
+gesendet werden konnte. So wird die ganze Verzögerung erfasst, einschließlich der Wartezeit auf der
+Seite des Generators. Hängt das Ziel eine Sekunde, meldet das Werkzeug `1005ms` — die Verzögerung,
+die ein echter Nutzer gesehen hätte — statt `5ms`, die nur zeigen, wie schnell die Antworten nach
+der Erholung kamen.
 
-Die Last folgt einem Fahrplan: Die eingestellte Rate wird gehalten, unabhängig davon, ob der
-Dienst mitkommt. Ein Lauf mit 1000 RPS bleibt von Anfang bis Ende ein Lauf mit 1000 RPS.
+Die Last folgt einem Zeitplan: Die angeforderte RPS wird gehalten, ob der Dienst mitkommt oder
+nicht.
 
-## Keine Vorbereitung nötig
+Eine durch den Timeout abgebrochene Anfrage wird nicht durch eine Zahl ersetzt. Bekannt ist nur,
+dass sie länger als der Timeout dauerte, und könnten solche Anfragen den Platz eines Perzentils
+einnehmen, druckt der Bericht statt einer Zahl eine untere Schranke: `p99 >2.0s`.
 
-Für den Start genügen Adresse und Methodenname. Die Methodenbeschreibung kommt per gRPC Server
-Reflection vom Dienst selbst: keine `.proto`-Dateien, keine Codegenerierung, keine Build-Schritte.
-Die Interaktion findet auf Protobuf-Ebene statt, deshalb spielen Sprache und Plattform des
-getesteten Dienstes keine Rolle.
+## Ohne Vorbereitung
+
+Adresse des Dienstes und Methodenname genügen zum Start. Die Beschreibung der Methode holt das
+Werkzeug per gRPC Server Reflection vom Dienst selbst: keine `.proto`-Dateien, kein Codegen, keine
+Build-Schritte. Der Request-Body steht als gewöhnliches YAML in der Konfiguration und wird vor dem
+Start nach dem Schema des Dienstes gebaut.
 
 ## Deklarative Beschreibung
 
-Last wird durch eine Konfigurationsdatei definiert, nicht durch ein Programm. Die Datei liegt beim
-Code des Dienstes, geht durch das Review und ist auch nach einem halben Jahr klar lesbar. Sie
-braucht kein Debugging und kann nicht selbst zur Quelle von Messverzerrungen werden.
+Die Last wird durch eine Konfigurationsdatei festgelegt, nicht durch ein Programm. Die Datei liegt
+beim Code des Dienstes, durchläuft das Code-Review und bleibt auch nach einem halben Jahr lesbar.
+Sie braucht kein Debugging und kann selbst keine Quelle von Messfehlern werden.
 
-## Bereit für Continuous Integration
+## Sorgfalt für den Menschen
 
-Schwellwertbedingungen stehen in derselben Datei: Wird ein angegebener Wert überschritten, endet
-der Prozess mit Exit-Code `1` und die Pipeline stoppt. Der Bericht geht nach stdout, die Diagnose
-nach stderr — das Ergebnis ist maschinell verwertbar, ohne Text mit regulären Ausdrücken zu
-zerlegen.
+Fehlermeldungen nennen Ort und Ursache. Ein unbekannter Schlüssel in der Konfiguration oder eine
+Rate von null sind Fehler und werden nicht stillschweigend hingenommen: Ein Lauf, der keine einzige
+Anfrage gesendet hat, darf nicht erfolgreich aussehen. Der Zustand des Laufs ist live sichtbar —
+aktuelle Rate, laufende Anfragen, Fehleranteil, Perzentile.
 
-## Rücksicht auf den Menschen davor
+Die Qualität der Oberfläche steht gleichrangig neben der Korrektheit der Messung: Eine unklare
+Fehlermeldung gilt als Defekt.
 
-Fehlermeldungen nennen Datei, Zeile und Ursache. Ein unbekannter Schlüssel in der Konfiguration
-und eine Rate von Null gelten als Fehler und werden nicht stillschweigend akzeptiert: Ein Lauf,
-der keine einzige Anfrage gesendet hat, darf nicht wie ein Erfolg aussehen. Der Zustand eines
-Laufs ist währenddessen sichtbar — aktuelle Rate, offene Anfragen, Fehleranteil, aktueller p99.
-
-Die Qualität der Bedienoberfläche wird am selben Maßstab gemessen wie die Korrektheit der
-Messwerte: Eine unklare Fehlermeldung zählt als Defekt.
-
-## Im Vergleich zu bestehenden Werkzeugen
+## Im Vergleich mit bestehenden Werkzeugen
 
 | Fähigkeit | ghz | k6 | JMeter | grpc-loadgen |
 |---|---|---|---|---|
-| Mehrere Methoden mit unterschiedlichen Raten in einem Lauf | eine Methode pro Lauf | per Skript | über mehrere Thread-Gruppen | **in der Konfiguration** |
-| Latenz ab dem geplanten Zeitpunkt | teilweise | Closed Model per Default | nein | **ja** |
-| Lauf ohne `.proto` und Codegenerierung | ja | `.proto` erforderlich | `.proto` erforderlich | **ja** |
-| Aufrufe über Antwortdaten verketten | nein | manuell im Skript | manuell | **Stufe 1** |
-| Schwellwertbedingungen für CI | teilweise | ja | über Plugins | **ja** |
-| Last ohne Programmieren beschreiben | ja | JavaScript-Skript | XML über eine GUI | **ja** |
+| Mehrere Methoden mit unterschiedlicher Rate in einem Lauf | eine Methode pro Lauf | per Skript | über mehrere Thread-Gruppen | **in der Konfiguration** |
+| Latenz ab dem geplanten Zeitpunkt | teilweise | standardmäßig Closed Model | nein | **ja** |
+| Ohne `.proto` und Codegen | ja | `.proto` nötig | `.proto` nötig | **ja** |
+| Last ohne Programmierung beschrieben | ja | JavaScript-Skript | XML über GUI | **ja** |
+| Hochfahren der Last | ja | ja | ja | geplant |
+| Schwellen für CI | teilweise | ja | über Plugins | geplant |
+| Verkettung von Aufrufen über Antwortdaten | nein | per Hand im Skript | per Hand | geplant |
+
+Die Reihenfolge des Geplanten steht in der [Strategie](../strategy.md) (Russisch).
