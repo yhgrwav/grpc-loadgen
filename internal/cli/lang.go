@@ -95,7 +95,7 @@ func (t Text) Summary() string {
 }
 
 func (t Text) Running() string {
-	return t.get(phrase{LangRU: "идёт прогон", LangEN: "running", LangDE: "läuft", LangZH: "运行中"})
+	return t.get(phrase{LangRU: "выполняется нагрузочное тестирование", LangEN: "load test running", LangDE: "Lasttest läuft", LangZH: "负载测试进行中"})
 }
 
 func (t Text) Stopping() string {
@@ -103,7 +103,7 @@ func (t Text) Stopping() string {
 }
 
 func (t Text) Finished() string {
-	return t.get(phrase{LangRU: "завершён", LangEN: "finished", LangDE: "beendet", LangZH: "已完成"})
+	return t.get(phrase{LangRU: "тестирование завершено", LangEN: "load test finished", LangDE: "Lasttest beendet", LangZH: "负载测试已完成"})
 }
 
 func (t Text) Sent() string {
