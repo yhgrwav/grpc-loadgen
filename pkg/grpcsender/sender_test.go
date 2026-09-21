@@ -230,6 +230,96 @@ func TestSend_ZeroDeadlineMeansNoDeadline(t *testing.T) {
 	}
 }
 
+func TestSend_MegabytePayloadGoesThrough(t *testing.T) {
+	// A HealthCheckRequest whose only field, service (field 1, a string), is a
+	// megabyte long: valid on the wire, and big enough to span many frames.
+	name := make([]byte, 1<<20)
+	for i := range name {
+		name[i] = 'a'
+	}
+
+	payload := []byte{0x0a}
+	for n := len(name); ; n >>= 7 {
+		if n < 0x80 {
+			payload = append(payload, byte(n))
+
+			break
+		}
+		payload = append(payload, byte(n&0x7f|0x80))
+	}
+	payload = append(payload, name...)
+
+	sender := dialTarget(t, &target{})
+
+	req := request(time.Now())
+	req.Payload = payload
+
+	out, err := sender.Send(bounded(t), req)
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if out.Category != engine.CategorySuccess {
+		t.Errorf("category = %v (%v), want success", out.Category, out.Err)
+	}
+}
+
+func TestSend_NanosecondDeadlineIsATimeoutNotAFailure(t *testing.T) {
+	sender := dialTarget(t, &target{delay: time.Second})
+
+	scheduled := time.Now()
+	req := request(scheduled)
+	req.Deadline = scheduled.Add(time.Nanosecond)
+
+	out, err := sender.Send(bounded(t), req)
+	if err != nil {
+		t.Fatalf("send: %v, want an exhausted deadline to be a measurement", err)
+	}
+	if out.Category != engine.CategoryTimeout {
+		t.Errorf("category = %v, want timeout", out.Category)
+	}
+}
+
+func TestSend_ContextCancelledBeforeTheCallWrapsItsError(t *testing.T) {
+	sender := dialTarget(t, &target{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := sender.Send(ctx, request(time.Now()))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
+	}
+}
+
+func TestConnect_TLSFlagTurnsOnTransportCredentials(t *testing.T) {
+	// The target speaks plaintext; a sender asked for TLS must fail the
+	// handshake instead of quietly falling back to an insecure connection.
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(srv, &target{})
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	sender := New(Options{
+		Target: "passthrough:///bufnet",
+		TLS:    true,
+		DialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+		},
+	})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := sender.Connect(ctx); err == nil {
+		t.Fatal("TLS sender connected to a plaintext server, want the handshake to fail")
+	}
+}
+
 // --- timestamps ---------------------------------------------------------
 
 func TestSend_TimestampsComeFromTheTransport(t *testing.T) {
@@ -298,52 +388,11 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 	}
 }
 
-func TestSend_SameCodeFromTwoSourcesGetsDifferentCategories(t *testing.T) {
-	// The whole point of watching InTrailer: UNAVAILABLE from a server that
-	// answered is a measurement, UNAVAILABLE from a connection that was never
-	// established is not. The status code alone cannot tell them apart.
-	answered := dialTarget(t, &target{code: codes.Unavailable})
+// vanishedTarget returns a sender that connected to a live target which then
+// went away: calls still go out, and nothing is there to answer them.
+func vanishedTarget(t *testing.T) *Sender {
+	t.Helper()
 
-	served, err := answered.Send(t.Context(), request(time.Now()))
-	if err != nil {
-		t.Fatalf("send to answering target: %v", err)
-	}
-	if served.Category != engine.CategoryOverload {
-		t.Errorf("served UNAVAILABLE = %v, want overload: the target did reply", served.Category)
-	}
-	if served.SentAt.IsZero() || served.DoneAt.IsZero() {
-		t.Error("a served rejection must carry timestamps: it is a measurement")
-	}
-
-	refused := New(Options{Target: "127.0.0.1:1"})
-	if err := refused.Connect(t.Context()); err == nil {
-		t.Cleanup(func() { _ = refused.Close() })
-
-		out, sendErr := refused.Send(t.Context(), request(time.Now()))
-		if sendErr != nil {
-			t.Fatalf("send to refused target: %v", sendErr)
-		}
-		if out.Category != engine.CategoryUnreachable {
-			t.Errorf("refused UNAVAILABLE = %v, want unreachable: nothing replied", out.Category)
-		}
-	}
-}
-
-func TestSend_ReportsTheRawTransportCode(t *testing.T) {
-	// The category is a guess where UNAVAILABLE is concerned; the raw code is a
-	// fact, and the report shows both.
-	sender := dialTarget(t, &target{code: codes.Unavailable})
-
-	out, err := sender.Send(t.Context(), request(time.Now()))
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	if out.Code != codes.Unavailable.String() {
-		t.Errorf("code = %q, want %q", out.Code, codes.Unavailable.String())
-	}
-}
-
-func TestSend_RefusedConnectionIsNotAMeasurement(t *testing.T) {
 	lis := bufconn.Listen(1024 * 1024)
 	srv := grpc.NewServer()
 	grpc_health_v1.RegisterHealthServer(srv, &target{})
@@ -363,11 +412,65 @@ func TestSend_RefusedConnectionIsNotAMeasurement(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sender.Close() })
 
-	// The target goes away mid-run: the call carries no latency worth recording.
 	srv.Stop()
-	lis.Close()
+	_ = lis.Close()
 
-	out, err := sender.Send(t.Context(), request(time.Now()))
+	return sender
+}
+
+// bounded gives a call a ceiling, so a regression fails the test instead of
+// eating the CI timeout.
+func bounded(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
+func TestSend_SameCodeFromTwoSourcesGetsDifferentCategories(t *testing.T) {
+	// The whole point of watching InTrailer: UNAVAILABLE from a server that
+	// answered is a measurement, UNAVAILABLE from a target nobody reached is
+	// not. The status code alone cannot tell them apart.
+	served, err := dialTarget(t, &target{code: codes.Unavailable}).Send(bounded(t), request(time.Now()))
+	if err != nil {
+		t.Fatalf("send to answering target: %v", err)
+	}
+
+	refused, err := vanishedTarget(t).Send(bounded(t), request(time.Now()))
+	if err != nil {
+		t.Fatalf("send to vanished target: %v", err)
+	}
+
+	if served.Code != refused.Code {
+		t.Fatalf("codes differ (%q vs %q): the test no longer pins the same code from two sources",
+			served.Code, refused.Code)
+	}
+	if served.Category != engine.CategoryOverload {
+		t.Errorf("served %s = %v, want overload: the target did reply", served.Code, served.Category)
+	}
+	if refused.Category != engine.CategoryUnreachable {
+		t.Errorf("refused %s = %v, want unreachable: nothing replied", refused.Code, refused.Category)
+	}
+}
+
+func TestSend_ReportsTheRawTransportCode(t *testing.T) {
+	// The category is a guess where UNAVAILABLE is concerned; the raw code is a
+	// fact, and the report shows both.
+	sender := dialTarget(t, &target{code: codes.Unavailable})
+
+	out, err := sender.Send(bounded(t), request(time.Now()))
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if out.Code != codes.Unavailable.String() {
+		t.Errorf("code = %q, want %q", out.Code, codes.Unavailable.String())
+	}
+}
+
+func TestSend_RefusedConnectionIsNotAMeasurement(t *testing.T) {
+	out, err := vanishedTarget(t).Send(bounded(t), request(time.Now()))
 	if err != nil {
 		t.Fatalf("send: %v, want an unreachable target to be data, not a broken sender", err)
 	}
@@ -400,7 +503,7 @@ func TestSend_CancellationWrapsContextError(t *testing.T) {
 // --- concurrency --------------------------------------------------------
 
 func TestSend_IsSafeUnderConcurrentUse(t *testing.T) {
-	const callers = 200
+	const callers = 1000
 
 	sender := dialTarget(t, &target{})
 
