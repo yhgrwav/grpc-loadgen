@@ -28,8 +28,9 @@ type Second struct {
 	// RequestFailed is client faults: the request itself was wrong, and the
 	// target said so.
 	RequestFailed int
-	// UnsentLate is timeouts the generator started past their deadline;
-	// UnsentQuota, timeouts that waited on the connection until the deadline.
+	// UnsentLate and UnsentQuota are timeouts whose request never went out,
+	// split by who ate more of the budget: the generator's lag, or the wait
+	// on the connection from the start of the call to the deadline.
 	UnsentLate  int
 	UnsentQuota int
 	Unanswered  int
@@ -140,7 +141,7 @@ func (t *timeline) record(start time.Time, r Result) {
 		switch {
 		case !r.NotSent:
 			s.targetFailed++
-		case !r.Deadline.IsZero() && !r.BegunAt.Before(r.Deadline):
+		case lateMoreThanQueued(r):
 			s.unsentLate++
 		default:
 			s.unsentQuota++
@@ -148,6 +149,19 @@ func (t *timeline) record(start time.Time, r Result) {
 	default:
 		s.targetFailed++
 	}
+}
+
+// lateMoreThanQueued reports whether the generator's lag ate more of an unsent
+// call's budget than the wait on the connection did. A generator running
+// behind starts calls just before their deadline, and a short quota wait
+// then finishes them off; blaming the connection would advise more
+// connections, which would not help.
+func lateMoreThanQueued(r Result) bool {
+	if r.Deadline.IsZero() {
+		return false
+	}
+
+	return r.QueueTime() >= r.Deadline.Sub(r.BegunAt)
 }
 
 // observed reports whether a call's latency is known whole: answered, and not

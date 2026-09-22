@@ -157,6 +157,15 @@ func unsent(start time.Time, begun, untilDeadline time.Duration) Result {
 	return r
 }
 
+// unsentAfterLag is a timeout scheduled at the start, begun lag later, that
+// then waited on the connection until its deadline.
+func unsentAfterLag(start time.Time, lag, wait time.Duration) Result {
+	r := unsent(start, lag, wait)
+	r.ScheduledAt = start
+
+	return r
+}
+
 // A config that sends the same entity every time gets AlreadyExists from the
 // second call on. The target copes fine; the verdict reads TargetFailed, so
 // these must not land there.
@@ -191,9 +200,15 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	// Started exactly at the deadline: no budget left, the generator's doing.
 	stats.Record(unsent(start, 0, 0))
 
+	// Half a second of budget. The generator ate 450ms of it, the quota the
+	// last 50ms: the generator's doing, though the call began before the deadline.
+	stats.Record(unsentAfterLag(start, 450*time.Millisecond, 50*time.Millisecond))
+	// And the other way round: the connection ate 450ms of it.
+	stats.Record(unsentAfterLag(start, 50*time.Millisecond, 450*time.Millisecond))
+
 	got := seconds(t, stats)[0]
-	if got.UnsentQuota != 3 || got.UnsentLate != 6 || got.TargetFailed != 0 {
-		t.Errorf("quota %d, late %d, target failed %d; want 3, 6 and 0",
+	if got.UnsentQuota != 4 || got.UnsentLate != 7 || got.TargetFailed != 0 {
+		t.Errorf("quota %d, late %d, target failed %d; want 4, 7 and 0",
 			got.UnsentQuota, got.UnsentLate, got.TargetFailed)
 	}
 }

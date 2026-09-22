@@ -73,9 +73,8 @@ type Outcome struct {
 	// this; the worker pool then falls back to the moment Send was called.
 	SentAt time.Time
 	// NotSent marks a timeout whose request never went out. The engine tells
-	// from the deadline whose fault it was: a call begun past its deadline was
-	// started too late by the generator, one begun before it waited on the
-	// connection. False when the sender does not track this.
+	// whose fault it was by who ate more of the budget: the generator's lag
+	// or the wait on the connection. False when the sender does not track this.
 	NotSent  bool
 	DoneAt   time.Time
 	Category Category
