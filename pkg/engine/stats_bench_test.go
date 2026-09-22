@@ -68,6 +68,7 @@ func BenchmarkStatsRecord(b *testing.B) {
 		b.Run(fmt.Sprintf("writers%d", writers), func(b *testing.B) {
 			stats := NewStats()
 			start := time.Now()
+			stats.Reserve(time.Hour, "pkg.Service/Method")
 			stats.Start(start, 0)
 
 			var wg sync.WaitGroup

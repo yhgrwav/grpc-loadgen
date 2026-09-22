@@ -119,3 +119,29 @@ func TestPrintReportShowsTheMethodAsTheConfigWritesIt(t *testing.T) {
 		t.Errorf("report shows the gRPC path instead of the name from the config:\n%s", out.String())
 	}
 }
+
+func TestPrintReportWarnsAboutCallsOffTheTimeline(t *testing.T) {
+	report := engine.Report{
+		Duration: time.Second,
+		Sent:     10,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/One", Sent: 7, OutsideTimeline: 2},
+			{Method: "a.B/Two", Sent: 3, OutsideTimeline: 1},
+		},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	if !strings.Contains(out.String(), "warning: 3 requests fell outside the per-second timeline") {
+		t.Errorf("the report must say how many calls are missing from the timeline:\n%s", out.String())
+	}
+
+	out.Reset()
+	report.Methods[0].OutsideTimeline, report.Methods[1].OutsideTimeline = 0, 0
+	PrintReport(&out, "localhost:50051", report)
+
+	if strings.Contains(out.String(), "timeline") {
+		t.Errorf("no warning is due when nothing fell off the timeline:\n%s", out.String())
+	}
+}

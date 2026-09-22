@@ -67,13 +67,23 @@ type MethodReport struct {
 	// Unanswered counts calls that never reached the target, so they are absent
 	// from the distribution rather than recorded as very fast replies.
 	Unanswered int
+	// Seconds covers the whole run, warmup included, up to the last second
+	// anything happened in. Unlike the totals it keeps every call.
+	Seconds []Second
+	// OutsideTimeline counts calls left off Seconds because a moment of theirs
+	// could not be placed on it; InvalidLag, calls begun before their schedule.
+	OutsideTimeline int
+	InvalidLag      int
 }
 
 type Report struct {
 	Duration time.Duration
-	Sent     int
-	Failed   int
-	Methods  []MethodReport
+	// Warmup is the leading span of the run whose calls are on Seconds but not
+	// in the totals: a call is warmup by the moment it was scheduled for.
+	Warmup  time.Duration
+	Sent    int
+	Failed  int
+	Methods []MethodReport
 	// Aborted counts calls cut off by an abort of the run. They are no fault
 	// of the target, so they are not in Failed; each is censored at the abort.
 	Aborted int
@@ -90,6 +100,7 @@ type Stats struct {
 	sent      int
 	failed    int
 	aborted   int
+	reserve   int
 	byMethod  map[string]*methodStats
 }
 
@@ -98,10 +109,31 @@ type methodStats struct {
 	failed     int
 	unanswered int
 	latency    *metrics.Latencies
+	timeline   timeline
 }
 
 func NewStats() *Stats {
 	return &Stats{byMethod: make(map[string]*methodStats)}
+}
+
+// Reserve fixes the span of the timeline: calls with a moment past it are
+// counted in OutsideTimeline instead. The space for the named methods is
+// taken here rather than on their first call, which records under the lock.
+// Without Reserve the timeline is empty and every call is outside it.
+func (s *Stats) Reserve(span time.Duration, methods ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.reserve = int(span/time.Second) + 1
+	for _, name := range methods {
+		if _, ok := s.byMethod[name]; !ok {
+			s.byMethod[name] = s.newMethod()
+		}
+	}
+}
+
+func (s *Stats) newMethod() *methodStats {
+	return &methodStats{latency: metrics.NewLatencies(), timeline: newTimeline(s.reserve)}
 }
 
 func (s *Stats) Start(at time.Time, warmup time.Duration) {
@@ -120,11 +152,22 @@ func (s *Stats) Finish(at time.Time) {
 }
 
 // Record files one finished call. Requests inside the warmup window are left
-// out entirely — of the counters as much as of the distribution — because the
-// report describes the measured part of the run, and counting them would skew
-// the reported rate and hide the cold-start failures warmup exists to absorb.
+// out of the counters as much as of the distribution — only the timeline keeps
+// them — because the report describes the measured part of the run, and
+// counting them would skew the reported rate and hide the cold-start failures
+// warmup exists to absorb.
 func (s *Stats) Record(r Result) {
 	s.mu.Lock()
+
+	method, ok := s.byMethod[r.Method]
+	if !ok {
+		method = s.newMethod()
+		s.byMethod[r.Method] = method
+	}
+
+	// The timeline keeps warmup: a target failing on the way up is exactly
+	// what it should show, and the report says which seconds were warmup.
+	method.timeline.record(s.startedAt, r)
 
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
 		s.mu.Unlock()
@@ -139,12 +182,6 @@ func (s *Stats) Record(r Result) {
 	}
 	if r.Category == CategoryAborted {
 		s.aborted++
-	}
-
-	method, ok := s.byMethod[r.Method]
-	if !ok {
-		method = &methodStats{latency: metrics.NewLatencies()}
-		s.byMethod[r.Method] = method
 	}
 
 	method.sent++
@@ -265,15 +302,28 @@ func (s *Stats) Snapshot() Snapshot {
 	return snapshot
 }
 
+// Report copies every method's timeline under the lock Record takes: call it
+// once the run is over. For live data use Snapshot.
 func (s *Stats) Report() Report {
 	elapsed, measured, sent, failed, views := s.views()
 
+	// The timelines are copied only here, once a run is over, never for the
+	// snapshots the interface takes several times a second.
 	s.mu.Lock()
-	aborted := s.aborted
+	aborted, warmup := s.aborted, s.warmup
+	timelines := make(map[string]MethodReport, len(s.byMethod))
+	for name, method := range s.byMethod {
+		timelines[name] = MethodReport{
+			Seconds:         method.timeline.export(),
+			OutsideTimeline: method.timeline.outside,
+			InvalidLag:      method.timeline.invalidLag,
+		}
+	}
 	s.mu.Unlock()
 
 	report := Report{
 		Duration: elapsed,
+		Warmup:   warmup,
 		Sent:     sent,
 		Failed:   failed,
 		Aborted:  aborted,
@@ -294,6 +344,10 @@ func (s *Stats) Report() Report {
 			P95:        v.dist.Percentile(0.95),
 			P99:        v.dist.Percentile(0.99),
 			Max:        v.dist.Percentile(1),
+
+			Seconds:         timelines[v.name].Seconds,
+			OutsideTimeline: timelines[v.name].OutsideTimeline,
+			InvalidLag:      timelines[v.name].InvalidLag,
 		}
 		if measured > 0 {
 			entry.RPS = float64(v.sent) / measured.Seconds()

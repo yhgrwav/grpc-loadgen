@@ -223,3 +223,42 @@ func TestSnapshotTracksProgress(t *testing.T) {
 		t.Error("final snapshot reports fewer requests than the mid-run one")
 	}
 }
+
+// A call begun in the last planned second against a target that hangs runs on
+// to its deadline past the plan: the reserve must hold it, and in flight must
+// come back to zero.
+func TestEngineTimelineHoldsTheDrain(t *testing.T) {
+	eng, err := New(Options{
+		Calls: []Call{{
+			Method:  "a.B/C",
+			Timeout: 1500 * time.Millisecond,
+			Stages:  []Stage{{StartRPS: 20, TargetRPS: 20, Duration: time.Second}},
+		}},
+		Sender:      FakeSender{Delay: time.Minute},
+		MaxInFlight: 64,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	if err := eng.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	m := eng.Report().Methods[0]
+	if m.OutsideTimeline != 0 {
+		t.Errorf("outside = %d, want 0", m.OutsideTimeline)
+	}
+
+	var begun, failed int
+	for _, s := range m.Seconds {
+		begun += s.Begun
+		failed += s.Failed
+	}
+	if begun != 20 || failed != 20 {
+		t.Errorf("begun %d, failed %d; want all 20 timed out on the timeline", begun, failed)
+	}
+	if len(m.Seconds) < 3 || m.Seconds[len(m.Seconds)-1].InFlight != 0 {
+		t.Errorf("seconds = %+v, want the drain past second 2 and zero in flight at the end", m.Seconds)
+	}
+}
