@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -60,31 +61,45 @@ func RequestBody(desc protoreflect.MessageDescriptor, data any) ([]byte, error) 
 	return proto.MarshalOptions{Deterministic: true}.Marshal(msg)
 }
 
-// AttachData fills in the payload of every call that has data, resolving the
-// method's schema through resolver. It runs once, before the load: no request
-// is sent while any body is wrong, and every problem is reported at once.
+// AttachData resolves every method the run will call and fills in the payload
+// of the calls that have data. It runs once, before the load: a method the
+// target does not serve, or a body that does not fit its message, is a config
+// error, and finding it out from a whole run of failures costs the run.
+// Without reflection a method that has no data is only reported to warn, since
+// it needs no schema to run.
 //
 // calls are the engine calls built from cfg, in the same order.
-func AttachData(ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig, calls []engine.Call) error {
+func AttachData(
+	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
+	calls []engine.Call, warn io.Writer,
+) error {
 	var errs []error
 
 	for i := range cfg.Load.Calls {
 		call := &cfg.Load.Calls[i]
-		if call.Data == nil {
-			continue
-		}
 
 		method, err := resolver.Resolve(ctx, call.Method)
 
 		switch {
+		case errors.Is(err, descriptor.ErrReflectionUnsupported) && call.Data == nil:
+			fmt.Fprintf(warn, "%s: %v, so the method was not checked before the run; "+
+				"it sends an empty message\n", call.Method, err)
+
+			continue
 		case errors.Is(err, descriptor.ErrReflectionUnsupported):
 			errs = append(errs, fmt.Errorf("%s: %w: the schema for its data comes from reflection; "+
 				"without data the method runs with an empty message", call.Method, err))
 
 			continue
 		case err != nil:
+			// Named here rather than left to the resolver: which method the
+			// run cannot make is ours to say, whoever resolves it.
 			errs = append(errs, fmt.Errorf("%s: %w", call.Method, err))
 
+			continue
+		}
+
+		if call.Data == nil {
 			continue
 		}
 

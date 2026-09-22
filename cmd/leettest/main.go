@@ -243,7 +243,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 		// Bodies need the schema, and the schema needs the connection.
 		dataCtx, cancelData := context.WithTimeout(ctx, *connectTimeout)
-		dataErr := cli.AttachData(dataCtx, descriptor.NewReflectionResolver(grpcSender.Conn()), cfg, opts.Calls)
+		dataErr := cli.AttachData(dataCtx, descriptor.NewReflectionResolver(grpcSender.Conn()), cfg, opts.Calls, stderr)
 		cancelData()
 
 		if dataErr != nil {
