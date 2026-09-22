@@ -125,8 +125,7 @@ func TestReport_SlotsHeldPastTheAllowanceHitTheCap(t *testing.T) {
 	// behind, so generator lateness is not the explanation. The numbers the
 	// failure needs are printed with it.
 	if report.CapHit.OverDeadline == 0 {
-		t.Errorf("no call in flight was past its deadline, yet only such calls fill the cap
-"+
+		t.Errorf("no call in flight was past its deadline, yet only such calls fill the cap\n"+
 			"start lag max %v, run %v of the planned %v, cap hit at %v, unsent %d, aborted %d, timed out %d",
 			report.StartLagMax, report.Duration, report.Planned, report.CapHit.At, report.CapHit.Unsent,
 			report.Aborted, report.Methods[0].TimedOut)
