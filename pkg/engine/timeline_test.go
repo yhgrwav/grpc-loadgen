@@ -15,6 +15,7 @@
 package engine
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -278,5 +279,51 @@ func TestTimeline_FinishedBeforeBegunIsCountedAside(t *testing.T) {
 		if s != (Second{}) {
 			t.Errorf("second %d = %+v, want the call left off whole", i, s)
 		}
+	}
+}
+
+// CI runs no benchmarks, so an allocation creeping into recording would go
+// unnoticed without this.
+func TestTimeline_RecordDoesNotAllocate(t *testing.T) {
+	start := time.Now()
+	stats := NewStats()
+	stats.Reserve(time.Hour, "a")
+	stats.Start(start, 0)
+
+	r := call(start, 500*time.Millisecond, 600*time.Millisecond, CategorySuccess)
+
+	if allocs := testing.AllocsPerRun(1000, func() { stats.Record(r) }); allocs != 0 {
+		t.Errorf("Record allocates %v times per call, want 0", allocs)
+	}
+}
+
+func TestTimeline_ConcurrentRecordingLosesNothing(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	const writers, each = 50, 200
+
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for i := range each {
+				begun := time.Duration(w*each+i) * time.Millisecond
+				stats.Record(call(start, begun, begun+time.Millisecond, CategorySuccess))
+			}
+		}()
+	}
+	wg.Wait()
+
+	var begun, succeeded int
+	for _, s := range seconds(t, stats) {
+		begun += s.Begun
+		succeeded += s.Succeeded
+	}
+	if begun != writers*each || succeeded != writers*each {
+		t.Errorf("begun %d, succeeded %d; want %d each", begun, succeeded, writers*each)
 	}
 }
