@@ -129,6 +129,11 @@ func TestLoadValidate(t *testing.T) {
 		{name: "negative warmup", load: config.Load{Warmup: -time.Second, Calls: []config.Call{call}}, wantErr: config.ErrInvalidWarmup},
 		{name: "broken call", load: config.Load{Calls: []config.Call{{}}}, wantErr: config.ErrInvalidMethod},
 		{name: "method in two calls", load: config.Load{Calls: []config.Call{call, call}}, wantErr: config.ErrDuplicateMethod},
+		// The ban compares raw strings, which is the report's key only while the
+		// config takes one spelling per method: another spelling must be refused,
+		// not treated as a second method.
+		{name: "method again with a leading slash", load: config.Load{Calls: []config.Call{call, withMethod(call, "/"+call.Method)}}, wantErr: config.ErrInvalidMethod},
+		{name: "method again with a dot for the slash", load: config.Load{Calls: []config.Call{call, withMethod(call, "wallet.v1.WalletService.GetBalance")}}, wantErr: config.ErrInvalidMethod},
 	}
 
 	for _, tt := range tests {
@@ -140,4 +145,9 @@ func TestLoadValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func withMethod(call config.Call, method string) config.Call {
+	call.Method = method
+	return call
 }
