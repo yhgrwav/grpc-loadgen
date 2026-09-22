@@ -275,3 +275,47 @@ func TestReport_ARefusalIsAnAnswerAmongTimeouts(t *testing.T) {
 		t.Errorf("timed out %d of %d, want half", m.TimedOut, m.Sent)
 	}
 }
+
+func TestReport_AHangingTargetFailsEveryCallLiveAndInTheReport(t *testing.T) {
+	// Timeouts left TargetFailed for an outcome of their own; the error share
+	// the live view and the report print must still count them.
+	target := stand.Start(stand.Hanging())
+	t.Cleanup(target.Stop)
+
+	sender := grpcsender.New(grpcsender.Options{Target: target.Target(), DialOptions: []grpc.DialOption{target.DialOption()}})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect to the stand: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	eng, err := engine.New(engine.Options{
+		Calls:       []engine.Call{load(target.Method(), silentRPS, silentRun, silentTimeout)},
+		Sender:      sender,
+		MaxInFlight: 1000,
+	})
+	if err != nil {
+		t.Fatalf("build the engine: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+	if err := eng.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	live := eng.Snapshot()
+	if live.Sent == 0 || live.Failed != live.Sent {
+		t.Errorf("live view: failed %d of %d, want all: no call got an answer", live.Failed, live.Sent)
+	}
+	for _, m := range live.Methods {
+		if m.Failed != m.Sent {
+			t.Errorf("live view, %s: failed %d of %d, want all", m.Method, m.Failed, m.Sent)
+		}
+	}
+
+	report := eng.Report()
+	if report.Failed != report.Sent || report.Methods[0].Failed != report.Methods[0].Sent {
+		t.Errorf("report: failed %d of %d, method %d of %d; want all",
+			report.Failed, report.Sent, report.Methods[0].Failed, report.Methods[0].Sent)
+	}
+}
