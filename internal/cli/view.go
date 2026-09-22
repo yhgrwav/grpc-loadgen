@@ -87,7 +87,7 @@ func (m *model) body(width int) string {
 	case m.done:
 		b.WriteString(m.finalReport(inner))
 	case m.showHelp:
-		b.WriteString(m.help())
+		b.WriteString(m.help(inner))
 	case m.active == 0:
 		b.WriteString(m.summary(inner))
 	case m.active == m.settingsTab():
@@ -366,7 +366,7 @@ func (m *model) latencyChart(points []point) string {
 
 	scale := "-"
 	if ok {
-		scale = formatDuration(millis(low)) + " – " + formatDuration(millis(high))
+		scale = formatDuration(millis(low)) + " - " + formatDuration(millis(high))
 	}
 
 	var b strings.Builder
@@ -413,7 +413,10 @@ func (m *model) gaugeRow(label string, value, limit float64, text string) string
 		m.styles.value.Render(text)
 }
 
-func (m *model) help() string {
+// helpKeyWidth is the key column of the help screen, wide enough for "<- -> tab".
+const helpKeyWidth = 11
+
+func (m *model) help(width int) string {
 	rows := [][2]string{
 		{"<- -> tab", m.text.HelpTabs()},
 		{"enter", m.text.HelpSettings()},
@@ -427,10 +430,17 @@ func (m *model) help() string {
 	b.WriteString(m.styles.title.Render(m.text.HelpTitle()))
 	b.WriteString("\n\n")
 
+	indent := strings.Repeat(" ", helpKeyWidth)
 	for _, row := range rows {
-		b.WriteString(m.styles.helpKey.Render(fmt.Sprintf("%-8s", row[0])))
-		b.WriteString(m.styles.helpText.Render(row[1]))
-		b.WriteString("\n")
+		for i, line := range wrapText(row[1], width-helpKeyWidth) {
+			key := indent
+			if i == 0 {
+				key = padRight(row[0], helpKeyWidth)
+			}
+			b.WriteString(m.styles.helpKey.Render(key))
+			b.WriteString(m.styles.helpText.Render(line))
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -454,10 +464,10 @@ func (m *model) footerHints() string {
 
 	if m.active == m.settingsTab() {
 		if !m.editing {
-			return m.styles.muted.Render(m.text.SettingsLocked())
+			return m.styles.muted.Render(fitHints(m.text.SettingsLocked(), contentWidth(m.viewWidth())))
 		}
 
-		return m.styles.muted.Render(m.text.SettingsHint())
+		return m.styles.muted.Render(fitHints(m.text.SettingsHint(), contentWidth(m.viewWidth())))
 	}
 
 	if m.showHelp {
@@ -679,12 +689,12 @@ func (m *model) finalReport(width int) string {
 
 	if m.stopper.Stopping() {
 		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render("> " + m.text.ReportStoppedNote()))
+		b.WriteString(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)))
 	}
 
 	if m.err != nil && !m.stopper.Stopping() {
 		b.WriteString("\n")
-		b.WriteString(m.styles.bad.Render("> " + m.err.Error()))
+		b.WriteString(m.styles.bad.Render(wrapNote(m.err.Error(), width)))
 	}
 
 	return b.String()
@@ -787,4 +797,59 @@ func padRight(s string, width int) string {
 
 func padLeft(s string, width int) string {
 	return strings.Repeat(" ", max(width-lipgloss.Width(s), 0)) + s
+}
+
+// wrapNote is a "> " note wrapped to width, its lines after the first indented
+// under the text. The final report has the height for it; the live view uses
+// a short form instead, so its layout does not jump.
+func wrapNote(text string, width int) string {
+	return "> " + strings.Join(wrapText(text, width-2), "\n  ")
+}
+
+// wrapText breaks text into lines of at most width columns at spaces, and
+// breaks a word longer than a line wherever it has to.
+func wrapText(text string, width int) []string {
+	width = max(width, 1)
+
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		for lipgloss.Width(word) > width {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+			}
+			head := []rune(word)
+			n := len(head)
+			for n > 0 && lipgloss.Width(string(head[:n])) > width {
+				n--
+			}
+			n = max(n, 1)
+			lines = append(lines, string(head[:n]))
+			word = string(head[n:])
+		}
+
+		switch {
+		case line == "":
+			line = word
+		case lipgloss.Width(line)+1+lipgloss.Width(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+
+	return append(lines, line)
+}
+
+// fitHints keeps as many of the key hints, separated by three spaces and
+// most important first, as fit in width.
+func fitHints(text string, width int) string {
+	hints := strings.Split(text, "   ")
+	for len(hints) > 1 && lipgloss.Width(strings.Join(hints, "   ")) > width {
+		hints = hints[:len(hints)-1]
+	}
+
+	return truncate(strings.Join(hints, "   "), width)
 }

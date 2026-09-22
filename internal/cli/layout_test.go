@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"errors"
 	"math"
 	"strconv"
 	"strings"
@@ -144,10 +145,27 @@ func TestNothingWrapsInsideTheFrame(t *testing.T) {
 						checkFits(t, m, width, "tab "+strconv.Itoa(tab))
 					}
 
+					m.active = m.settingsTab()
+					m.editing = true
+					checkFits(t, m, width, "settings, editing")
+					m.editing = false
+
+					m.showHelp = true
+					checkFits(t, m, width, "help")
+					m.showHelp = false
+
 					m.done = true
 					m.active = 0
 					m.report = widestReport()
 					checkFits(t, m, width, "final report")
+
+					m.stopper.Press()
+					checkFits(t, m, width, "final report, stopped")
+
+					m.stopper = NewStopper(func() {}, func() {}, func() {}, time.Hour)
+					m.err = errors.New("rpc error: code = Unavailable desc = connection refused to 10.0.0.1:50051 " +
+						strings.Repeat("x", 80))
+					checkFits(t, m, width, "final report, error")
 				})
 			}
 		}
@@ -168,7 +186,7 @@ func checkFits(t *testing.T, m *model, width int, screen string) {
 // ambiguousInText are the characters a CJK terminal may draw two columns
 // wide while lipgloss counts one. Text lines use ASCII instead; the frame,
 // bars and spinner are graphics and stay.
-const ambiguousInText = "›·—≥…←→↑↓«»"
+const ambiguousInText = "›·—–≥…←→↑↓«»"
 
 func TestTextLinesUseNoAmbiguousWidthCharacters(t *testing.T) {
 	for _, lang := range allLangs {
@@ -190,8 +208,17 @@ func TestTextLinesUseNoAmbiguousWidthCharacters(t *testing.T) {
 				m.showHelp = false
 				press(m, "x")
 				screens = append(screens, m.footer())
-				m.done, m.active, m.report = true, 0, widestReport()
+				m.active, m.editing = m.settingsTab(), true
+				screens = append(screens, m.footer())
+				m.active, m.editing = 0, false
+				m.done, m.report = true, widestReport()
 				screens = append(screens, m.body(120))
+				m.stopper.Press()
+				screens = append(screens, m.body(120))
+
+				setup := &setupModel{settings: &Settings{Mode: string(ModeDark), Palette: Palettes()[0].Name}, text: NewText(lang)}
+				setup.restyle()
+				screens = append(screens, setup.View())
 
 				for _, screen := range screens {
 					if i := strings.IndexAny(screen, ambiguousInText); i >= 0 {
@@ -260,17 +287,20 @@ func TestStatLineCompactsBeforeItDrops(t *testing.T) {
 
 func TestStatLineDropsSentFirstThenRate(t *testing.T) {
 	m := testModel(t)
-	m.text = NewText(LangDE)
+	m.text = NewText(LangEN)
 	m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
 	tickN(m, 3)
-	widest(m)
+
+	// The frame leaves 52. Compact, "sent 1.0M  |  rps 0  |  in flight 1.0M
+	// |  errors 100.0%" is 56: exactly one field must go, and it is sent.
+	m.snapshot.Sent, m.snapshot.Failed, m.snapshot.InFlight = 1_000_000, 1_000_000, 1_000_000
 
 	line := statLineWith(t, m.body(minWidth), m.text.InFlight())
-	if strings.Contains(line, m.text.Sent()) && !strings.Contains(line, "rps") {
-		t.Errorf("rate dropped before sent: %q", line)
-	}
 	if strings.Contains(line, m.text.Sent()) {
-		t.Errorf("sent kept on a line that had to drop something: %q", line)
+		t.Errorf("sent kept on a line that had to drop one field: %q", line)
+	}
+	if !strings.Contains(line, "rps") {
+		t.Errorf("rate dropped while dropping sent alone was enough: %q", line)
 	}
 }
 
@@ -435,5 +465,24 @@ func TestWideningBringsTheFrameBack(t *testing.T) {
 
 	if view := m.View(); !strings.Contains(view, "╭") {
 		t.Errorf("after widening to 100 the frame is not back: %q", firstLine(view))
+	}
+}
+
+// The frame test covers the upper clamp and the cut history; these two edges
+// it never feeds: a value below zero, and no history at all.
+func TestGauge_NegativeValueDrawsAnEmptyBar(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	// -50 of 100 over 10 cells is -5 cells, which strings.Repeat panics on.
+	if got := lipglossWidth(gauge(s, -50, 100, 10)); got != 10 {
+		t.Errorf("gauge width with a negative value = %d, want 10", got)
+	}
+}
+
+func TestSparkline_NoHistoryStillFillsTheRow(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+
+	if got := lipglossWidth(sparkline(s, nil, 20)); got != 20 {
+		t.Errorf("empty sparkline width = %d, want 20", got)
 	}
 }

@@ -424,7 +424,7 @@ func TestSetupQuitKeys(t *testing.T) {
 
 func TestHelpListsTabAndQuit(t *testing.T) {
 	m := testModel(t)
-	help := m.help()
+	help := m.help(100)
 
 	for _, want := range []string{"tab", m.text.HelpQuit()} {
 		if !strings.Contains(help, want) {
@@ -437,7 +437,7 @@ func TestHelpOffersNoSecondQuit(t *testing.T) {
 	// One q leaves now; a line about pressing it again describes a stop that
 	// no longer exists.
 	m := testModel(t)
-	if strings.Contains(m.help(), "q q") {
+	if strings.Contains(m.help(100), "q q") {
 		t.Error("help still tells to press q again")
 	}
 }

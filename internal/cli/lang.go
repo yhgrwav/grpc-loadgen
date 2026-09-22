@@ -324,7 +324,7 @@ func (t Text) ReportStopped() string {
 
 func (t Text) ReportStoppedNote() string {
 	return t.get(phrase{
-		LangRU: "прогон прерван, нагрузка была не полной — числа ниже описывают только то, что успело пройти",
+		LangRU: "прогон прерван, нагрузка была не полной - числа ниже описывают только то, что успело пройти",
 		LangEN: "the run was cut short, so the numbers below describe only the part that ran",
 		LangDE: "der Lauf wurde abgebrochen; die Zahlen unten beschreiben nur den gelaufenen Teil",
 		LangZH: "运行被中止，以下数字仅反映已完成的部分",
@@ -359,10 +359,10 @@ func (t Text) Saved(path string) string {
 
 func (t Text) PickHint() string {
 	return t.get(phrase{
-		LangRU: "↑↓ выбрать   enter подтвердить",
-		LangEN: "↑↓ move   enter confirm",
-		LangDE: "↑↓ wählen   enter bestätigen",
-		LangZH: "↑↓ 选择   enter 确认",
+		LangRU: "up/down выбрать   enter подтвердить",
+		LangEN: "up/down move   enter confirm",
+		LangDE: "up/down wählen   enter bestätigen",
+		LangZH: "up/down 选择   enter 确认",
 	})
 }
 
