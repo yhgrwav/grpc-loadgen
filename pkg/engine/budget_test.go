@@ -203,4 +203,7 @@ func TestNew_MethodInTwoCallsIsRejected(t *testing.T) {
 	if !errors.Is(err, ErrDuplicateMethod) {
 		t.Fatalf("err = %v, want %v", err, ErrDuplicateMethod)
 	}
+	if want := "call 2: method appears in more than one call: a, as call 0"; err.Error() != want {
+		t.Errorf("err = %q, want %q: the user must see which calls collide", err, want)
+	}
 }
