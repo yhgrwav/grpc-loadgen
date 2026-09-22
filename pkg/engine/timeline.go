@@ -46,9 +46,9 @@ type Second struct {
 	LagSum   time.Duration
 	LagMax   time.Duration
 	LagCalls int
-	// The observed sums are over fully observed calls only (succeeded, target
-	// and request faults except timeouts): ObservedCalls. They add up to those
-	// calls' latencies. Timeouts are missing from them, so a drowning target
+	// The observed sums are over successes only: ObservedCalls. They add up to
+	// those calls' latencies. A refusal in 2ms would pass for a faster target,
+	// and a timeout's service time is only a lower bound. So a drowning target
 	// keeps a fine average here; its signal is TargetFailed.
 	ObservedCalls    int
 	ObservedLagSum   time.Duration
@@ -116,7 +116,7 @@ func (t *timeline) record(start time.Time, r Result) {
 		s.lagSum += lag
 		s.lagMax = max(s.lagMax, lag)
 
-		if observed(r.Category) {
+		if r.Category == CategorySuccess {
 			s.observedCalls++
 			s.observedLag += lag
 			s.transportWait += r.TransportWait()
@@ -162,17 +162,6 @@ func lateMoreThanQueued(r Result) bool {
 	}
 
 	return r.QueueTime() >= r.Deadline.Sub(r.BegunAt)
-}
-
-// observed reports whether a call's latency is known whole: answered, and not
-// cut off by a deadline or an abort.
-func observed(c Category) bool {
-	switch c {
-	case CategorySuccess, CategoryClientFault, CategoryServerFault, CategoryOverload:
-		return true
-	default:
-		return false
-	}
 }
 
 func (t *timeline) export() []Second {

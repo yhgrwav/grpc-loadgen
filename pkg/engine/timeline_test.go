@@ -240,17 +240,20 @@ func decomposed(start time.Time, category Category, lag, wait, service time.Dura
 	return r
 }
 
-// Only fully observed calls carry a transport wait and a service time: for a
-// refused connection SentAt means nothing, and a timeout knows its service
-// time only as a lower bound.
-func TestTimeline_OnlyObservedCallsEnterTransportAndService(t *testing.T) {
+// Only successes carry a transport wait and a service time: for a refused
+// connection SentAt means nothing, a timeout knows its service time only as a
+// lower bound, and a fast refusal would pass for a faster target.
+func TestTimeline_OnlySuccessesEnterTransportAndService(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
 
-	for _, c := range []Category{CategorySuccess, CategoryClientFault, CategoryServerFault, CategoryOverload} {
-		stats.Record(decomposed(start, c, time.Millisecond, 2*time.Millisecond, 3*time.Millisecond))
+	for range 4 {
+		stats.Record(decomposed(start, CategorySuccess, time.Millisecond, 2*time.Millisecond, 3*time.Millisecond))
 	}
-	for _, c := range []Category{CategoryUnreachable, CategoryAborted, CategoryTimeout, CategoryUnknown} {
+	for _, c := range []Category{
+		CategoryClientFault, CategoryServerFault, CategoryOverload,
+		CategoryUnreachable, CategoryAborted, CategoryTimeout, CategoryUnknown,
+	} {
 		stats.Record(decomposed(start, c, time.Millisecond, 20*time.Millisecond, 30*time.Millisecond))
 	}
 	stats.Record(unsent(start, 0, 50*time.Millisecond))
@@ -261,9 +264,29 @@ func TestTimeline_OnlyObservedCallsEnterTransportAndService(t *testing.T) {
 			got.ObservedCalls, got.TransportWaitSum, got.ServiceTimeSum)
 	}
 	// The lag stays over every call begun, answered or not.
-	if got.LagCalls != 9 || got.LagSum != 8*time.Millisecond || got.ObservedLagSum != 4*time.Millisecond {
-		t.Errorf("lag calls %d, lag %s, observed lag %s; want 9, 8ms, 4ms",
+	if got.LagCalls != 12 || got.LagSum != 11*time.Millisecond || got.ObservedLagSum != 4*time.Millisecond {
+		t.Errorf("lag calls %d, lag %s, observed lag %s; want 12, 11ms, 4ms",
 			got.LagCalls, got.LagSum, got.ObservedLagSum)
+	}
+}
+
+// A target shedding load refuses half the calls in 2ms and still serves the
+// rest in 200ms. Averaged together that is 101ms: a target twice as fast under
+// overload. Google's SRE book (Monitoring Distributed Systems, the four golden
+// signals) warns of exactly this mix.
+func TestTimeline_FastRefusalsDoNotMakeTheTargetLookFaster(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	for range 100 {
+		stats.Record(decomposed(start, CategorySuccess, 0, 0, 200*time.Millisecond))
+		stats.Record(decomposed(start, CategoryOverload, 0, 0, 2*time.Millisecond))
+		stats.Record(decomposed(start, CategoryClientFault, 0, 0, time.Millisecond))
+	}
+
+	got := seconds(t, stats)[0]
+	if got.ObservedCalls != 100 || got.ServiceTimeSum != 100*200*time.Millisecond {
+		t.Errorf("observed %d, service %s; want 100 and 20s", got.ObservedCalls, got.ServiceTimeSum)
 	}
 }
 
