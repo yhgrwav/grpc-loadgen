@@ -264,9 +264,9 @@ type methodView struct {
 // views copies the counters under the lock and takes each distribution's
 // snapshot outside it: every snapshot briefly locks its own distribution, and
 // nesting those under the Stats lock would stall recording for as long as all
-// methods together take to copy. The refusal times are snapshot only on
-// request: the live view does not show them, and every snapshot allocates.
-func (s *Stats) views(withRefusals bool) (elapsed, measured time.Duration, sent, failed int, out []methodView) {
+// methods together take to copy. Only Report uses it: it allocates, and the
+// live view goes through SnapshotInto instead.
+func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out []methodView) {
 	s.mu.Lock()
 	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
 
@@ -292,9 +292,7 @@ func (s *Stats) views(withRefusals bool) (elapsed, measured time.Duration, sent,
 
 	for i, src := range sources {
 		out[i].dist = src.latency.Snapshot()
-		if withRefusals {
-			out[i].refusal = src.refusal.Snapshot()
-		}
+		out[i].refusal = src.refusal.Snapshot()
 	}
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
@@ -302,52 +300,111 @@ func (s *Stats) views(withRefusals bool) (elapsed, measured time.Duration, sent,
 	return elapsed, measured, sent, failed, out
 }
 
+// Snapshot is SnapshotInto with fresh memory: for an occasional look. A reader
+// that looks several times a second keeps a LiveBuffer and calls SnapshotInto.
 func (s *Stats) Snapshot() Snapshot {
-	elapsed, measured, sent, failed, views := s.views(false)
+	var snapshot Snapshot
+	s.SnapshotInto(&snapshot, NewLiveBuffer(), true)
 
-	snapshot := Snapshot{
-		Elapsed: elapsed,
-		Sent:    sent,
-		Failed:  failed,
+	return snapshot
+}
+
+// LiveBuffer is the memory repeated snapshots reuse, so that looking at a run
+// does not feed the collector in the generator's process. It belongs to
+// whoever made it: not safe for concurrent use, two readers need two.
+type LiveBuffer struct {
+	names   []string
+	methods []*methodStats
+	dists   []*metrics.Buffer
+	merged  *metrics.Buffer
+}
+
+func NewLiveBuffer() *LiveBuffer {
+	return &LiveBuffer{merged: metrics.NewBuffer()}
+}
+
+// SnapshotInto fills dst, reusing its memory and buf's. The counters are
+// always taken. The percentiles only when asked: copying a distribution holds
+// its lock while recording waits, so they are recomputed about once a second,
+// not on every frame. Without them dst keeps the percentiles it had; the
+// methods are always in the same order, by name.
+func (s *Stats) SnapshotInto(dst *Snapshot, buf *LiveBuffer, percentiles bool) {
+	s.mu.Lock()
+	if len(buf.methods) != len(s.byMethod) {
+		buf.track(s.byMethod)
 	}
+
+	elapsed, sent, failed := s.elapsed(), s.sent, s.failed
+	measured := max(elapsed-s.warmup, 0)
+
+	if len(dst.Methods) != len(buf.names) {
+		dst.Methods = make([]MethodSnapshot, len(buf.names))
+	}
+	for i, method := range buf.methods {
+		m := &dst.Methods[i]
+		m.Method, m.Sent, m.Failed = buf.names[i], method.sent, method.failed
+	}
+	s.mu.Unlock()
+
+	dst.Elapsed, dst.Sent, dst.Failed, dst.RPS = elapsed, sent, failed, 0
 	if measured > 0 {
-		snapshot.RPS = float64(sent) / measured.Seconds()
+		dst.RPS = float64(sent) / measured.Seconds()
+	}
+	for i := range dst.Methods {
+		m := &dst.Methods[i]
+		m.RPS = 0
+		if measured > 0 {
+			m.RPS = float64(m.Sent) / measured.Seconds()
+		}
 	}
 
-	dists := make([]*metrics.Snapshot, 0, len(views))
+	if !percentiles {
+		return
+	}
 
-	for _, v := range views {
-		dists = append(dists, v.dist)
+	// Each distribution is copied under its own lock, never nested under the
+	// Stats lock: that would stall recording for all methods at once.
+	for i, method := range buf.methods {
+		method.latency.CopyInto(buf.dists[i])
 
-		entry := MethodSnapshot{
-			Method: v.name,
-			Sent:   v.sent,
-			Failed: v.failed,
-			P50:    v.dist.Percentile(0.50),
-			P90:    v.dist.Percentile(0.90),
-			P99:    v.dist.Percentile(0.99),
-		}
-		if measured > 0 {
-			entry.RPS = float64(v.sent) / measured.Seconds()
-		}
-
-		snapshot.Methods = append(snapshot.Methods, entry)
+		m := &dst.Methods[i]
+		m.P50 = buf.dists[i].Percentile(0.50)
+		m.P90 = buf.dists[i].Percentile(0.90)
+		m.P99 = buf.dists[i].Percentile(0.99)
 	}
 
 	// Distributions are merged rather than their percentiles averaged: the mean
 	// of two p99s is not the p99 of anything.
-	overall := metrics.Merge(dists...)
-	snapshot.P50 = overall.Percentile(0.50)
-	snapshot.P90 = overall.Percentile(0.90)
-	snapshot.P99 = overall.Percentile(0.99)
+	metrics.MergeInto(buf.merged, buf.dists...)
+	dst.P50 = buf.merged.Percentile(0.50)
+	dst.P90 = buf.merged.Percentile(0.90)
+	dst.P99 = buf.merged.Percentile(0.99)
+}
 
-	return snapshot
+// track rebuilds the buffer for the methods there are now. It allocates, but
+// only when a method appears; the planned ones are all there from Reserve.
+func (b *LiveBuffer) track(byMethod map[string]*methodStats) {
+	b.names = b.names[:0]
+	for name := range byMethod {
+		b.names = append(b.names, name)
+	}
+	slices.Sort(b.names)
+
+	b.methods = b.methods[:0]
+	for _, name := range b.names {
+		b.methods = append(b.methods, byMethod[name])
+	}
+
+	for len(b.dists) < len(b.names) {
+		b.dists = append(b.dists, metrics.NewBuffer())
+	}
+	b.dists = b.dists[:len(b.names)]
 }
 
 // Report copies every method's timeline under the lock Record takes: call it
 // once the run is over. For live data use Snapshot.
 func (s *Stats) Report() Report {
-	elapsed, measured, sent, failed, views := s.views(true)
+	elapsed, measured, sent, failed, views := s.views()
 
 	// The timelines are copied only here, once a run is over, never for the
 	// snapshots the interface takes several times a second.

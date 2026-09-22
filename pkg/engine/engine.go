@@ -48,6 +48,10 @@ type Engine struct {
 	stats *Stats
 	pool  *WorkerPool
 
+	// targets is each method's highest planned rate, worked out once: the
+	// live view asks for it on every frame.
+	targets map[string]int
+
 	stopOnce sync.Once
 	stopped  chan struct{}
 	// incomplete is set when the run ended before its plan: stopped or aborted.
@@ -76,12 +80,15 @@ func New(opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	return &Engine{
+	e := &Engine{
 		opts:    opts,
 		stats:   NewStats(),
 		pool:    NewWorkerPool(opts.Sender, opts.MaxInFlight),
 		stopped: make(chan struct{}),
-	}, nil
+	}
+	e.targets = e.targetRates()
+
+	return e, nil
 }
 
 // Stop ends the run gently: nothing new is scheduled, and calls in flight run
@@ -92,17 +99,24 @@ func (e *Engine) Stop() {
 	e.stopOnce.Do(func() { close(e.stopped) })
 }
 
+// Snapshot is SnapshotInto with fresh memory: for an occasional look.
 func (e *Engine) Snapshot() Snapshot {
-	snapshot := e.stats.Snapshot()
-	snapshot.InFlight = e.pool.inFlightCount()
-	snapshot.Total = e.plannedDuration()
-
-	targets := e.targetRates()
-	for i, method := range snapshot.Methods {
-		snapshot.Methods[i].TargetRPS = targets[method.Method]
-	}
+	var snapshot Snapshot
+	e.SnapshotInto(&snapshot, NewLiveBuffer(), true)
 
 	return snapshot
+}
+
+// SnapshotInto is Stats.SnapshotInto plus what the engine knows: calls in
+// flight, the planned length, each method's target rate.
+func (e *Engine) SnapshotInto(dst *Snapshot, buf *LiveBuffer, percentiles bool) {
+	e.stats.SnapshotInto(dst, buf, percentiles)
+	dst.InFlight = e.pool.inFlightCount()
+	dst.Total = e.plannedDuration()
+
+	for i := range dst.Methods {
+		dst.Methods[i].TargetRPS = e.targets[dst.Methods[i].Method]
+	}
 }
 
 func (e *Engine) targetRates() map[string]int {
