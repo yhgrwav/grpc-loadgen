@@ -85,10 +85,13 @@ The config is read strictly: a typo in a field name or a zero `rps` is an error 
 not a run with no load.
 
 **Timeout and the in-flight cap.** When the service hangs, each method keeps `rps × timeout`
-requests in flight until the timeout fires. The sum over methods must stay within
-`-max-in-flight` (5000 by default), otherwise the cap runs out before the first timeout and the
-run fails without ever showing that the service hung. This is checked before the start, and the
-error names both ways out: which timeout fits and which cap is needed.
+requests in flight until the timeout fires, plus an allowance: one request on the window's edge
+and `rps × 100ms` for the generator freeing the slot a little after the deadline. The sum over
+methods must stay within `-max-in-flight` (5000 by default). This is checked before the start,
+and the error names both ways out: which timeout fits and which cap is needed. So a hung service
+does not fill the cap: the run reaches its end, and the report says how many calls got no answer
+within the timeout. If the cap does run out after all, slots were held past the deadline by more
+than the allowance — that is the generator or the sender, and the report calls the run invalid.
 
 ### Request body
 
