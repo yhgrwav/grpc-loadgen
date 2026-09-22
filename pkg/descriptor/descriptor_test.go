@@ -72,6 +72,7 @@ func dialTarget(t *testing.T, withReflection bool) grpc.ClientConnInterface {
 	return conn
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveUnaryMethod(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -93,6 +94,7 @@ func TestResolveUnaryMethod(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveAllDeduplicates(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -112,6 +114,7 @@ func TestResolveAllDeduplicates(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveAllFailsOnFirstBadMethod(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -121,6 +124,7 @@ func TestResolveAllFailsOnFirstBadMethod(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveRejectsStreaming(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -130,6 +134,7 @@ func TestResolveRejectsStreaming(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveMissingMethod(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -139,6 +144,7 @@ func TestResolveMissingMethod(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveMissingService(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -148,6 +154,7 @@ func TestResolveMissingService(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveWithoutReflection(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, false))
 
@@ -157,6 +164,7 @@ func TestResolveWithoutReflection(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestResolveMalformedMethod(t *testing.T) {
 	cases := map[string]string{
 		"no slash":       "grpc.health.v1.Health.Check",
@@ -179,6 +187,7 @@ func TestResolveMalformedMethod(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestNewRequest(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 
@@ -221,6 +230,7 @@ func TestNewRequest(t *testing.T) {
 	})
 }
 
+// Ground: contract — pkg/descriptor is a library API; callers get this without our CLI.
 func TestNewResponse(t *testing.T) {
 	resolver := descriptor.NewReflectionResolver(dialTarget(t, true))
 

@@ -47,9 +47,8 @@ func busy(t *testing.T) *Stats {
 	return stats
 }
 
-// Ground: public pkg/ API contract — the live view snapshots several times a
-// second, and every allocation there is collector work in the generator's
-// process: generator lag the tool causes itself.
+// Ground: hot path — the live view snapshots several times a second; every allocation there is
+// collector work in the generator's process, generator lag the tool causes itself.
 func TestStats_RepeatedSnapshotIntoDoesNotAllocate(t *testing.T) {
 	stats := busy(t)
 
@@ -66,7 +65,7 @@ func TestStats_RepeatedSnapshotIntoDoesNotAllocate(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — the live numbers are the report's
+// Ground: contract — the live numbers are the report's
 // numbers, taken through the allocating path.
 func TestStats_SnapshotIntoMatchesTheReport(t *testing.T) {
 	stats := busy(t)
@@ -89,7 +88,7 @@ func TestStats_SnapshotIntoMatchesTheReport(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — between recomputations the caller keeps
+// Ground: contract — between recomputations the caller keeps
 // the percentiles it has, while the counters move on every call.
 func TestStats_SnapshotWithoutPercentilesKeepsTheOnesItHas(t *testing.T) {
 	stats := NewStats()
@@ -115,8 +114,8 @@ func TestStats_SnapshotWithoutPercentilesKeepsTheOnesItHas(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — what the engine adds on top, the target
-// rates and calls in flight, must not allocate either.
+// Ground: hot path — what the engine adds on top, the target rates and calls in flight, must not
+// allocate either.
 func TestEngine_RepeatedSnapshotIntoDoesNotAllocate(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{

@@ -12,6 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package clock abstracts time so scheduling and latency accounting can be
-// tested without sleeping.
-package clock
+package cli
+
+import "testing"
+
+// Ground: signal google.golang.org/protobuf v1.36.12 — internal/detrand picks the space after
+// "proto:" per binary, so the test binary and a release build can see different ones.
+func TestFieldInError_EitherPrefixSpace(t *testing.T) {
+	for _, prefix := range []string{"proto: ", "proto:\u00a0"} {
+		text := prefix + "(line 1:9): invalid value for int32 field idXRay: 5"
+		if got := fieldInError(text); got != "idXRay" {
+			t.Errorf("fieldInError(%q) = %q, want idXRay", text, got)
+		}
+	}
+}

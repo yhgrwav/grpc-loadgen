@@ -21,6 +21,7 @@ import (
 
 // BenchmarkSend is the allocation budget of the hot path. Moving the codec from
 // the connection to the call must not raise allocs/op.
+// Ground: hot path — allocations per call on the send path.
 func BenchmarkSend(b *testing.B) {
 	sender := dialTarget(b, &target{})
 	req := request(time.Now())

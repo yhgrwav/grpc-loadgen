@@ -19,6 +19,7 @@ import (
 	"testing"
 )
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestCreateConnectionString(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -83,6 +84,7 @@ func TestCreateConnectionString(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestResolveTLS(t *testing.T) {
 	enabled, disabled := true, false
 

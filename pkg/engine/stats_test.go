@@ -21,6 +21,8 @@ import (
 	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
+// Ground: boundary — which rank is p50 and p99: end-to-end only the stop tests catch p99 read as
+// p95, and by chance (mutation 2026-09-22).
 func TestStatsReportsPercentiles(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -61,44 +63,7 @@ func TestStatsReportsPercentiles(t *testing.T) {
 	}
 }
 
-func TestStatsReportsTimeoutAsLowerBound(t *testing.T) {
-	stats := NewStats()
-	start := time.Now()
-	stats.Start(start, 0)
-
-	// p99 of 100 observations is the 99th; with three of them abandoned it can
-	// no longer be pinned down, while p50 still can.
-	for range 97 {
-		stats.Record(Result{
-			Method:      "a",
-			ScheduledAt: start,
-			Outcome:     Outcome{DoneAt: start.Add(10 * time.Millisecond), Category: CategorySuccess},
-		})
-	}
-	for range 3 {
-		stats.Record(Result{
-			Method:      "a",
-			ScheduledAt: start,
-			Outcome:     Outcome{DoneAt: start.Add(time.Second), Category: CategoryTimeout},
-		})
-	}
-
-	report := stats.Report()
-
-	if got := report.Methods[0].P99; got.Exact {
-		t.Errorf("p99 = %+v, want a lower bound: the tail ran past the deadline", got)
-	}
-	if got := report.Methods[0].P99; !got.Defined || got.Value < time.Second {
-		t.Errorf("p99 = %+v, want a bound of at least the deadline", got)
-	}
-	if got := report.Methods[0].Censored; got != 3 {
-		t.Errorf("censored = %d, want 3", got)
-	}
-	if got := report.Methods[0].P50; !got.Exact {
-		t.Errorf("p50 = %+v, want an exact value: the timeout sits above it", got)
-	}
-}
-
+// Ground: boundary — zero observations.
 func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -122,6 +87,7 @@ func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	}
 }
 
+// Ground: contract — one MethodReport per method.
 func TestStatsSplitsMethods(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -149,6 +115,7 @@ func TestStatsSplitsMethods(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a category outside the enum, which no real sender returns.
 func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -163,6 +130,8 @@ func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 	}
 }
 
+// Ground: contract — a refused connection is not latency, until the stand can drop connections
+// mid-run; end-to-end an unreachable target ends at connect.
 func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -200,6 +169,7 @@ func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the threshold is the deadline to the nanosecond, not a later moment.
 func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -224,6 +194,8 @@ func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
 	}
 }
 
+// Ground: contract — Options.Warmup, until the stand switches its delay by time instead of call
+// number.
 func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()

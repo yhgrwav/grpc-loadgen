@@ -91,6 +91,10 @@ func testMessages(t *testing.T) (item, empty protoreflect.MessageDescriptor) {
 	return file.Messages().ByName("Item"), file.Messages().ByName("Empty")
 }
 
+// Ground: signal google.golang.org/protobuf v1.36.12 — fieldInError parses the body of a protojson
+// error, "invalid value for <kind> field <name>:", which the library does not promise. Its detrand
+// instability touches only the "proto:" prefix (U+0020 or U+00A0 by binary hash), which the parser
+// never reads; TestFieldInError_EitherPrefixSpace pins that.
 func TestRequestBody_TheHintNamesTheFieldTheErrorIsAbout(t *testing.T) {
 	item, _ := testMessages(t)
 

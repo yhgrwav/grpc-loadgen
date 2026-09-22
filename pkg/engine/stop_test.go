@@ -105,6 +105,7 @@ func waitRun(t *testing.T, done <-chan error) error {
 	}
 }
 
+// Ground: concurrency — calls in flight at the moment of Stop.
 func TestStop_InFlightFinishAndAreRecorded(t *testing.T) {
 	h := newHoldingSender()
 	eng := stopEngine(t, h, time.Minute)
@@ -127,6 +128,7 @@ func TestStop_InFlightFinishAndAreRecorded(t *testing.T) {
 	}
 }
 
+// Ground: contract — Stop and abort are how a library caller ends a run.
 func TestStop_SchedulesNothingNew(t *testing.T) {
 	h := newHoldingSender()
 	eng := stopEngine(t, h, time.Minute)
@@ -145,6 +147,7 @@ func TestStop_SchedulesNothingNew(t *testing.T) {
 	}
 }
 
+// Ground: contract — a stop drains no longer than the timeout, and calls it cut stay as censored.
 func TestStop_WaitsNoLongerThanTheDeadline(t *testing.T) {
 	const timeout = 150 * time.Millisecond
 
@@ -172,6 +175,7 @@ func TestStop_WaitsNoLongerThanTheDeadline(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — Stop racing the start and the end of a run.
 func TestStop_IsSafeAtAnyTime(t *testing.T) {
 	h := newHoldingSender()
 	close(h.release)
@@ -187,6 +191,7 @@ func TestStop_IsSafeAtAnyTime(t *testing.T) {
 	eng.Stop() // after Run
 }
 
+// Ground: contract — Stop and abort are how a library caller ends a run.
 func TestAbort_InFlightAreCensoredNotLost(t *testing.T) {
 	h := newHoldingSender()
 	eng := stopEngine(t, h, time.Minute)
@@ -221,6 +226,7 @@ func TestAbort_InFlightAreCensoredNotLost(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the censoring threshold of a cut-off call is the abort moment.
 func TestAbortedResult_ThresholdIsTimeUntilTheAbort(t *testing.T) {
 	scheduled := time.Now()
 	r := Result{
@@ -254,6 +260,8 @@ func (l *lateSender) Send(ctx context.Context, _ Request) (Outcome, error) {
 	return Outcome{}, ctx.Err()
 }
 
+// Ground: concurrency — every cut-off call gets the one abort moment, not its own goroutine's read
+// of the clock.
 func TestAbort_OneMomentForEveryInFlightCall(t *testing.T) {
 	sender := &lateSender{entered: make(chan struct{}, 16)}
 	pool := NewWorkerPool(sender, 16)
@@ -309,6 +317,7 @@ func TestAbort_OneMomentForEveryInFlightCall(t *testing.T) {
 	}
 }
 
+// Ground: contract — Stop and abort are how a library caller ends a run.
 func TestStop_MakesTheRunIncomplete(t *testing.T) {
 	h := newHoldingSender()
 	eng := stopEngine(t, h, time.Minute)
@@ -326,6 +335,7 @@ func TestStop_MakesTheRunIncomplete(t *testing.T) {
 	}
 }
 
+// Ground: contract — Stop and abort are how a library caller ends a run.
 func TestAbort_MakesTheRunIncomplete(t *testing.T) {
 	h := newHoldingSender()
 	eng := stopEngine(t, h, time.Minute)
@@ -341,6 +351,7 @@ func TestAbort_MakesTheRunIncomplete(t *testing.T) {
 	}
 }
 
+// Ground: contract — Stop and abort are how a library caller ends a run.
 func TestRun_FinishedAsPlannedIsComplete(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: time.Second, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond}}}},

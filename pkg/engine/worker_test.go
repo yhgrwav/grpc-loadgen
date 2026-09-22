@@ -56,6 +56,7 @@ func drain(out <-chan Result, done *sync.WaitGroup) *[]Result {
 	return &got
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestPoolReportsEveryRequest(t *testing.T) {
 	in := make(chan Request, 8)
 	out := make(chan Result, 8)
@@ -88,6 +89,9 @@ func TestPoolReportsEveryRequest(t *testing.T) {
 	}
 }
 
+// Ground: boundary — latency from BegunAt, the generator's own queue left out, stays green in every
+// end-to-end test; latency from SentAt is caught only by the stream-quota stop (mutations
+// 2026-09-22). Not a duplicate.
 func TestPoolMeasuresLatencyFromScheduledTime(t *testing.T) {
 	scheduledAt := time.Now().Add(-100 * time.Millisecond)
 
@@ -113,6 +117,7 @@ func TestPoolMeasuresLatencyFromScheduledTime(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — calls overlap in flight.
 func TestPoolSendsConcurrently(t *testing.T) {
 	const requests = 20
 
@@ -150,6 +155,8 @@ func TestPoolSendsConcurrently(t *testing.T) {
 	}
 }
 
+// Ground: contract — the pool stops with ErrInFlightCapExceeded once the cap is full. Not exact:
+// 16 requests against a cap of 2, so an off-by-one in the check stays green.
 func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
 	const limit = 2
 
@@ -169,6 +176,7 @@ func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
 	}
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestPoolStopsOnCancel(t *testing.T) {
 	in := make(chan Request)
 	out := make(chan Result, 4)
@@ -184,6 +192,7 @@ func TestPoolStopsOnCancel(t *testing.T) {
 	}
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestPoolRejectsBadSetup(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -216,6 +225,7 @@ func TestPoolRejectsBadSetup(t *testing.T) {
 	}
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestPoolPropagatesSenderError(t *testing.T) {
 	wantErr := errors.New("sender unusable")
 
@@ -243,6 +253,7 @@ func TestPoolPropagatesSenderError(t *testing.T) {
 	}
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestPoolReportsFailedCallWithoutFailingRun(t *testing.T) {
 	callErr := errors.New("call failed")
 
@@ -271,6 +282,7 @@ func TestPoolReportsFailedCallWithoutFailingRun(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a sender that fills in no timestamps.
 func TestPoolFillsInZeroTimestamps(t *testing.T) {
 	sender := senderFunc(func(_ context.Context, _ Request) (Outcome, error) {
 		return Outcome{Category: CategorySuccess}, nil
@@ -309,6 +321,7 @@ func TestPoolFillsInZeroTimestamps(t *testing.T) {
 	}
 }
 
+// Ground: contract — WorkerPool is exported.
 func TestResultLatencyComponentsSumToTotal(t *testing.T) {
 	scheduledAt := time.Now().Add(-100 * time.Millisecond)
 	sentAt := scheduledAt.Add(30 * time.Millisecond)
@@ -336,6 +349,7 @@ func TestResultLatencyComponentsSumToTotal(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — releasing a pool slot.
 func TestPoolFreesSlotBeforeResultIsDelivered(t *testing.T) {
 	sent := make(chan struct{}, 2)
 
@@ -394,6 +408,7 @@ func waitForNoneInFlight(t *testing.T, pool *WorkerPool) {
 	}
 }
 
+// Ground: concurrency — cancellation racing a call in flight.
 func TestPoolDoesNotBlameSenderForOwnCancellation(t *testing.T) {
 	const requests = 4
 
@@ -436,6 +451,7 @@ func TestPoolDoesNotBlameSenderForOwnCancellation(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — a stalled reader of results.
 func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 	in := make(chan Request, 8)
 	for range 8 {

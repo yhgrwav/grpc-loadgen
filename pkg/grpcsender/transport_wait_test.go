@@ -102,6 +102,8 @@ func oneStreamTarget(t *testing.T) *Sender {
 	return sender
 }
 
+// Ground: boundary — the request waits for stream quota exactly until its deadline and never
+// leaves.
 func TestSend_QuotaWaitUntilDeadlineIsNotServiceTime(t *testing.T) {
 	const budget = 100 * time.Millisecond
 
@@ -135,6 +137,9 @@ func TestSend_QuotaWaitUntilDeadlineIsNotServiceTime(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the branch "headers out, body stuck" has no end-to-end test: a grpc-go
+// server reads the whole body before the handler, so the stand cannot hold a flow-control window
+// shut.
 func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 	base := time.Now()
 	header, payload, end := base.Add(10*time.Millisecond), base.Add(20*time.Millisecond), base.Add(100*time.Millisecond)
@@ -173,11 +178,10 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 	}
 }
 
-// TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded pins the contract the
-// timings live under: grpc-go reports a stream from the transport's own
+// Ground: concurrency — dropping the lock goes red under -race (checked 2026-09-22).
+// The timings live under this: grpc-go reports a stream from the transport's own
 // goroutine, which keeps working on a call the caller has already given up on.
-// Reading and writing the same struct at once must therefore be safe — under
-// -race this test goes red the moment the lock is dropped.
+// Reading and writing the same struct at once must therefore be safe.
 func TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded(t *testing.T) {
 	call := &callStats{}
 	ctx := context.WithValue(t.Context(), callKey{}, call)

@@ -86,9 +86,13 @@ func distributions() []distribution {
 
 var fractions = []float64{0, 0.001, 0.25, 0.5, 0.9, 0.95, 0.99, 0.999, 1}
 
-// Ground: boundary — bucket bounds and the definiteness criterion, which no
-// run against the stand hits reliably. The allocating Snapshot is the
-// reference: it is checked against exact percentiles in latencies_test.go.
+// Ground: signal hdrhistogram-go v1.3.0 — valueAtRankOf relies on how the library rounds a
+// percentile to a count, int64(q/100*total + 0.5), which it does not document. We aim at
+// rank − 0.25, so a switch to ceil is harmless (ceil(rank − 0.25) = rank) and only truncation
+// breaks us: checked by aiming at rank − 0.75, which makes today's rounding act like truncation —
+// this test and three others go red (2026-09-22). Do not check this with ceil: it stays green.
+// The allocating Snapshot is the reference, checked against exact percentiles in
+// latencies_test.go.
 func TestBuffer_PercentilesMatchTheSnapshot(t *testing.T) {
 	for _, d := range distributions() {
 		t.Run(d.name, func(t *testing.T) {
@@ -113,7 +117,7 @@ func TestBuffer_PercentilesMatchTheSnapshot(t *testing.T) {
 	}
 }
 
-// Ground: boundary, as above, for the merge of several methods.
+// Ground: signal hdrhistogram-go v1.3.0 — as above, for the merge of several methods.
 func TestBuffer_MergeMatchesTheSnapshotMerge(t *testing.T) {
 	var snapshots []*Snapshot
 	var buffers []*Buffer
@@ -145,7 +149,7 @@ func TestBuffer_MergeMatchesTheSnapshotMerge(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — a buffer reused for the next copy holds
+// Ground: contract — a buffer reused for the next copy holds
 // only the new distribution.
 func TestBuffer_CopyReplacesWhatWasThere(t *testing.T) {
 	buf := NewBuffer()
@@ -169,7 +173,7 @@ func TestBuffer_CopyReplacesWhatWasThere(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — a percentile among the censored builds a
+// Ground: contract — a percentile among the censored builds a
 // combined distribution; the next fill must not reuse it.
 func TestBuffer_RefillDropsTheCombinedDistribution(t *testing.T) {
 	buf := NewBuffer()
@@ -188,9 +192,8 @@ func TestBuffer_RefillDropsTheCombinedDistribution(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — the live view takes a copy several times
-// a second, and every allocation there is collector work in the generator's
-// process, which shows up as generator lag.
+// Ground: hot path — the live view takes a copy several times a second; an allocation there shows
+// up as generator lag.
 func TestBuffer_RepeatedUseDoesNotAllocate(t *testing.T) {
 	l := NewLatencies()
 	for i := range 1000 {
@@ -230,7 +233,7 @@ func ExampleBuffer() {
 	// Output: 10ms
 }
 
-// Ground: public pkg/ API contract — refusals are never cut short, so their
+// Ground: contract — refusals are never cut short, so their
 // distribution carries no censored histogram until a value above its range
 // needs one.
 func TestUncensored_WorksLikeLatenciesWithoutTheSecondHistogram(t *testing.T) {
@@ -268,7 +271,7 @@ func TestUncensored_WorksLikeLatenciesWithoutTheSecondHistogram(t *testing.T) {
 	}
 }
 
-// Ground: public pkg/ API contract — the point of the constructor is memory.
+// Ground: contract — the point of the constructor is memory.
 func TestUncensored_TakesHalfTheMemory(t *testing.T) {
 	var before, after runtime.MemStats
 

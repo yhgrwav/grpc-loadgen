@@ -41,6 +41,8 @@ func collect(ctx context.Context, t *testing.T, s *Scheduler) ([]Request, error)
 	return got, <-errc
 }
 
+// Ground: boundary — the exact count of a stage: a mutation that loses its last call stays green in
+// every end-to-end test (2026-09-22).
 func TestRunEmitsOneRequestPerInterval(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}})
 
@@ -61,6 +63,7 @@ func TestRunEmitsOneRequestPerInterval(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRunWalksEveryStage(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
@@ -77,6 +80,8 @@ func TestRunWalksEveryStage(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the exact span across a stage seam, to the nanosecond; arrivals at the stand
+// carry scheduling jitter.
 func TestStagesDoNotDriftApart(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
@@ -94,6 +99,8 @@ func TestStagesDoNotDriftApart(t *testing.T) {
 	}
 }
 
+// Ground: boundary — rounding of nanoseconds per interval must not accumulate; arrivals at the
+// stand carry scheduling jitter.
 func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 	const rps = 3000
 
@@ -112,6 +119,7 @@ func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRunStopsOnCancel(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}})
 
@@ -131,6 +139,7 @@ func TestRunStopsOnCancel(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRequestsCarryCallFields(t *testing.T) {
 	call := Call{
 		Method:       "a.B/C",
@@ -161,6 +170,7 @@ func TestRequestsCarryCallFields(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRequestDeadlineFollowsTimeout(t *testing.T) {
 	const timeout = 25 * time.Millisecond
 
@@ -187,6 +197,7 @@ func TestRequestDeadlineFollowsTimeout(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRequestDeadlineIsZeroWithoutTimeout(t *testing.T) {
 	call := Call{
 		Method: "a.B/C",
@@ -209,6 +220,7 @@ func TestRequestDeadlineIsZeroWithoutTimeout(t *testing.T) {
 	}
 }
 
+// Ground: contract — Scheduler is exported; its requests are what a library caller sends.
 func TestRunRejectsBadStages(t *testing.T) {
 	tests := []struct {
 		name    string

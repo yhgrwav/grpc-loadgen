@@ -24,6 +24,7 @@ import (
 	"github.com/yhgrwav/leettest/pkg/config"
 )
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestLoadParsesDurations(t *testing.T) {
 	const raw = `
 app:
@@ -58,6 +59,7 @@ load:
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestCallValidate(t *testing.T) {
 	valid := config.Call{
 		Method:   "wallet.v1.WalletService/GetBalance",
@@ -95,6 +97,7 @@ func TestCallValidate(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestCallValidateReportsEveryProblem(t *testing.T) {
 	call := config.Call{}
 
@@ -107,6 +110,7 @@ func TestCallValidateReportsEveryProblem(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestLoadValidate(t *testing.T) {
 	call := config.Call{
 		Method:   "wallet.v1.WalletService/GetBalance",

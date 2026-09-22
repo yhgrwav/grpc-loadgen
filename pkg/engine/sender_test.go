@@ -16,6 +16,7 @@ package engine
 
 import "testing"
 
+// Ground: contract — Category.String is exported.
 func TestCategoryString(t *testing.T) {
 	tests := []struct {
 		name string

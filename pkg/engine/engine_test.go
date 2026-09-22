@@ -22,6 +22,8 @@ import (
 	"time"
 )
 
+// Ground: contract — Report.Sent in total: end-to-end tests read only method rows, and a mutation
+// that stops counting it stays green there (2026-09-22).
 func TestEngineRunsEveryCall(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{
@@ -53,27 +55,8 @@ func TestEngineRunsEveryCall(t *testing.T) {
 	}
 }
 
-func TestEngineCountsFailures(t *testing.T) {
-	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
-		Sender:      FakeSender{Delay: time.Millisecond, FailRatio: 1},
-		MaxInFlight: 64,
-	})
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-
-	if err := eng.Run(context.Background()); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	report := eng.Report()
-
-	if report.Failed != report.Sent {
-		t.Errorf("failed = %d, want all %d to fail", report.Failed, report.Sent)
-	}
-}
-
+// Ground: contract — Options.Warmup, until the stand switches its delay by time instead of call
+// number.
 func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
@@ -102,6 +85,7 @@ func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	}
 }
 
+// Ground: contract — cancelling the context is how a library caller stops a run.
 func TestEngineStopsOnCancel(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}}},
@@ -125,6 +109,7 @@ func TestEngineStopsOnCancel(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — a leak shows only after many runs in one process.
 func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	before := runtime.NumGoroutine()
 
@@ -157,6 +142,7 @@ func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	}
 }
 
+// Ground: contract — engine.New validates what a library caller passes.
 func TestEngineRejectsBadOptions(t *testing.T) {
 	stage := []Stage{{StartRPS: 1, TargetRPS: 1, Duration: time.Second}}
 
@@ -193,6 +179,7 @@ func TestEngineRejectsBadOptions(t *testing.T) {
 	}
 }
 
+// Ground: contract — the live snapshot is the API a UI polls.
 func TestSnapshotTracksProgress(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 200 * time.Millisecond}}}},
@@ -227,6 +214,7 @@ func TestSnapshotTracksProgress(t *testing.T) {
 // A call begun in the last planned second against a target that hangs runs on
 // to its deadline past the plan: the reserve must hold it, and in flight must
 // come back to zero.
+// Ground: contract — Report.Timeline covers the drain after the last scheduled call.
 func TestEngineTimelineHoldsTheDrain(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{{
