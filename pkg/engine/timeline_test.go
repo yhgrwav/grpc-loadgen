@@ -51,7 +51,7 @@ func seconds(t *testing.T, stats *Stats) []Second {
 	return report.Methods[0].Seconds
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a second an hour into a run; no end-to-end test runs an hour.
 func TestTimeline_SecondFarIntoALongRunIsItsOwnWindow(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -67,7 +67,7 @@ func TestTimeline_SecondFarIntoALongRunIsItsOwnWindow(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — an event exactly on a second boundary.
 func TestTimeline_BoundaryBelongsToTheNextSecond(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -80,7 +80,7 @@ func TestTimeline_BoundaryBelongsToTheNextSecond(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — in flight at the exact end of each second.
 func TestTimeline_InFlightAtTheEndOfEachSecond(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -193,7 +193,7 @@ func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
 // A request that never went out tells two different stories: stuck behind
 // the connection's stream quota, or started by a generator already past the
 // deadline. Opening more connections helps only the first.
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — the budget-share split of unsent calls, to the millisecond.
 func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -220,7 +220,7 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a category outside the enum, which no real sender returns.
 func TestTimeline_UnknownIsUnclassifiedNotUnanswered(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -325,7 +325,7 @@ func TestTimeline_ObservedTermsAddUpToLatency(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — an invalid lag, which a real run produces only when a clock jumps.
 func TestTimeline_InvalidLagIsNotALagCall(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -378,7 +378,7 @@ func TestTimeline_UnansweredAndAbortedCountInLag(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a negative lag, which a real run produces only when a clock jumps.
 func TestTimeline_NegativeLagIsInvalidNotZero(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -417,7 +417,7 @@ func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a call just past the reserved span.
 func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -436,7 +436,7 @@ func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a timeline with no span reserved.
 func TestTimeline_WithoutReserveEverythingIsOutside(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -450,7 +450,7 @@ func TestTimeline_WithoutReserveEverythingIsOutside(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — an event before the start, which a real run produces only when a clock jumps.
 func TestTimeline_EventBeforeTheStartIsCountedAside(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -469,7 +469,8 @@ func TestTimeline_EventBeforeTheStartIsCountedAside(t *testing.T) {
 	}
 }
 
-// Ground: boundary — second boundaries and edge values a run cannot place reliably.
+// Ground: boundary — a call finished before it began, which a real run produces only when a clock
+// jumps.
 func TestTimeline_FinishedBeforeBegunIsCountedAside(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)

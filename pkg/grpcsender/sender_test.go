@@ -202,7 +202,8 @@ func TestConnect_UnresolvableNameFailsWithoutADeadline(t *testing.T) {
 	}
 }
 
-// Ground: boundary — a probe racing a target that comes up.
+// Ground: boundary — the race the probe exists for, set up by hand: the connection came up between
+// the failure and the probe.
 func TestTransportCause_ProbeThatReachesATargetHasNoEffect(t *testing.T) {
 	// The race the probe is built for: the connection came up between seeing
 	// TRANSIENT_FAILURE and probing. The target must see nothing it would act

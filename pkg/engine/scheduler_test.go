@@ -41,8 +41,8 @@ func collect(ctx context.Context, t *testing.T, s *Scheduler) ([]Request, error)
 	return got, <-errc
 }
 
-// Ground: boundary — the exact count at a stage end: checkArrivals tolerates one call, so losing
-// the last one stays green end-to-end (mutation 2026-09-22).
+// Ground: boundary — the exact count of a stage: a mutation that loses its last call stays green in
+// every end-to-end test (2026-09-22).
 func TestRunEmitsOneRequestPerInterval(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}})
 
@@ -80,7 +80,8 @@ func TestRunWalksEveryStage(t *testing.T) {
 	}
 }
 
-// Ground: boundary — drift of microseconds per stage, below what a run against the stand resolves.
+// Ground: boundary — the exact span across a stage seam, to the nanosecond; arrivals at the stand
+// carry scheduling jitter.
 func TestStagesDoNotDriftApart(t *testing.T) {
 	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
 		{StartRPS: 100, TargetRPS: 100, Duration: 50 * time.Millisecond},
@@ -98,8 +99,8 @@ func TestStagesDoNotDriftApart(t *testing.T) {
 	}
 }
 
-// Ground: boundary — rounding of nanoseconds per interval, below what a run against the stand
-// resolves.
+// Ground: boundary — rounding of nanoseconds per interval must not accumulate; arrivals at the
+// stand carry scheduling jitter.
 func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
 	const rps = 3000
 

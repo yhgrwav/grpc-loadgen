@@ -147,7 +147,7 @@ func TestStop_SchedulesNothingNew(t *testing.T) {
 	}
 }
 
-// Ground: boundary — the drain ends at the deadline, not after it.
+// Ground: contract — a stop drains no longer than the timeout, and calls it cut stay as censored.
 func TestStop_WaitsNoLongerThanTheDeadline(t *testing.T) {
 	const timeout = 150 * time.Millisecond
 
@@ -260,7 +260,8 @@ func (l *lateSender) Send(ctx context.Context, _ Request) (Outcome, error) {
 	return Outcome{}, ctx.Err()
 }
 
-// Ground: boundary — every cut-off call gets the same moment, not its own read of the clock.
+// Ground: concurrency — every cut-off call gets the one abort moment, not its own goroutine's read
+// of the clock.
 func TestAbort_OneMomentForEveryInFlightCall(t *testing.T) {
 	sender := &lateSender{entered: make(chan struct{}, 16)}
 	pool := NewWorkerPool(sender, 16)

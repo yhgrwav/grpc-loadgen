@@ -36,8 +36,8 @@ func newWithCap(maxInFlight int, calls ...Call) error {
 	return err
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: contract — engine.New refuses a run a hung target would push past the cap, before
+// anything is sent; the numbers ride on InFlightBudgetError.
 func TestNew_RejectsCallsThatOutgrowTheCapWhenTheTargetHangs(t *testing.T) {
 	// 1000 RPS against a hung target with a 20s timeout: the cap of 5000 is
 	// hit at 5s, fifteen seconds before the first timeout could free a slot.
@@ -56,16 +56,14 @@ func TestNew_RejectsCallsThatOutgrowTheCapWhenTheTargetHangs(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: boundary — exactly at the cap.
 func TestNew_BudgetExactlyAtTheCapIsAccepted(t *testing.T) {
 	if err := newWithCap(5000, budgetCall("a", 100, 50*time.Second)); err != nil {
 		t.Errorf("100 RPS x 50s = 5000 against a cap of 5000: err = %v, want nil", err)
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: boundary — one over the cap, rounded up.
 func TestNew_BudgetOneOverTheCapIsRejected(t *testing.T) {
 	// 100 x 50.001s = 5000.1, which rounds up: a request is either in flight
 	// or not.
@@ -80,8 +78,7 @@ func TestNew_BudgetOneOverTheCapIsRejected(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: contract — the cap is one for the whole run, not per call.
 func TestNew_BudgetSumsEveryCall(t *testing.T) {
 	// The cap is shared by the whole run: two calls that fit one by one can
 	// still overflow it together.
@@ -118,8 +115,8 @@ func TestNew_CallWithoutTimeoutIsRejected(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: contract — stages shorter than the timeout add up; sizing each by its own duration lets
+// 2000 pass a cap of 1999.
 func TestNew_StagesShorterThanTheTimeoutAddUp(t *testing.T) {
 	// Two one-second stages at 1000 RPS under a 2s timeout: at t=2s a hung
 	// target still holds every request of both, 2000 in all. A check that sized
@@ -138,8 +135,7 @@ func TestNew_StagesShorterThanTheTimeoutAddUp(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: contract — the budget is the busiest stage, not the first or the sum.
 func TestNew_BudgetUsesThePeakStage(t *testing.T) {
 	// Neither the first stage nor the sum of stages: the busiest one.
 	call := Call{
@@ -161,8 +157,7 @@ func TestNew_BudgetUsesThePeakStage(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the cap, one over it, overflow: a run cannot hit these edges
-// reliably.
+// Ground: boundary — a product past what an int holds must not wrap into a pass.
 func TestNew_HugeBudgetDoesNotOverflowIntoAPass(t *testing.T) {
 	// MaxInt32 RPS for 292 years is about 2e19 requests, past what an int holds.
 	// A product that wraps around lands anywhere, a negative number included,

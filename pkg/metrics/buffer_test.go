@@ -86,10 +86,10 @@ func distributions() []distribution {
 
 var fractions = []float64{0, 0.001, 0.25, 0.5, 0.9, 0.95, 0.99, 0.999, 1}
 
-// Ground: signal hdrhistogram-go v1.3.0 — Buffer computes percentiles from bucket counts itself,
-// repeating the library's undocumented ValueAtQuantile formula; an upgrade that changes it goes red
-// here instead of splitting live and report numbers. The allocating Snapshot is the reference,
-// checked against exact percentiles in latencies_test.go.
+// Ground: signal hdrhistogram-go v1.3.0 — valueAtRankOf relies on how the library rounds a
+// percentile to a count, int64(q/100*total + 0.5), which it does not document; an upgrade that
+// changes it goes red here instead of splitting live and report numbers. The allocating Snapshot is
+// the reference, checked against exact percentiles in latencies_test.go.
 func TestBuffer_PercentilesMatchTheSnapshot(t *testing.T) {
 	for _, d := range distributions() {
 		t.Run(d.name, func(t *testing.T) {
