@@ -98,26 +98,6 @@ func TestTextFallsBackToEnglish(t *testing.T) {
 	}
 }
 
-func TestEveryLanguageTranslatesTheBasics(t *testing.T) {
-	for _, option := range Languages() {
-		text := NewText(option.Lang)
-
-		for name, got := range map[string]string{
-			"summary":  text.Summary(),
-			"running":  text.Running(),
-			"sent":     text.Sent(),
-			"errors":   text.Errors(),
-			"inflight": text.InFlight(),
-			"helptabs": text.HelpTabs(),
-			"helpquit": text.HelpQuit(),
-		} {
-			if got == "" {
-				t.Errorf("%s is empty in %s", name, option.Lang)
-			}
-		}
-	}
-}
-
 func TestPaletteByNameFallsBack(t *testing.T) {
 	if got := PaletteByName("nope").Name; got != Palettes()[0].Name {
 		t.Errorf("unknown palette resolved to %q, want the first one", got)

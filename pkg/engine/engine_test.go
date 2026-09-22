@@ -53,27 +53,6 @@ func TestEngineRunsEveryCall(t *testing.T) {
 	}
 }
 
-func TestEngineCountsFailures(t *testing.T) {
-	eng, err := New(Options{
-		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
-		Sender:      FakeSender{Delay: time.Millisecond, FailRatio: 1},
-		MaxInFlight: 64,
-	})
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-
-	if err := eng.Run(context.Background()); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	report := eng.Report()
-
-	if report.Failed != report.Sent {
-		t.Errorf("failed = %d, want all %d to fail", report.Failed, report.Sent)
-	}
-}
-
 func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},

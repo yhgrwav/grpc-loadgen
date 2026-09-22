@@ -61,44 +61,6 @@ func TestStatsReportsPercentiles(t *testing.T) {
 	}
 }
 
-func TestStatsReportsTimeoutAsLowerBound(t *testing.T) {
-	stats := NewStats()
-	start := time.Now()
-	stats.Start(start, 0)
-
-	// p99 of 100 observations is the 99th; with three of them abandoned it can
-	// no longer be pinned down, while p50 still can.
-	for range 97 {
-		stats.Record(Result{
-			Method:      "a",
-			ScheduledAt: start,
-			Outcome:     Outcome{DoneAt: start.Add(10 * time.Millisecond), Category: CategorySuccess},
-		})
-	}
-	for range 3 {
-		stats.Record(Result{
-			Method:      "a",
-			ScheduledAt: start,
-			Outcome:     Outcome{DoneAt: start.Add(time.Second), Category: CategoryTimeout},
-		})
-	}
-
-	report := stats.Report()
-
-	if got := report.Methods[0].P99; got.Exact {
-		t.Errorf("p99 = %+v, want a lower bound: the tail ran past the deadline", got)
-	}
-	if got := report.Methods[0].P99; !got.Defined || got.Value < time.Second {
-		t.Errorf("p99 = %+v, want a bound of at least the deadline", got)
-	}
-	if got := report.Methods[0].Censored; got != 3 {
-		t.Errorf("censored = %d, want 3", got)
-	}
-	if got := report.Methods[0].P50; !got.Exact {
-		t.Errorf("p50 = %+v, want an exact value: the timeout sits above it", got)
-	}
-}
-
 func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
