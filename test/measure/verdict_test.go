@@ -17,6 +17,7 @@ package measure
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -411,5 +412,88 @@ func TestReport_TwoMethodsOfDifferentBudgetsStillNameTheHeldSlots(t *testing.T) 
 	if got := report.CapHit.OverDeadline; got < 150 {
 		t.Errorf("over deadline = %d at %v, want the held slots of the method with the short timeout",
 			got, report.CapHit.At)
+	}
+}
+
+// --- the sending rate --------------------------------------------------------
+
+const (
+	rateRPS     = 50
+	rateRun     = 3 * time.Second
+	rateTimeout = time.Second
+)
+
+// The drain after the plan is waiting, not sending: divided into the rate, a
+// hanging target would read as 150 calls over 4s, 37.5/s instead of 50.
+func TestReport_AHangingTargetDoesNotLowerTheSendingRate(t *testing.T) {
+	target := stand.Start(stand.Hanging())
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), rateRPS, rateRun, rateTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if got := report.Methods[0].RPS; got < rateRPS*0.96 || got > rateRPS*1.04 {
+		t.Errorf("rps = %.1f, want %d: the drain is not sending time", got, rateRPS)
+	}
+}
+
+// stopAt calls Stop once the n-th call reaches the sender.
+type stopAt struct {
+	engine.Sender
+	n    int64
+	seen atomic.Int64
+	stop func()
+}
+
+func (s *stopAt) Send(ctx context.Context, req engine.Request) (engine.Outcome, error) {
+	if s.seen.Add(1) == s.n {
+		s.stop()
+	}
+
+	return s.Sender.Send(ctx, req)
+}
+
+// Stopped after a second of a 3s plan: 50 calls over the second they were
+// sent in. Dividing by the plan (3s) or by the run with its drain (2s) gives
+// 17 or 25.
+func TestReport_AStoppedRunRatesOverTheTimeItSent(t *testing.T) {
+	target := stand.Start(stand.Hanging())
+	t.Cleanup(target.Stop)
+
+	sender := grpcsender.New(grpcsender.Options{
+		Target:      target.Target(),
+		DialOptions: []grpc.DialOption{target.DialOption()},
+	})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect to the stand: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	wrapped := &stopAt{Sender: sender, n: rateRPS}
+	eng, err := engine.New(engine.Options{
+		Calls:       []engine.Call{load(target.Method(), rateRPS, rateRun, rateTimeout)},
+		Sender:      wrapped,
+		MaxInFlight: 1000,
+	})
+	if err != nil {
+		t.Fatalf("build the engine: %v", err)
+	}
+	wrapped.stop = eng.Stop
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+	if err := eng.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	report := eng.Report()
+	if !report.Incomplete {
+		t.Fatal("report not marked incomplete after Stop")
+	}
+	if got := report.Methods[0].RPS; got < rateRPS*0.9 || got > rateRPS*1.1 {
+		t.Errorf("rps = %.1f, want about %d: %d calls over the second they were sent in",
+			got, rateRPS, report.Methods[0].Sent)
 	}
 }

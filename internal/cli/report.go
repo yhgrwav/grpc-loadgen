@@ -33,7 +33,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	}
 
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
-		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
+		"method", "sent", "failed", "sent/s", "p50", "p90", "p95", "p99")
 
 	censored, invalid, unanswered, unclassified, outside, refused := 0, 0, 0, 0, 0, 0
 

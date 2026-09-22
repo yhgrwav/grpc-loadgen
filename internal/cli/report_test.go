@@ -320,3 +320,18 @@ func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
 		t.Errorf("start lag is not the generator's lag as a whole: it does not see answers picked up late:\n%s", text)
 	}
 }
+
+// The column carries what the generator sent per second of sending, not the
+// target's throughput and not an average over the drain: a header reading
+// "rps" leaves the reader to guess which.
+func TestPrintReportNamesTheRateColumnForWhatItCounts(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration: time.Second,
+		Methods:  []engine.MethodReport{{Method: "a.B/One", Sent: 100, RPS: 100}},
+	})
+
+	if text := out.String(); !strings.Contains(text, "sent/s") {
+		t.Errorf("rate column is not named sent/s:\n%s", text)
+	}
+}
