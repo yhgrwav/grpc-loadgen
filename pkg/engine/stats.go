@@ -58,6 +58,11 @@ type MethodReport struct {
 	P95    metrics.Quantile
 	P99    metrics.Quantile
 	Max    metrics.Quantile
+	// The percentiles above are the service time: successes, with timeouts and
+	// aborted calls as lower bounds of it. Refusals — the target answering it
+	// will not serve — are a different quantity, often far faster, and are in
+	// Refusal instead.
+	//
 	// Latencies counts the observations behind the percentiles, Censored how
 	// many of them only have a lower bound, and Invalid how many were rejected
 	// as impossible — a negative latency means the time arithmetic is wrong.
@@ -71,6 +76,7 @@ type MethodReport struct {
 	// of the sender, kept apart so it does not pass for an unreachable target.
 	// They are absent from the distribution too.
 	Unclassified int
+	Refusal      RefusalLatency
 	// Seconds covers the whole run, warmup included, up to the last second
 	// anything happened in. Unlike the totals it keeps every call.
 	Seconds []Second
@@ -78,6 +84,17 @@ type MethodReport struct {
 	// could not be placed on it; InvalidLag, calls begun before their schedule.
 	OutsideTimeline int
 	InvalidLag      int
+}
+
+// RefusalLatency is how long the target took to refuse: server faults,
+// overload and client faults. A slow refusal is worse than a fast one.
+type RefusalLatency struct {
+	Count int
+	P50   metrics.Quantile
+	P90   metrics.Quantile
+	P95   metrics.Quantile
+	P99   metrics.Quantile
+	Max   metrics.Quantile
 }
 
 type Report struct {
@@ -114,6 +131,7 @@ type methodStats struct {
 	unanswered int
 	unknown    int
 	latency    *metrics.Latencies
+	refusal    *metrics.Latencies
 	timeline   timeline
 }
 
@@ -138,7 +156,11 @@ func (s *Stats) Reserve(span time.Duration, methods ...string) {
 }
 
 func (s *Stats) newMethod() *methodStats {
-	return &methodStats{latency: metrics.NewLatencies(), timeline: newTimeline(s.reserve)}
+	return &methodStats{
+		latency:  metrics.NewLatencies(),
+		refusal:  metrics.NewLatencies(),
+		timeline: newTimeline(s.reserve),
+	}
 }
 
 func (s *Stats) Start(at time.Time, warmup time.Duration) {
@@ -218,7 +240,12 @@ func (s *Stats) Record(r Result) {
 		return
 	}
 
-	method.latency.Record(r.Latency())
+	switch r.Category {
+	case CategorySuccess:
+		method.latency.Record(r.Latency())
+	case CategoryServerFault, CategoryOverload, CategoryClientFault:
+		method.refusal.Record(r.Latency())
+	}
 }
 
 // methodView is one method's counters taken under the lock together with a
@@ -231,13 +258,15 @@ type methodView struct {
 	unanswered int
 	unknown    int
 	dist       *metrics.Snapshot
+	refusal    *metrics.Snapshot
 }
 
 // views copies the counters under the lock and takes each distribution's
 // snapshot outside it: every snapshot briefly locks its own distribution, and
 // nesting those under the Stats lock would stall recording for as long as all
-// methods together take to copy.
-func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out []methodView) {
+// methods together take to copy. The refusal times are snapshot only on
+// request: the live view does not show them, and every snapshot allocates.
+func (s *Stats) views(withRefusals bool) (elapsed, measured time.Duration, sent, failed int, out []methodView) {
 	s.mu.Lock()
 	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
 
@@ -250,19 +279,22 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	}
 
 	out = make([]methodView, 0, len(s.byMethod))
-	sources := make([]*metrics.Latencies, 0, len(s.byMethod))
+	sources := make([]*methodStats, 0, len(s.byMethod))
 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
 			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
 			unknown: method.unknown,
 		})
-		sources = append(sources, method.latency)
+		sources = append(sources, method)
 	}
 	s.mu.Unlock()
 
 	for i, src := range sources {
-		out[i].dist = src.Snapshot()
+		out[i].dist = src.latency.Snapshot()
+		if withRefusals {
+			out[i].refusal = src.refusal.Snapshot()
+		}
 	}
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
@@ -271,7 +303,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	elapsed, measured, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views(false)
 
 	snapshot := Snapshot{
 		Elapsed: elapsed,
@@ -315,7 +347,7 @@ func (s *Stats) Snapshot() Snapshot {
 // Report copies every method's timeline under the lock Record takes: call it
 // once the run is over. For live data use Snapshot.
 func (s *Stats) Report() Report {
-	elapsed, measured, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views(true)
 
 	// The timelines are copied only here, once a run is over, never for the
 	// snapshots the interface takes several times a second.
@@ -355,6 +387,14 @@ func (s *Stats) Report() Report {
 			P95:          v.dist.Percentile(0.95),
 			P99:          v.dist.Percentile(0.99),
 			Max:          v.dist.Percentile(1),
+			Refusal: RefusalLatency{
+				Count: int(v.refusal.Count()),
+				P50:   v.refusal.Percentile(0.50),
+				P90:   v.refusal.Percentile(0.90),
+				P95:   v.refusal.Percentile(0.95),
+				P99:   v.refusal.Percentile(0.99),
+				Max:   v.refusal.Percentile(1),
+			},
 
 			Seconds:         timelines[v.name].Seconds,
 			OutsideTimeline: timelines[v.name].OutsideTimeline,
