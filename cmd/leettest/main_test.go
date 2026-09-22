@@ -542,10 +542,11 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 		t.Fatal("run succeeded, want the in-flight budget to reject the config")
 	}
 
-	// Cap 10 at 50 RPS: a slot for the call on the window's edge and 5 for
-	// 100ms of late release leave 4, a timeout of 80ms; keeping 2s needs
-	// 100 + 1 + 5 = 106. The error says why the numbers are not 200ms and 100.
-	for _, want := range []string{"timeout", "80ms", "-max-in-flight", "106", "100ms"} {
+	// Cap 10 at 50 RPS: a slot for the call on the window's edge, 5 for 100ms
+	// of late release and one for rounding rps × timeout up leave 3, a timeout
+	// of 60ms; keeping 2s needs 100 + 1 + 5 = 106. The error says why the
+	// numbers are not 200ms and 100.
+	for _, want := range []string{"timeout", "60ms", "-max-in-flight", "106", "100ms"} {
 		if !strings.Contains(res.err.Error(), want) {
 			t.Errorf("error %q lacks %q", res.err, want)
 		}
@@ -914,5 +915,56 @@ func TestRunResult_OtherFailuresStayErrors(t *testing.T) {
 	boom := errors.New("boom")
 	if err := runResult(engine.Report{}, boom); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want the failure itself", err)
+	}
+}
+
+func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
+	// Each call rounds its own rps × timeout up: dividing the cap by the summed
+	// rate once advised 600ms for 3 and 7 RPS under a cap of 10, which New
+	// then rejected with a budget of 11.
+	for _, maxInFlight := range []int{3, 10, 57, 500, 5000, 12345} {
+		for _, rates := range [][]int{{1}, {50}, {3, 7}, {999, 1}, {2500}, {100, 200, 300}} {
+			calls := make([]engine.Call, len(rates))
+			for i, rps := range rates {
+				calls[i] = engine.Call{Method: strconv.Itoa(i), Timeout: 2 * time.Second,
+					Stages: []engine.Stage{{StartRPS: rps, TargetRPS: rps, Duration: time.Second}}}
+			}
+			fresh := func(timeout time.Duration, cap int) error {
+				for i := range calls {
+					calls[i].Timeout = timeout
+				}
+				_, err := engine.New(engine.Options{Calls: calls, Sender: engine.FakeSender{}, MaxInFlight: cap})
+
+				return err
+			}
+
+			var budget *engine.InFlightBudgetError
+			if !errors.As(fresh(2*time.Second, maxInFlight), &budget) {
+				continue
+			}
+
+			advice := withBudgetAdvice(budget).Error()
+			if err := fresh(2*time.Second, budget.Need); err != nil {
+				t.Errorf("cap %d, rates %v: advised -max-in-flight %d, New says %v", maxInFlight, rates, budget.Need, err)
+			}
+
+			at := strings.Index(advice, "at most ")
+			if at < 0 {
+				if !strings.Contains(advice, "no timeout fits") {
+					t.Errorf("cap %d, rates %v: advice names neither a timeout nor why not: %q", maxInFlight, rates, advice)
+				}
+				continue
+			}
+			fits, err := time.ParseDuration(strings.Fields(advice[at+len("at most "):])[0])
+			if err != nil {
+				t.Fatalf("advice %q: %v", advice, err)
+			}
+			if fits <= 0 {
+				t.Errorf("cap %d, rates %v: advised a timeout of %v", maxInFlight, rates, fits)
+			}
+			if err := fresh(fits, maxInFlight); err != nil {
+				t.Errorf("cap %d, rates %v: advised %v, New says %v", maxInFlight, rates, fits, err)
+			}
+		}
 	}
 }

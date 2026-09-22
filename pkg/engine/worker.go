@@ -159,7 +159,8 @@ func newPoolRun(ctx context.Context, maxInFlight int) *poolRun {
 	}
 	r.stopWatch = context.AfterFunc(ctx, func() {
 		now := time.Now()
-		r.abortedAt.Store(&now)
+		// A cap hit may have cut the calls off first: the moment stays its.
+		r.abortedAt.CompareAndSwap(nil, &now)
 		abort()
 	})
 

@@ -44,9 +44,11 @@ type InFlightBudgetError struct {
 	// would fit: Cap / PeakRPS.
 	PeakRPS int
 	// Reserved is the part of Need that is not rps × timeout: the edge slot
-	// and the ReleaseMargin of every call. A timeout fits when
-	// PeakRPS × timeout ≤ Cap − Reserved.
+	// and the ReleaseMargin of every call. Each of the Calls rounds its own
+	// rps × timeout up, so a timeout surely fits when
+	// PeakRPS × timeout ≤ Cap − Reserved − Calls.
 	Reserved  int
+	Calls     int
 	Unbounded []string
 }
 
@@ -75,8 +77,8 @@ const ReleaseMargin = 100 * time.Millisecond
 // is released, and ⌈rps × ReleaseMargin⌉ for late release.
 func checkInFlightBudget(calls []Call, maxInFlight int) error {
 	var (
-		need, peak, reserved int
-		unbounded            []string
+		need, peak, reserved, bounded int
+		unbounded                     []string
 	)
 
 	for _, call := range calls {
@@ -96,6 +98,7 @@ func checkInFlightBudget(calls []Call, maxInFlight int) error {
 		reserve := saturatingAdd(1, inFlightFor(rps, ReleaseMargin))
 		need = saturatingAdd(need, saturatingAdd(inFlightFor(rps, call.Timeout), reserve))
 		reserved = saturatingAdd(reserved, reserve)
+		bounded++
 		peak = saturatingAdd(peak, rps)
 	}
 
@@ -103,7 +106,7 @@ func checkInFlightBudget(calls []Call, maxInFlight int) error {
 		return &InFlightBudgetError{Need: math.MaxInt, Cap: maxInFlight, PeakRPS: peak, Unbounded: unbounded}
 	}
 	if need > maxInFlight {
-		return &InFlightBudgetError{Need: need, Cap: maxInFlight, PeakRPS: peak, Reserved: reserved}
+		return &InFlightBudgetError{Need: need, Cap: maxInFlight, PeakRPS: peak, Reserved: reserved, Calls: bounded}
 	}
 
 	return nil

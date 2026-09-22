@@ -303,7 +303,14 @@ func withBudgetAdvice(err error) error {
 
 	// Rounded down, so the advice still fits; to the millisecond unless that
 	// would round it to zero.
-	fits := time.Duration(max(budget.Cap-budget.Reserved, 0)) * time.Second / time.Duration(budget.PeakRPS)
+	room := budget.Cap - budget.Reserved - budget.Calls
+	if room <= 0 {
+		return fmt.Errorf("%w\nno timeout fits this cap: run with -max-in-flight %d\n"+
+			"(the cap keeps a slot per call for the call on the window's edge, and room for calls released up\n"+
+			"to %s past their deadline)", err, budget.Need, engine.ReleaseMargin)
+	}
+
+	fits := time.Duration(room) * time.Second / time.Duration(budget.PeakRPS)
 	if fits >= time.Millisecond {
 		fits = fits.Truncate(time.Millisecond)
 	} else {
