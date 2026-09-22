@@ -62,3 +62,6 @@ config.local.*
 CLAUDE.md
 docs/decisions.md
 docs/strategy.md
+
+# Night shift notes live in the internal repo
+/night/
