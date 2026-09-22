@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
@@ -137,22 +138,22 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		call     callStats
+		call     callTimes
 		category engine.Category
 		wantSent time.Time
 	}{
-		{"payload went out: unchanged", callStats{headerAt: header, sentAt: payload, doneAt: end}, engine.CategoryTimeout, payload},
+		{"payload went out: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategoryTimeout, payload},
 		// Headers out means the stream existed and the target saw it; waiting on
 		// its flow-control window after that is the target's doing.
-		{"stream opened, body stuck: from the header", callStats{headerAt: header, doneAt: end}, engine.CategoryTimeout, header},
-		{"no stream: quota wait, nothing is service", callStats{doneAt: end}, engine.CategoryTimeout, end},
-		{"unreachable: left as is", callStats{doneAt: end}, engine.CategoryUnreachable, time.Time{}},
-		{"success: unchanged", callStats{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload},
+		{"stream opened, body stuck: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryTimeout, header},
+		{"no stream: quota wait, nothing is service", callTimes{doneAt: end}, engine.CategoryTimeout, end},
+		{"unreachable: left as is", callTimes{doneAt: end}, engine.CategoryUnreachable, time.Time{}},
+		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sent, done := timestamps(&tt.call, tt.category)
+			sent, done := timestamps(tt.call, tt.category)
 
 			if !sent.Equal(tt.wantSent) {
 				t.Errorf("SentAt = %v, want %v", sent, tt.wantSent)
@@ -161,5 +162,33 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 				t.Errorf("DoneAt = %v, want %v", done, end)
 			}
 		})
+	}
+}
+
+// TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded pins the contract the
+// timings live under: grpc-go reports a stream from the transport's own
+// goroutine, which keeps working on a call the caller has already given up on.
+// Reading and writing the same struct at once must therefore be safe — under
+// -race this test goes red the moment the lock is dropped.
+func TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded(t *testing.T) {
+	call := &callStats{}
+	ctx := context.WithValue(t.Context(), callKey{}, call)
+
+	written := make(chan struct{})
+
+	go func() {
+		defer close(written)
+
+		handler{}.HandleRPC(ctx, &stats.InTrailer{})
+		handler{}.HandleRPC(ctx, &stats.End{EndTime: time.Now()})
+	}()
+
+	// What Send does the instant Invoke returns.
+	_ = call.read()
+
+	<-written
+
+	if times := call.read(); !times.answered {
+		t.Errorf("the target's trailer was handled, and the call is not marked answered")
 	}
 }

@@ -734,3 +734,51 @@ func TestConn_ServesReflection(t *testing.T) {
 		t.Errorf("reflection over the sender's connection: %v", err)
 	}
 }
+
+// --- the transport outlives the call -------------------------------------
+
+// TestSend_TimedOutCallDoesNotRaceItsOwnTransport loads the case where the
+// call and the transport work on the same timings at once: the deadline fires,
+// Send reads what the call recorded, and the target's answer arrives a moment
+// later on the transport's own goroutine. Under -race a shared write shows up
+// here; without the detector it shows up as a timestamp nobody can explain.
+func TestSend_TimedOutCallDoesNotRaceItsOwnTransport(t *testing.T) {
+	const (
+		callers = 100
+		// The target is still holding the call when the caller gives up, and
+		// lets go the moment the stream is cancelled: its status is then on its
+		// way back exactly while Send reads what the call recorded.
+		deadline = 20 * time.Millisecond
+		delay    = 5 * time.Second
+	)
+
+	sender := dialTarget(t, &target{delay: delay})
+
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			req := request(time.Now())
+			req.Deadline = time.Now().Add(deadline)
+
+			out, err := sender.Send(bounded(t), req)
+			if err != nil {
+				t.Errorf("send: %v", err)
+
+				return
+			}
+			if out.Category != engine.CategoryTimeout {
+				t.Errorf("a call cut off at its deadline is %v, want timeout", out.Category)
+			}
+			if out.DoneAt.Before(out.SentAt) {
+				t.Errorf("the call is reported as done at %v, before it went out at %v",
+					out.DoneAt, out.SentAt)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
