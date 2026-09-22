@@ -302,6 +302,8 @@ func (s *Stats) Snapshot() Snapshot {
 	return snapshot
 }
 
+// Report copies every method's timeline under the lock Record takes: call it
+// once the run is over. For live data use Snapshot.
 func (s *Stats) Report() Report {
 	elapsed, measured, sent, failed, views := s.views()
 

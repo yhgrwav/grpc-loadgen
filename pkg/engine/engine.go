@@ -155,6 +155,8 @@ func (e *Engine) longestTimeout() time.Duration {
 	return longest
 }
 
+// Report is meant for after Run returns: it copies the per-second timelines
+// under the lock every worker records through. For live data use Snapshot.
 func (e *Engine) Report() Report {
 	report := e.stats.Report()
 	report.Incomplete = e.incomplete.Load()
