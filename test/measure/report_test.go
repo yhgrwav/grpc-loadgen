@@ -422,10 +422,22 @@ func TestReport_AStopInTheMiddleIsReportedAsItsLength(t *testing.T) {
 	t.Cleanup(target.Stop)
 
 	_, method := run(t, target, load(target.Method(), freezeRPS, freezeRun, 3*time.Second), 4*freezeRPS)
-	sent := checkArrivals(t, target.Arrivals(), freezeRPS, freezeRun)
+	arrivals := target.Arrivals()
+	sent := checkArrivals(t, arrivals, freezeRPS, freezeRun)
 
 	checkCounts(t, method, sent)
 	checkFreeze(t, method, freezeLength)
+
+	// p99 alone would pass a closed-model generator: the few calls it sent
+	// before waiting also hang for the second. The open model is what keeps
+	// sending while the target is silent, a second's worth of calls. A generator
+	// that waits for answers sends one per worker; 80 leaves room for timer
+	// jitter and rules out any pool smaller than that.
+	const least = freezeRPS * 8 / 10
+	if got := arrivalsWithin(arrivals, freezeFrom, freezeFrom+freezeLength); got < least {
+		t.Errorf("%d calls reached the stand during the stop, the plan sends %d; the generator stopped sending while the target was silent",
+			got, freezeRPS)
+	}
 }
 
 // TestReport_AStopBehindTheStreamQuotaIsReportedAsItsLength is where
