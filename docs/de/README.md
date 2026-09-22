@@ -1,10 +1,16 @@
 <div align="center">
 
-# grpc-loadgen
+<h1><img src="../../assets/logo.png" width="360" alt="LeetTest"></h1>
 
 **gRPC-Lasttests, die nicht lügen.**
 
 [Русский](../ru/) · [English](../en/) · [Deutsch](../de/) · [中文](../zh-CN/)
+
+[![CI](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yhgrwav/leettest.svg)](https://pkg.go.dev/github.com/yhgrwav/leettest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/yhgrwav/leettest)](https://goreportcard.com/report/github.com/yhgrwav/leettest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/yhgrwav/leettest)](../../go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 
 </div>
 
@@ -36,7 +42,7 @@ Vorteile des Produkts, und eine unklare Fehlermeldung ist ebenso ein Defekt wie 
 ## Installation
 
 ```console
-$ go install github.com/yhgrwav/grpc-loadgen/cmd/grpc-loadgen@latest
+$ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
 ## Konfiguration
@@ -123,7 +129,7 @@ direkt. Eine Methode ohne `data` funktioniert auch ohne Reflection.
 ## Ausführen
 
 ```console
-$ grpc-loadgen -c loadgen.yaml
+$ leettest -c leettest.yaml
 ```
 
 Vor dem Start verbindet sich das Werkzeug mit dem Dienst. Eine unerreichbare Adresse ist sofort
@@ -160,7 +166,7 @@ der Fehler nach Code im Bericht, Export nach Prometheus.
 
 | Frage | |
 |---|---|
-| Welches Problem löst grpc-loadgen? | [Lesen](problem.md) |
+| Welches Problem löst LeetTest? | [Lesen](problem.md) |
 | Warum dieses Werkzeug? | [Lesen](why.md) |
 | Welche Lasttest-Probleme behebt es? | [Lesen](pitfalls.md) |
 | Was ist Call-Verkettung und wozu? | [Lesen](chaining.md) |

@@ -23,7 +23,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
@@ -727,7 +727,7 @@ func RunLive(view LiveView, run func() error, cancel func()) error {
 // the hints need the room.
 func (m *model) footer() string {
 	hints := m.footerHints()
-	name := m.styles.faint.Render("grpc-loadgen")
+	name := m.styles.faint.Render("LeetTest")
 
 	gap := contentWidth(m.viewWidth()) - lipgloss.Width(hints) - lipgloss.Width(name)
 	if gap < 2 {

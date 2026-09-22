@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // rawCall moves bytes through a call untouched. It is set per call, not on the
@@ -145,7 +145,7 @@ func waitReady(ctx context.Context, conn *grpc.ClientConn) error {
 
 // probeMethod is a path no service implements. The probe must not be able to
 // do anything if it does reach a target.
-const probeMethod = "/grpc.loadgen.v0.Probe/DoesNotExist"
+const probeMethod = "/leettest.v0.Probe/DoesNotExist"
 
 // transportCause asks the connection why it failed, or returns nil if it works
 // after all. grpc-go has no public accessor for the last connection error, but

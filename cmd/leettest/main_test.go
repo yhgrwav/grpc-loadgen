@@ -37,10 +37,10 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/yhgrwav/grpc-loadgen/internal/cli"
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
-	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/internal/cli"
+	"github.com/yhgrwav/leettest/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/descriptor"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 const (
@@ -270,7 +270,7 @@ load:
       duration: 300ms
 %s`, host, port, tlsLine, method, callLines)
 
-	path := filepath.Join(t.TempDir(), "loadgen.yaml")
+	path := filepath.Join(t.TempDir(), "leettest.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 }
 
 func TestExampleConfigFitsTheDefaultInFlightCap(t *testing.T) {
-	cfg, err := config.LoadFile(filepath.Join("..", "..", "examples", "loadgen.yaml"))
+	cfg, err := config.LoadFile(filepath.Join("..", "..", "examples", "leettest.yaml"))
 	if err != nil {
 		t.Fatalf("load example: %v", err)
 	}
@@ -580,7 +580,7 @@ func dataConfig(t *testing.T, addr, calls string) string {
 
 	cfg := fmt.Sprintf("app:\n  target:\n    ip: %s\n    port: %s\n  tls: false\nload:\n  calls:\n%s", host, port, calls)
 
-	path := filepath.Join(t.TempDir(), "loadgen.yaml")
+	path := filepath.Join(t.TempDir(), "leettest.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -816,7 +816,7 @@ func runSignalled(t *testing.T, callLines string, signal func(stops, aborts chan
 
 	cfg := fmt.Sprintf("app:\n  target:\n    ip: localhost\n    port: 1\nload:\n  calls:\n    - method: %s\n      rps: 50\n      duration: 1m\n%s",
 		checkMethod, callLines)
-	path := filepath.Join(t.TempDir(), "loadgen.yaml")
+	path := filepath.Join(t.TempDir(), "leettest.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

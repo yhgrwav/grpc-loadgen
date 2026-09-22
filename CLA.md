@@ -2,7 +2,7 @@
 
 Version 1.0
 
-Thank you for your interest in contributing to grpc-loadgen (the "Project"),
+Thank you for your interest in contributing to LeetTest (the "Project"),
 maintained by the Project owner ("We" or "Us").
 
 This Contributor License Agreement (the "Agreement") documents the rights

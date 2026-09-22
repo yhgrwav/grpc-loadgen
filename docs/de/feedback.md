@@ -9,7 +9,7 @@ nicht feststeht, ist eine schlechte Idee billig zu ändern.
 
 ## GitHub Issues
 
-Der Hauptkanal sind die [Issues des Repositorys](https://github.com/yhgrwav/grpc-loadgen/issues).
+Der Hauptkanal sind die [Issues des Repositorys](https://github.com/yhgrwav/leettest/issues).
 Wer ein GitHub-Konto hat, kann eines eröffnen; es bekommt eine Nummer, ist für alle sichtbar,
 erlaubt Diskussion und lässt sich aus Commits referenzieren.
 

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 func TestStatsReportsPercentiles(t *testing.T) {

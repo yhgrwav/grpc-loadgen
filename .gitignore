@@ -31,7 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# --- grpc-loadgen ---
+# --- LeetTest ---
 
 # Local task tracker, not shared
 TASK.md
@@ -39,8 +39,8 @@ TASK.md
 # Build output
 /bin/
 /dist/
-/grpc-loadgen
-/grpc-loadgen.exe
+/leettest
+/leettest.exe
 
 # Run artifacts: reports, raw samples, profiles
 /reports/

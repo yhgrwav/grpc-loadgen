@@ -1,4 +1,4 @@
-# Contributing to grpc-loadgen
+# Contributing to LeetTest
 
 Thanks for your interest. The project is early work in progress — expect the
 internals to move.

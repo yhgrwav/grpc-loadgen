@@ -26,9 +26,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
-	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/descriptor"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // ErrRequestData says a call's data does not fit its method's request message.

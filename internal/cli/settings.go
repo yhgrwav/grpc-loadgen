@@ -22,7 +22,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-const settingsDir = "grpc-loadgen"
+const settingsDir = "leettest"
 
 // Settings holds what the tool remembers between runs.
 type Settings struct {

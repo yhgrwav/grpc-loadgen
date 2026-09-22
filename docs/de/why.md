@@ -4,7 +4,7 @@
 
 > Diese Übersetzung kann hinter dem [russischen Original](../ru/why.md) zurückliegen.
 
-grpc-loadgen ruht auf einem Grundsatz: Ein Lasttest ist nur dann etwas wert, wenn man seinem
+LeetTest ruht auf einem Grundsatz: Ein Lasttest ist nur dann etwas wert, wenn man seinem
 Ergebnis ohne Einschränkung vertrauen kann. Alles andere im Werkzeug folgt daraus.
 
 Die Prioritäten sind geordnet: **Korrektheit der Messung**, dann **Bedienbarkeit**, dann
@@ -58,7 +58,7 @@ Fehlermeldung gilt als Defekt.
 
 ## Im Vergleich mit bestehenden Werkzeugen
 
-| Fähigkeit | ghz | k6 | JMeter | grpc-loadgen |
+| Fähigkeit | ghz | k6 | JMeter | LeetTest |
 |---|---|---|---|---|
 | Mehrere Methoden mit unterschiedlicher Rate in einem Lauf | eine Methode pro Lauf | per Skript | über mehrere Thread-Gruppen | **in der Konfiguration** |
 | Latenz ab dem geplanten Zeitpunkt | teilweise | standardmäßig Closed Model | nein | **ja** |

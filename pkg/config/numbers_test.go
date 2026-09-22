@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/config"
 )
 
 const numbersHead = `app:

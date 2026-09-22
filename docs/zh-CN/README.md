@@ -1,10 +1,16 @@
 <div align="center">
 
-# grpc-loadgen
+<h1><img src="../../assets/logo.png" width="360" alt="LeetTest"></h1>
 
 **不会撒谎的 gRPC 压力测试工具。**
 
 [Русский](../ru/) · [English](../en/) · [Deutsch](../de/) · [中文](../zh-CN/)
+
+[![CI](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yhgrwav/leettest.svg)](https://pkg.go.dev/github.com/yhgrwav/leettest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/yhgrwav/leettest)](https://goreportcard.com/report/github.com/yhgrwav/leettest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/yhgrwav/leettest)](../../go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 
 </div>
 
@@ -32,7 +38,7 @@
 ## 安装
 
 ```console
-$ go install github.com/yhgrwav/grpc-loadgen/cmd/grpc-loadgen@latest
+$ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
 ## 配置
@@ -113,7 +119,7 @@ load:
 ## 运行
 
 ```console
-$ grpc-loadgen -c loadgen.yaml
+$ leettest -c leettest.yaml
 ```
 
 启动前工具会先连接服务。地址不可达会立即报错，给出地址和原因，不运行也不出报告。
@@ -148,7 +154,7 @@ $ grpc-loadgen -c loadgen.yaml
 
 | 问题 | |
 |---|---|
-| grpc-loadgen 解决什么问题？ | [阅读](problem.md) |
+| LeetTest 解决什么问题？ | [阅读](problem.md) |
 | 为什么选择它？ | [阅读](why.md) |
 | 它修正了压测中的哪些问题？ | [阅读](pitfalls.md) |
 | 什么是调用串联，为什么重要？ | [阅读](chaining.md) |

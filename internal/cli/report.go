@@ -19,8 +19,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 // PrintReport writes the finished run to w as plain text.
@@ -80,7 +80,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 
 	if invalid > 0 {
 		fmt.Fprintf(w, "\nwarning: %d measurements were impossible (negative latency) and left out.\n"+
-			"This is a bug in grpc-loadgen, not in the target. Please report it.\n", invalid)
+			"This is a bug in LeetTest, not in the target. Please report it.\n", invalid)
 	}
 }
 

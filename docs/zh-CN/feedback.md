@@ -8,7 +8,7 @@
 
 ## GitHub Issues
 
-主要渠道是[仓库的 issues](https://github.com/yhgrwav/grpc-loadgen/issues)。
+主要渠道是[仓库的 issues](https://github.com/yhgrwav/leettest/issues)。
 任何拥有 GitHub 账号的人都可以创建：它会获得编号、对所有人可见、可在其中讨论，
 也可以从提交中引用。
 

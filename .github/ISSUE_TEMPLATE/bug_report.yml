@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: Версия
-      description: Вывод `grpc-loadgen --version` или хеш коммита.
+      description: Вывод `leettest --version` или хеш коммита.
     validations:
       required: true
 

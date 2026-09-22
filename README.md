@@ -1,10 +1,16 @@
 <div align="center">
 
-# grpc-loadgen
+<h1><img src="assets/logo.png" width="360" alt="LeetTest"></h1>
 
 **Нагрузочное тестирование gRPC, которое не врёт.**
 
 [Русский](docs/ru/) · [English](docs/en/) · [Deutsch](docs/de/) · [中文](docs/zh-CN/)
+
+[![CI](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yhgrwav/leettest.svg)](https://pkg.go.dev/github.com/yhgrwav/leettest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/yhgrwav/leettest)](https://goreportcard.com/report/github.com/yhgrwav/leettest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/yhgrwav/leettest)](go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -33,7 +39,7 @@
 ## Установка
 
 ```console
-$ go install github.com/yhgrwav/grpc-loadgen/cmd/grpc-loadgen@latest
+$ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
 ## Конфиг
@@ -117,7 +123,7 @@ reflection; `.proto` не нужен. Тело собирается один р�
 ## Запуск
 
 ```console
-$ grpc-loadgen -c loadgen.yaml
+$ leettest -c leettest.yaml
 ```
 
 До старта инструмент подключается к сервису. Недоступный адрес — ошибка сразу, с адресом и

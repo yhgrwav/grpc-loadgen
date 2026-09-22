@@ -161,7 +161,7 @@ func (m *setupModel) choose() (tea.Model, tea.Cmd) {
 func (m *setupModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(m.styles.shimmer("◆ grpc-loadgen", m.frame))
+	b.WriteString(m.styles.shimmer("◆ LeetTest", m.frame))
 	b.WriteString("\n\n")
 	b.WriteString(m.styles.title.Render(m.stepTitle()))
 	b.WriteString("\n\n")

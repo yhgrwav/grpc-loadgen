@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
+	"github.com/yhgrwav/leettest/pkg/descriptor"
 )
 
 const (

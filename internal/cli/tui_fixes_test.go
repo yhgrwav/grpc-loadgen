@@ -25,8 +25,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 // --- quitting -----------------------------------------------------------

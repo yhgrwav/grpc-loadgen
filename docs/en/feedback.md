@@ -9,7 +9,7 @@ still unsettled, a bad idea is cheap to change.
 
 ## GitHub Issues
 
-The main channel is [the repository's issues](https://github.com/yhgrwav/grpc-loadgen/issues).
+The main channel is [the repository's issues](https://github.com/yhgrwav/leettest/issues).
 Anyone with a GitHub account can open one; it gets a number, stays visible to everyone, supports
 discussion and can be referenced from commits.
 

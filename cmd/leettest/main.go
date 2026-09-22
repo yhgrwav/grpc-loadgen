@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command grpc-loadgen runs a load test described by a YAML config against a
+// Command leettest runs a load test described by a YAML config against a
 // gRPC target, prints a report and exits non-zero when the run fails.
 package main
 
@@ -32,11 +32,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yhgrwav/grpc-loadgen/internal/cli"
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
-	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
-	"github.com/yhgrwav/grpc-loadgen/pkg/grpcsender"
+	"github.com/yhgrwav/leettest/internal/cli"
+	"github.com/yhgrwav/leettest/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/descriptor"
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/grpcsender"
 )
 
 const defaultMaxInFlight = 5000
@@ -49,7 +49,7 @@ var ErrIncomplete = errors.New("the run stopped before its planned end; the repo
 // exitNow is the way out that depends on nothing: the third stop, or an abort
 // that has not finished in time.
 var exitNow = func() {
-	fmt.Fprintln(os.Stderr, "grpc-loadgen: aborted without a report")
+	fmt.Fprintln(os.Stderr, "leettest: aborted without a report")
 	os.Exit(130)
 }
 
@@ -76,7 +76,7 @@ func main() {
 	signal.Stop(signals)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "grpc-loadgen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "leettest: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -120,7 +120,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		}
 	}()
 
-	flags := flag.NewFlagSet("grpc-loadgen", flag.ContinueOnError)
+	flags := flag.NewFlagSet("leettest", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	interactive := stderr == io.Writer(os.Stderr) && cli.Interactive()
