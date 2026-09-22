@@ -155,7 +155,7 @@ func transportCause(ctx context.Context, conn *grpc.ClientConn) error {
 	probe := &callStats{}
 
 	err := conn.Invoke(context.WithValue(ctx, callKey{}, probe), probeMethod, &empty, &discarded{}, rawCall...)
-	if err == nil || probe.answered {
+	if err == nil || probe.read().answered {
 		// The connection came up between the failure and the probe. Any status
 		// from the target proves it, not only Unimplemented: a service that
 		// checks credentials before routing says Unauthenticated instead.
@@ -239,8 +239,9 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 		return engine.Outcome{}, fmt.Errorf("call aborted with %s: %w", status.Code(err), ctx.Err())
 	}
 
-	category := categorize(err, call.answered)
-	sentAt, doneAt := timestamps(call, category)
+	times := call.read()
+	category := categorize(err, times.answered)
+	sentAt, doneAt := timestamps(times, category)
 
 	outcome := engine.Outcome{
 		SentAt:   sentAt,
@@ -284,7 +285,7 @@ func (s *Sender) Conn() grpc.ClientConnInterface {
 // for stream quota, so nothing counts as service; with headers the target saw
 // the stream and the rest is its own doing, such as a closed flow-control
 // window.
-func timestamps(call *callStats, category engine.Category) (sentAt, doneAt time.Time) {
+func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.Time) {
 	sentAt, doneAt = call.sentAt, call.doneAt
 	if category != engine.CategoryTimeout || !sentAt.IsZero() {
 		return sentAt, doneAt

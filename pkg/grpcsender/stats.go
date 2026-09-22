@@ -16,6 +16,7 @@ package grpcsender
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/stats"
@@ -23,10 +24,9 @@ import (
 
 type callKey struct{}
 
-// callStats is what one call records about itself while the transport works.
-// Send puts a fresh one in the context; the handler fills it in. Each call has
-// its own, so nothing is shared between goroutines.
-type callStats struct {
+// callTimes is what one call recorded about itself, as it stood when it was
+// read.
+type callTimes struct {
 	// headerAt is when the stream's headers went out. grpc-go emits OutHeader
 	// inside NewStream after stream quota is granted, so a call without it
 	// never got a stream.
@@ -38,6 +38,29 @@ type callStats struct {
 	// both as UNAVAILABLE, and a refused connection carries no latency worth
 	// recording.
 	answered bool
+}
+
+// callStats is where one call's timings are collected while the transport
+// works. Send puts a fresh one in the context; the handler fills it in.
+//
+// Each call has its own, but not one goroutine: grpc-go reports headers and
+// trailers from the transport's reader, and a call cut off by its deadline
+// returns from Invoke while the target's status is still on its way. The
+// reader then writes into the same struct Send is reading, so both go through
+// the lock — a torn time.Time would put a moment in the report that never
+// happened.
+type callStats struct {
+	mu    sync.Mutex
+	times callTimes
+}
+
+// read copies the timings recorded so far. What arrives later is not part of
+// the call: the caller had already given up on it.
+func (c *callStats) read() callTimes {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.times
 }
 
 // handler collects per-call timings. One instance serves the whole connection;
@@ -56,19 +79,22 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 		return
 	}
 
+	call.mu.Lock()
+	defer call.mu.Unlock()
+
 	switch v := rpc.(type) {
 	case *stats.OutHeader:
 		// OutHeader carries no time of its own; the call is synchronous at the
 		// point the headers are handed to the transport.
-		call.headerAt = time.Now()
+		call.times.headerAt = time.Now()
 	case *stats.OutPayload:
 		// SentTime is when the request went out on the wire, after the transport
 		// granted stream quota. Taking it here rather than with time.Now() in the
 		// worker keeps the Go scheduler's delay out of the measurement.
-		call.sentAt = v.SentTime
+		call.times.sentAt = v.SentTime
 	case *stats.InTrailer:
-		call.answered = true
+		call.times.answered = true
 	case *stats.End:
-		call.doneAt = v.EndTime
+		call.times.doneAt = v.EndTime
 	}
 }
