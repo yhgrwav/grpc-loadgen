@@ -229,11 +229,3 @@ func (m *setupModel) entries() []string {
 
 	return nil
 }
-
-func padRight(text string, width int) string {
-	if len(text) >= width {
-		return text
-	}
-
-	return text + strings.Repeat(" ", width-len(text))
-}

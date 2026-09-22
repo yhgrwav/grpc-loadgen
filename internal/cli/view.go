@@ -38,7 +38,15 @@ func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration
 	)
 }
 
+// minWidth is the narrowest terminal the frame is laid out for. Below it
+// the view is one line asking for more room; keys and the run go on.
+const minWidth = 60
+
 func (m *model) View() string {
+	if m.width > 0 && m.width < minWidth {
+		return truncate(m.text.TooNarrow(minWidth), m.width)
+	}
+
 	width := m.viewWidth()
 
 	frame := m.styles.frame.Width(width - 4)
@@ -50,7 +58,7 @@ func (m *model) View() string {
 }
 
 func (m *model) viewWidth() int {
-	if m.width < 40 {
+	if m.width < minWidth {
 		return 72
 	}
 
@@ -79,7 +87,7 @@ func (m *model) body(width int) string {
 	case m.done:
 		b.WriteString(m.finalReport(inner))
 	case m.showHelp:
-		b.WriteString(m.help())
+		b.WriteString(m.help(inner))
 	case m.active == 0:
 		b.WriteString(m.summary(inner))
 	case m.active == m.settingsTab():
@@ -162,7 +170,7 @@ func (m *model) stopHint() string {
 		return action
 	}
 
-	return m.text.InFlightCount(formatCount(m.snapshot.InFlight)) + " · " + action
+	return m.text.InFlightCount(formatCount(m.snapshot.InFlight)) + " | " + action
 }
 
 // headerLine lays the header pieces out left to right, each behind a
@@ -174,14 +182,14 @@ type headerLine struct {
 	room int
 }
 
-// minPiece is the narrowest a cut piece may get: four columns and the
+// minPiece is the narrowest a cut piece may get: two columns and the
 // ellipsis. Below it the piece carries nothing and is dropped.
 const minPiece = 5
 
 func newHeaderLine(s styles, width int, lead string) *headerLine {
 	return &headerLine{
 		text: lead,
-		sep:  s.faint.Render("  ·  "),
+		sep:  s.faint.Render("  |  "),
 		room: width - lipgloss.Width(lead),
 	}
 }
@@ -218,7 +226,12 @@ func (l *headerLine) add(style lipgloss.Style, texts ...string) {
 	}
 }
 
-// truncate shortens s to width columns, marking the cut with an ellipsis.
+// ellipsis marks a cut. Three dots rather than "…": a CJK terminal may draw
+// that one two columns wide while it is counted as one.
+const ellipsis = "..."
+
+// truncate shortens s to width columns, marking the cut with an ellipsis
+// where there is room for one.
 func truncate(s string, width int) string {
 	if lipgloss.Width(s) <= width {
 		return s
@@ -227,12 +240,17 @@ func truncate(s string, width int) string {
 		return ""
 	}
 
+	mark := ellipsis
+	if width <= len(ellipsis) {
+		mark = ""
+	}
+
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+	for len(runes) > 0 && lipgloss.Width(string(runes))+len(mark) > width {
 		runes = runes[:len(runes)-1]
 	}
 
-	return string(runes) + "…"
+	return string(runes) + mark
 }
 
 func (m *model) tabBar(width int) string {
@@ -257,11 +275,11 @@ func (m *model) summary(width int) string {
 
 	var b strings.Builder
 
-	b.WriteString(statLine(m.styles,
-		[2]string{m.text.Sent(), formatCount(s.Sent)},
-		[2]string{"rps", fmt.Sprintf("%.0f", s.RPS)},
-		[2]string{m.text.InFlight(), formatCount(s.InFlight)},
-		[2]string{m.text.Errors(), m.errorShare(s.Sent, s.Failed)},
+	b.WriteString(fitStatLine(m.styles, width,
+		countField(m.text.Sent(), s.Sent, 1),
+		statField{label: "rps", value: fmt.Sprintf("%.0f", s.RPS), drop: 2},
+		countField(m.text.InFlight(), s.InFlight, 0),
+		statField{label: m.text.Errors(), value: m.errorShare(s.Sent, s.Failed)},
 	))
 	b.WriteString("\n")
 	b.WriteString(statLine(m.styles,
@@ -283,9 +301,13 @@ func (m *model) summary(width int) string {
 	b.WriteString("\n")
 	b.WriteString(m.latencyChart(m.overall.points))
 
-	if note := m.note(); note != "" {
+	if full, short := m.note(); full != "" {
+		note := "> " + full
+		if lipgloss.Width(note) > width {
+			note = "> " + short
+		}
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.note.Render("› " + note))
+		b.WriteString(m.styles.note.Render(note))
 	}
 
 	return b.String()
@@ -293,7 +315,7 @@ func (m *model) summary(width int) string {
 
 func (m *model) method(width, index int) string {
 	if index >= len(m.snapshot.Methods) {
-		return m.styles.muted.Render("…")
+		return m.styles.muted.Render(ellipsis)
 	}
 
 	method := m.snapshot.Methods[index]
@@ -303,10 +325,10 @@ func (m *model) method(width, index int) string {
 	b.WriteString(m.styles.value.Render(displayMethod(method.Method)))
 	b.WriteString("\n\n")
 
-	b.WriteString(statLine(m.styles,
-		[2]string{m.text.Sent(), formatCount(method.Sent)},
-		[2]string{"rps", fmt.Sprintf("%.0f", method.RPS)},
-		[2]string{m.text.Errors(), m.errorShare(method.Sent, method.Failed)},
+	b.WriteString(fitStatLine(m.styles, width,
+		countField(m.text.Sent(), method.Sent, 1),
+		statField{label: "rps", value: fmt.Sprintf("%.0f", method.RPS), drop: 2},
+		statField{label: m.text.Errors(), value: m.errorShare(method.Sent, method.Failed)},
 	))
 	b.WriteString("\n")
 	b.WriteString(statLine(m.styles,
@@ -344,12 +366,12 @@ func (m *model) latencyChart(points []point) string {
 
 	scale := "-"
 	if ok {
-		scale = formatDuration(millis(low)) + " – " + formatDuration(millis(high))
+		scale = formatDuration(millis(low)) + " - " + formatDuration(millis(high))
 	}
 
 	var b strings.Builder
 
-	b.WriteString(m.styles.label.Render(fmt.Sprintf("%-10s", m.text.Latency())))
+	b.WriteString(m.styles.label.Render(padRight(m.text.Latency(), sparkLabelWidth)))
 	b.WriteString(m.styles.muted.Render(scale))
 
 	for _, s := range series {
@@ -379,21 +401,24 @@ func (m *model) sparkCells() int {
 }
 
 func (m *model) sparkRow(label string, values []float64, unit string, format func(float64) string) string {
-	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
+	return m.styles.label.Render(padRight(label, sparkLabelWidth)) +
 		sparkline(m.styles, values, m.sparkCells()) +
 		m.styles.pad(2) +
 		sparkRange(m.styles, values, unit, format)
 }
 
 func (m *model) gaugeRow(label string, value, limit float64, text string) string {
-	return m.styles.label.Render(fmt.Sprintf("%-10s", label)) +
+	return m.styles.label.Render(padRight(label, sparkLabelWidth)) +
 		gauge(m.styles, value, limit, min(max(gaugeWidth, m.sparkCells()/2), m.sparkCells())) + m.styles.pad(2) +
 		m.styles.value.Render(text)
 }
 
-func (m *model) help() string {
+// helpKeyWidth is the key column of the help screen, wide enough for "<- -> tab".
+const helpKeyWidth = 11
+
+func (m *model) help(width int) string {
 	rows := [][2]string{
-		{"←→ tab", m.text.HelpTabs()},
+		{"<- -> tab", m.text.HelpTabs()},
 		{"enter", m.text.HelpSettings()},
 		{"esc", m.text.HelpEscape()},
 		{"?", m.text.HelpHelp()},
@@ -405,10 +430,17 @@ func (m *model) help() string {
 	b.WriteString(m.styles.title.Render(m.text.HelpTitle()))
 	b.WriteString("\n\n")
 
+	indent := strings.Repeat(" ", helpKeyWidth)
 	for _, row := range rows {
-		b.WriteString(m.styles.helpKey.Render(fmt.Sprintf("%-8s", row[0])))
-		b.WriteString(m.styles.helpText.Render(row[1]))
-		b.WriteString("\n")
+		for i, line := range wrapText(row[1], width-helpKeyWidth) {
+			key := indent
+			if i == 0 {
+				key = padRight(row[0], helpKeyWidth)
+			}
+			b.WriteString(m.styles.helpKey.Render(key))
+			b.WriteString(m.styles.helpText.Render(line))
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -422,8 +454,10 @@ func (m *model) footerHints() string {
 		return fade[stage].Render(m.text.UnknownKey(m.hintKey))
 	}
 
+	width := contentWidth(m.viewWidth())
+
 	if m.done {
-		return keyHint(m.styles, m.text.HintTabs(), m.text.PressToExit())
+		return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.PressToExit(), 0})
 	}
 
 	if m.notice != "" {
@@ -431,18 +465,22 @@ func (m *model) footerHints() string {
 	}
 
 	if m.active == m.settingsTab() {
+		// The phrases list their keys in reading order, three spaces apart;
+		// the drop order is given here: esc, the way out, never goes.
 		if !m.editing {
-			return m.styles.muted.Render(m.text.SettingsLocked())
+			return fitKeyHints(m.styles, width, append(phraseHints(m.text.SettingsLocked(), 2, 1, 0),
+				hint{m.text.HintQuit(), 0})...)
 		}
 
-		return m.styles.muted.Render(m.text.SettingsHint())
+		return fitKeyHints(m.styles, width, append(phraseHints(m.text.SettingsHint(), 3, 2, 0, 1),
+			hint{m.text.HintQuit(), 0})...)
 	}
 
 	if m.showHelp {
-		return keyHint(m.styles, m.text.HintBack(), m.text.HintQuit())
+		return fitKeyHints(m.styles, width, hint{m.text.HintBack(), 0}, hint{m.text.HintQuit(), 0})
 	}
 
-	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
+	return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.HintHelp(), 2}, hint{m.text.HintQuit(), 0})
 }
 
 func (m *model) settingsView(width int) string {
@@ -511,12 +549,17 @@ func truncateLeft(s string, width int) string {
 		return ""
 	}
 
+	mark := ellipsis
+	if width <= len(ellipsis) {
+		mark = ""
+	}
+
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+	for len(runes) > 0 && lipgloss.Width(string(runes))+len(mark) > width {
 		runes = runes[1:]
 	}
 
-	return "…" + string(runes)
+	return mark + string(runes)
 }
 
 func (m *model) option(text string, selected bool) string {
@@ -585,21 +628,27 @@ func (m *model) finalReport(width int) string {
 
 	b.WriteString(m.styles.title.Render(title))
 	b.WriteString("\n")
-	b.WriteString(statLine(m.styles,
-		[2]string{m.text.Sent(), formatCount(report.Sent)},
-		[2]string{m.text.Errors(), m.errorShare(report.Sent, report.Failed)},
-		[2]string{"rps", fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1))},
-		[2]string{m.text.Latency(), formatDuration(report.Duration)},
+	b.WriteString(fitStatLine(m.styles, width,
+		countField(m.text.Sent(), report.Sent, 1),
+		statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
+		statField{label: "rps", value: fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1)), drop: 2},
+		statField{label: m.text.Latency(), value: formatDuration(report.Duration)},
 	))
 	b.WriteString("\n" + "\n")
 
 	// Sent, errors and p99 always fit; p50 and p90 go first when the terminal
-	// is narrow, and the method name takes whatever is left.
+	// is narrow, and the method name takes whatever is left. Columns are sized
+	// by width on screen and never narrower than their heading: "отправлено"
+	// is ten columns, and a Chinese heading takes two per character.
 	const (
-		coreColumns = 1 + 9 + 1 + 8 + 1 + 9
-		midColumns  = 1 + 9 + 1 + 9
-		minName     = 12
+		pColumn = 9
+		minName = 12
 	)
+
+	sentColumn := max(9, lipgloss.Width(m.text.Sent()))
+	errColumn := max(8, lipgloss.Width(m.text.Errors()))
+	coreColumns := 1 + sentColumn + 1 + errColumn + 1 + pColumn
+	midColumns := 1 + pColumn + 1 + pColumn
 
 	wide := width-coreColumns-midColumns >= minName
 
@@ -609,11 +658,12 @@ func (m *model) finalReport(width int) string {
 	}
 	nameWidth = min(max(nameWidth, minName), 40)
 
-	header := fmt.Sprintf("%-*s %9s %8s", nameWidth, m.text.ColumnMethod(), m.text.Sent(), m.text.Errors())
+	header := padRight(m.text.ColumnMethod(), nameWidth) + " " +
+		padLeft(m.text.Sent(), sentColumn) + " " + padLeft(m.text.Errors(), errColumn)
 	if wide {
-		header += fmt.Sprintf(" %9s %9s", "p50", "p90")
+		header += " " + padLeft("p50", pColumn) + " " + padLeft("p90", pColumn)
 	}
-	header += fmt.Sprintf(" %9s", "p99")
+	header += " " + padLeft("p99", pColumn)
 
 	b.WriteString(m.styles.label.Render(header))
 	b.WriteString("\n")
@@ -622,48 +672,56 @@ func (m *model) finalReport(width int) string {
 		method := &report.Methods[i]
 		name := truncate(shortMethod(method.Method), nameWidth)
 
+		sent := formatCount(method.Sent)
+		if lipgloss.Width(sent) > sentColumn && method.Sent >= 0 {
+			sent = compactCount(uint64(method.Sent))
+		}
+
 		errors := m.styles.value
 		if method.Failed > 0 {
 			errors = m.styles.bad
 		}
 
-		b.WriteString(m.styles.value.Render(fmt.Sprintf("%-*s", nameWidth, name)))
-		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatCount(method.Sent))))
-		b.WriteString(errors.Render(fmt.Sprintf(" %8s", m.errorShare(method.Sent, method.Failed))))
+		b.WriteString(m.styles.value.Render(padRight(name, nameWidth)))
+		b.WriteString(m.styles.value.Render(" " + padLeft(sent, sentColumn)))
+		b.WriteString(errors.Render(" " + padLeft(m.errorShare(method.Sent, method.Failed), errColumn)))
 		if wide {
-			b.WriteString(m.styles.muted.Render(fmt.Sprintf(" %9s %9s", formatQuantile(method.P50), formatQuantile(method.P90))))
+			b.WriteString(m.styles.muted.Render(" " + padLeft(formatQuantile(method.P50), pColumn) +
+				" " + padLeft(formatQuantile(method.P90), pColumn)))
 		}
-		b.WriteString(m.styles.value.Render(fmt.Sprintf(" %9s", formatQuantile(method.P99))))
+		b.WriteString(m.styles.value.Render(" " + padLeft(formatQuantile(method.P99), pColumn)))
 		b.WriteString("\n")
 	}
 
 	if m.stopper.Stopping() {
 		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render("› " + m.text.ReportStoppedNote()))
+		b.WriteString(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)))
 	}
 
 	if m.err != nil && !m.stopper.Stopping() {
 		b.WriteString("\n")
-		b.WriteString(m.styles.bad.Render("› " + m.err.Error()))
+		b.WriteString(m.styles.bad.Render(wrapNote(m.err.Error(), width)))
 	}
 
 	return b.String()
 }
 
-func (m *model) note() string {
+// note returns the live view's note in full and in the short form a narrow
+// frame takes instead of wrapping it.
+func (m *model) note() (full, short string) {
 	s := m.snapshot
 
 	if m.warmup > 0 && s.Elapsed < m.warmup {
-		return m.text.WarmupNote(formatDuration(m.warmup - s.Elapsed))
+		return m.text.WarmupNote(formatDuration(m.warmup - s.Elapsed)), m.text.WarmupNoteShort()
 	}
 	if s.Sent > 0 && float64(s.Failed)/float64(s.Sent) > 0.05 {
-		return m.text.ErrorsNote()
+		return m.text.ErrorsNote(), m.text.ErrorsNoteShort()
 	}
 	if s.InFlight > 0 && float64(s.InFlight) > m.totalTarget() {
-		return m.text.InFlightNote()
+		return m.text.InFlightNote(), m.text.InFlightNoteShort()
 	}
 
-	return ""
+	return "", ""
 }
 
 func (m *model) errorShare(sent, failed int) string {
@@ -735,4 +793,101 @@ func (m *model) footer() string {
 	}
 
 	return hints + m.styles.pad(gap) + name
+}
+
+// padRight and padLeft pad s with spaces to width columns on screen; fmt
+// pads by characters, which a Chinese character or a combining mark defeats.
+func padRight(s string, width int) string {
+	return s + strings.Repeat(" ", max(width-lipgloss.Width(s), 0))
+}
+
+func padLeft(s string, width int) string {
+	return strings.Repeat(" ", max(width-lipgloss.Width(s), 0)) + s
+}
+
+// wrapNote is a "> " note wrapped to width, its lines after the first indented
+// under the text. The final report has the height for it; the live view uses
+// a short form instead, so its layout does not jump.
+func wrapNote(text string, width int) string {
+	return "> " + strings.Join(wrapText(text, width-2), "\n  ")
+}
+
+// wrapText breaks text into lines of at most width columns at spaces, and
+// breaks a word longer than a line wherever it has to.
+func wrapText(text string, width int) []string {
+	width = max(width, 1)
+
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		for lipgloss.Width(word) > width {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+			}
+			head := []rune(word)
+			n := len(head)
+			for n > 0 && lipgloss.Width(string(head[:n])) > width {
+				n--
+			}
+			n = max(n, 1)
+			lines = append(lines, string(head[:n]))
+			word = string(head[n:])
+		}
+
+		switch {
+		case line == "":
+			line = word
+		case lipgloss.Width(line)+1+lipgloss.Width(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+
+	return append(lines, line)
+}
+
+// hint is one key hint of a footer. drop orders what goes when the footer
+// does not fit, lowest first; 0 never goes: quitting and leaving a mode must
+// stay on screen whatever the width.
+type hint struct {
+	text string
+	drop int
+}
+
+// phraseHints splits a phrase that lists its keys three spaces apart and
+// gives each its drop order, in the phrase's order.
+func phraseHints(phrase string, drops ...int) []hint {
+	parts := strings.Split(phrase, "   ")
+	hints := make([]hint, len(parts))
+	for i, part := range parts {
+		hints[i] = hint{part, drops[min(i, len(drops)-1)]}
+	}
+
+	return hints
+}
+
+// fitKeyHints lays the hints out in width, dropping them by their order
+// until the line fits.
+func fitKeyHints(s styles, width int, hints ...hint) string {
+	for dropped := 0; ; dropped++ {
+		var kept []string
+		last := true
+		for _, h := range hints {
+			if h.drop != 0 && h.drop <= dropped {
+				continue
+			}
+			if h.drop > dropped {
+				last = false
+			}
+			kept = append(kept, h.text)
+		}
+
+		line := keyHint(s, kept...)
+		if lipgloss.Width(line) <= width || last {
+			return line
+		}
+	}
 }

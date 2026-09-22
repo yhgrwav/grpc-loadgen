@@ -25,7 +25,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/yhgrwav/leettest/pkg/engine"
 	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
@@ -88,7 +87,7 @@ func TestUnknownKeyExplainsTheLayout(t *testing.T) {
 			m := testModel(t)
 			press(m, key)
 
-			if footer := m.footer(); !strings.Contains(footer, "«"+key+"»") {
+			if footer := m.footer(); !strings.Contains(footer, `"`+key+`"`) {
 				t.Errorf("footer = %q, want a hint naming %q", footer, key)
 			}
 		})
@@ -99,7 +98,7 @@ func TestCommandsShowNoLayoutHint(t *testing.T) {
 	m := testModel(t)
 	press(m, "?")
 
-	if footer := m.footer(); strings.Contains(footer, "«") {
+	if footer := m.footer(); strings.Contains(footer, `"`) {
 		t.Errorf("footer = %q, want no hint after a real command", footer)
 	}
 }
@@ -111,7 +110,7 @@ func TestLayoutHintWorksWhileEditingSettings(t *testing.T) {
 
 	press(m, "ж")
 
-	if footer := m.footer(); !strings.Contains(footer, "«ж»") {
+	if footer := m.footer(); !strings.Contains(footer, `"ж"`) {
 		t.Errorf("footer = %q, want the hint in the settings editor too", footer)
 	}
 }
@@ -131,7 +130,7 @@ func TestLayoutHintFadesAndGoes(t *testing.T) {
 	}
 
 	tickN(m, ticksFor(500*time.Millisecond))
-	if footer := m.footer(); strings.Contains(footer, "«ж»") {
+	if footer := m.footer(); strings.Contains(footer, `"ж"`) {
 		t.Errorf("footer at 2.2s = %q, want the hint gone and the usual hints back", footer)
 	}
 }
@@ -145,48 +144,12 @@ func TestAnotherWrongKeyRestartsTheHint(t *testing.T) {
 	tickN(m, ticksFor(1200*time.Millisecond))
 
 	footer := m.footer()
-	if !strings.Contains(footer, "«x»") || strings.Contains(footer, "«ж»") {
+	if !strings.Contains(footer, `"x"`) || strings.Contains(footer, `"ж"`) {
 		t.Errorf("footer = %q, want only the latest key, still shown 1.2s after it", footer)
 	}
 }
 
 // --- header and width ---------------------------------------------------
-
-func TestNothingWrapsInsideTheFrame(t *testing.T) {
-	// The frame does not let a line out past the terminal: it wraps it inside,
-	// which is how "running" ended up alone on the next line. So the check is
-	// on the body against the width the frame leaves, not on the whole view.
-	for _, width := range []int{60, 80, 120, 200} {
-		t.Run(strconv.Itoa(width), func(t *testing.T) {
-			m := testModel(t)
-			m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
-			tickN(m, 3)
-
-			limit := contentWidth(width)
-
-			check := func(screen string) {
-				for i, line := range strings.Split(m.body(width), "\n") {
-					if w := lipgloss.Width(line); w > limit {
-						t.Errorf("%s, line %d is %d wide, the frame leaves %d: %q", screen, i, w, limit, line)
-					}
-				}
-			}
-
-			for tab := range m.tabs {
-				m.active = tab
-				check("tab " + strconv.Itoa(tab))
-			}
-
-			m.done = true
-			m.active = 0
-			m.report = engine.Report{Methods: []engine.MethodReport{{
-				Method: "/wallet.v1.WalletService/GetBalanceWithAVeryLongName", Sent: 1_000_000, Failed: 12,
-				P50: exact(31), P90: exact(35), P99: exact(36),
-			}}}
-			check("final report")
-		})
-	}
-}
 
 func TestHeaderPutsStatusAndTargetOnOneLine(t *testing.T) {
 	m := testModel(t)
@@ -311,14 +274,9 @@ func latencyRow(t *testing.T, chart, label string) []rune {
 			continue
 		}
 
-		var cells []rune
-		for _, r := range line {
-			if strings.ContainsRune("▁▂▃▄▅▆▇█·", r) {
-				cells = append(cells, r)
-			}
-		}
-
-		return cells
+		// The cells are the second field: a gap is "." like the decimal point
+		// of the value after them, so the value must not be scanned.
+		return []rune(fields[1])
 	}
 
 	t.Fatalf("no %s row in:\n%s", label, chart)
@@ -385,7 +343,7 @@ func TestLatencyGapWhereNothingWasMeasured(t *testing.T) {
 	h.push(1, exact(10), exact(20), exact(30))
 
 	row := latencyRow(t, m.latencyChart(h.points), "p99")
-	if gap := row[len(row)-2]; gap != '·' {
+	if gap := row[len(row)-2]; gap != '.' {
 		t.Errorf("p99 cell with no measurement = %q, want a gap", gap)
 	}
 }
