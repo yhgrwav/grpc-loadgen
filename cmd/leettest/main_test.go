@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -899,12 +901,12 @@ func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
 	}
 }
 
-func TestRunResult_CapHitIsAnIncompleteRunNotAnError(t *testing.T) {
+func TestRunResult_CapHitIsAnInvalidRunNotAnError(t *testing.T) {
 	report := engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}
 	err := runResult(report, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
 
-	if !errors.Is(err, ErrIncomplete) {
-		t.Errorf("err = %v, want ErrIncomplete: the report and its verdict were printed", err)
+	if !errors.Is(err, ErrInvalidRun) {
+		t.Errorf("err = %v, want ErrInvalidRun: the report and its verdict were printed", err)
 	}
 	if errors.Is(err, engine.ErrInFlightCapExceeded) {
 		t.Errorf("err = %v: a cap hit is a verdict in the report, not an error printed without one", err)
@@ -966,5 +968,44 @@ func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
 				t.Errorf("cap %d, rates %v: advised %v, New says %v", maxInFlight, rates, fits, err)
 			}
 		}
+	}
+}
+
+// A pipeline reads the code, not the words: a config error, a run that stopped
+// early and a run whose numbers say nothing must not look the same.
+func TestExitCode_TellsTheOutcomesApart(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "plan finished", err: nil, want: 0},
+		{name: "help", err: flag.ErrHelp, want: 0},
+		{name: "config error", err: errors.New("cannot read config"), want: 1},
+		{name: "invalid run", err: ErrInvalidRun, want: 2},
+		{name: "invalid run, wrapped", err: fmt.Errorf("run: %w", ErrInvalidRun), want: 2},
+		{name: "incomplete run", err: ErrIncomplete, want: 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := exitCode(tt.err); got != tt.want {
+				t.Errorf("exitCode(%v) = %d, want %d", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// 128 + the signal, the shell's own convention: a script that kills the run
+// with SIGTERM must not read the result as "the person pressed Ctrl+C".
+func TestExitCode_AnAbortedRunCarriesItsSignal(t *testing.T) {
+	if got := abortCode(syscall.SIGTERM); got != 143 {
+		t.Errorf("after SIGTERM = %d, want 143", got)
+	}
+	if got := abortCode(os.Interrupt); got != 130 {
+		t.Errorf("after Ctrl+C = %d, want 130", got)
+	}
+	if got := abortCode(nil); got != 130 {
+		t.Errorf("without a signal = %d, want 130", got)
 	}
 }

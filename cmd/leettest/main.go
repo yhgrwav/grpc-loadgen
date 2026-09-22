@@ -44,14 +44,25 @@ const defaultMaxInFlight = 5000
 // ErrIncomplete says the run ended before its plan. The report is printed and
 // honest, but it covers less than was asked for, so the exit code is not zero:
 // a pipeline must not pass on a three-minute run of a ten-minute plan.
+// ErrInvalidRun says the run's numbers say nothing about the target: the
+// generator hit its own cap. The report prints the verdict; the code carries
+// it to a pipeline.
+var ErrInvalidRun = errors.New("the run is invalid: its numbers do not describe the target")
+
 var ErrIncomplete = errors.New("the run stopped before its planned end; the report covers only the part that ran")
 
 // exitNow is the way out that depends on nothing: the third stop, or an abort
 // that has not finished in time.
 var exitNow = func() {
 	fmt.Fprintln(os.Stderr, "leettest: aborted without a report")
-	os.Exit(130)
+	sig, _ := lastSignal.Load().(os.Signal)
+	os.Exit(abortCode(sig))
 }
+
+// lastSignal is what asked the run to stop, so an abort without a report
+// exits the way that signal would have: a script reads 143 from an
+// orchestrator's SIGTERM and 130 from a person's Ctrl+C.
+var lastSignal atomic.Value
 
 // runStarting is called once presses go to the stopper; tests use it to press
 // during the run rather than during the connection.
@@ -64,6 +75,8 @@ func main() {
 	stops, aborts := make(chan struct{}), make(chan struct{})
 	go func() {
 		for sig := range signals {
+			lastSignal.Store(sig)
+
 			if sig == syscall.SIGTERM {
 				aborts <- struct{}{}
 			} else {
@@ -75,10 +88,44 @@ func main() {
 	err := run(context.Background(), stops, aborts, os.Args[1:], os.Stdout, os.Stderr)
 	signal.Stop(signals)
 
-	if err != nil {
+	if err != nil && !errors.Is(err, flag.ErrHelp) {
 		fmt.Fprintf(os.Stderr, "leettest: %v\n", err)
-		os.Exit(1)
 	}
+
+	os.Exit(exitCode(err))
+}
+
+// exitCode maps the outcome onto codes a pipeline can tell apart. Whether the
+// target is fast enough is not among them: that needs a threshold, and none is
+// set yet, so a finished run exits 0 however the target answered.
+//
+//	0   the plan ran to its end and the report is complete
+//	1   the run never started: bad flags, bad config, no connection
+//	2   the run is invalid: its numbers do not describe the target
+//	3   the run stopped before its planned end; the report covers less
+//	130 aborted without a report after Ctrl+C
+//	143 aborted without a report after SIGTERM
+func exitCode(err error) int {
+	switch {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+		return 0
+	case errors.Is(err, ErrInvalidRun):
+		return 2
+	case errors.Is(err, ErrIncomplete):
+		return 3
+	default:
+		return 1
+	}
+}
+
+// abortCode is the shell's convention for a process killed by a signal:
+// 128 plus the signal's number.
+func abortCode(sig os.Signal) int {
+	if s, ok := sig.(syscall.Signal); ok {
+		return 128 + int(s)
+	}
+
+	return 130
 }
 
 // run is the whole command. The live view is used only when stderr is the
@@ -368,6 +415,9 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 func runResult(report engine.Report, runErr error) error {
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
+	}
+	if report.CapHit != nil {
+		return ErrInvalidRun
 	}
 	if report.Incomplete {
 		return ErrIncomplete
