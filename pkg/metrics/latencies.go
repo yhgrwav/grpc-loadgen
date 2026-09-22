@@ -35,6 +35,8 @@ const (
 type Latencies struct {
 	mu       sync.Mutex
 	measured *hdrhistogram.Histogram
+	// censored is nil in an uncensored distribution until a value past the
+	// range needs it.
 	censored *hdrhistogram.Histogram
 	invalid  atomic.Int64
 }
@@ -44,6 +46,13 @@ func NewLatencies() *Latencies {
 		measured: newHistogram(),
 		censored: newHistogram(),
 	}
+}
+
+// NewUncensoredLatencies is for a quantity never cut short, such as how long
+// a target took to refuse. It skips the histogram of lower bounds, half the
+// memory, and creates it only if a value past the range turns up.
+func NewUncensoredLatencies() *Latencies {
+	return &Latencies{measured: newHistogram()}
 }
 
 func newHistogram() *hdrhistogram.Histogram {
@@ -87,6 +96,9 @@ func (l *Latencies) RecordCensored(threshold time.Duration) {
 func (l *Latencies) recordCensoredLocked(nanos int64) {
 	if nanos > highestTrackableNanos {
 		nanos = highestTrackableNanos
+	}
+	if l.censored == nil {
+		l.censored = newHistogram()
 	}
 	_ = l.censored.RecordValue(nanos)
 }

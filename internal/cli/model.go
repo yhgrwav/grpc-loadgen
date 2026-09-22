@@ -26,9 +26,12 @@ import (
 )
 
 const (
-	refresh      = 120 * time.Millisecond
-	historyLimit = 240
-	gaugeWidth   = 24
+	refresh = 120 * time.Millisecond
+	// percentileEvery is how often the live view recomputes percentiles; the
+	// counters move on every frame.
+	percentileEvery = time.Second
+	historyLimit    = 240
+	gaugeWidth      = 24
 )
 
 type tickMsg time.Time
@@ -99,11 +102,16 @@ type model struct {
 	text   Text
 	styles styles
 
-	snapshot  engine.Snapshot
-	report    engine.Report
-	warmup    time.Duration
-	overall   history
-	perMethod map[string]*history
+	snapshot engine.Snapshot
+	live     *engine.LiveBuffer
+	// percentilesAt is when the snapshot's percentiles were last recomputed.
+	// Copying a distribution holds its lock while recording waits, so it is
+	// done once a second; a person cannot tell that from every frame.
+	percentilesAt time.Time
+	report        engine.Report
+	warmup        time.Duration
+	overall       history
+	perMethod     map[string]*history
 
 	tabs   []string
 	active int
@@ -133,6 +141,7 @@ func newModel(target string, eng *engine.Engine, warmup time.Duration, settings 
 		stopper:   stopper,
 		warmup:    warmup,
 		perMethod: make(map[string]*history),
+		live:      engine.NewLiveBuffer(),
 		settings:  settings,
 	}
 
@@ -179,7 +188,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 
 		if !m.done {
-			m.snapshot = m.engine.Snapshot()
+			fresh := time.Since(m.percentilesAt) >= percentileEvery
+			m.engine.SnapshotInto(&m.snapshot, m.live, fresh)
+			if fresh {
+				m.percentilesAt = time.Now()
+			}
+
 			m.overall.push(m.snapshot.RPS, m.snapshot.P50, m.snapshot.P90, m.snapshot.P99)
 
 			for _, method := range m.snapshot.Methods {
@@ -195,7 +209,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 
 	case doneMsg:
-		m.snapshot = m.engine.Snapshot()
+		m.engine.SnapshotInto(&m.snapshot, m.live, true)
 		m.report = m.engine.Report()
 		m.done = true
 		m.err = msg.err
