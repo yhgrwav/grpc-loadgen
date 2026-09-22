@@ -202,3 +202,24 @@ func TestHeaderDropsAPieceItCannotShow(t *testing.T) {
 		t.Errorf("header %q shows a shard of the service name", line)
 	}
 }
+
+func TestStopHintsTranslated(t *testing.T) {
+	en := NewText(LangEN)
+
+	for _, lang := range Languages() {
+		text := NewText(lang.Lang)
+
+		for name, pair := range map[string][2]string{
+			"StopAgainAborts": {text.StopAgainAborts(), en.StopAgainAborts()},
+			"StopAgainExits":  {text.StopAgainExits(), en.StopAgainExits()},
+			"InFlightCount":   {text.InFlightCount("7"), en.InFlightCount("7")},
+		} {
+			if pair[0] == "" {
+				t.Errorf("%s is empty in %s", name, lang.Lang)
+			}
+			if lang.Lang != LangEN && pair[0] == pair[1] {
+				t.Errorf("%s in %s is the English string: a missing translation", name, lang.Lang)
+			}
+		}
+	}
+}

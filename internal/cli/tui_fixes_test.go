@@ -188,6 +188,26 @@ func TestNothingWrapsInsideTheFrame(t *testing.T) {
 	}
 }
 
+func TestHeaderPutsStatusAndTargetOnOneLine(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+
+	for line := range strings.Lines(m.View()) {
+		if !strings.Contains(line, m.text.Running()) {
+			continue
+		}
+		for _, want := range []string{m.text.Running(), "localhost:50051"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("header line %q lacks %q", line, want)
+			}
+		}
+
+		return
+	}
+
+	t.Fatal("no header line in the view")
+}
+
 func TestFakeTargetIsNamedInTheInterfaceLanguage(t *testing.T) {
 	m := testModel(t)
 	m.target = FakeTarget

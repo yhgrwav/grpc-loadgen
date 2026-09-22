@@ -220,7 +220,7 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	}
 }
 
-// Ground: boundary — a category outside the enum, which no real sender returns.
+// Ground: boundary — the zero Category, a sender that forgot to fill it in; no real sender does.
 func TestTimeline_UnknownIsUnclassifiedNotUnanswered(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)

@@ -155,7 +155,8 @@ func TestPoolSendsConcurrently(t *testing.T) {
 	}
 }
 
-// Ground: boundary — exactly at the in-flight cap.
+// Ground: contract — the pool stops with ErrInFlightCapExceeded once the cap is full. Not exact:
+// 16 requests against a cap of 2, so an off-by-one in the check stays green.
 func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
 	const limit = 2
 
