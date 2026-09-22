@@ -335,3 +335,32 @@ func TestPrintReportNamesTheRateColumnForWhatItCounts(t *testing.T) {
 		t.Errorf("rate column is not named sent/s:\n%s", text)
 	}
 }
+
+// A target that answers "no such method" says nothing about load: counted with
+// overload refusals it would read as a service shedding requests.
+func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration:        time.Second,
+		Sent:            100,
+		Failed:          100,
+		RequestRejected: true,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 100, Failed: 100, RPS: 100,
+			Rejected: engine.RefusalLatency{
+				Count: 100,
+				P50:   metrics.Quantile{Value: 300 * time.Microsecond, Exact: true, Defined: true},
+			},
+		}},
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "rejected") {
+		t.Errorf("no rejected row:\n%s", text)
+	}
+	for _, want := range []string{"invalid run", "a.B/One"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("verdict does not say %q:\n%s", want, text)
+		}
+	}
+}

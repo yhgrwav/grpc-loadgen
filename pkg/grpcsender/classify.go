@@ -15,11 +15,19 @@
 package grpcsender
 
 import (
+	"strings"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
+
+// sizeLimit is the part of grpc-go's message that both size errors carry
+// (v1.84.0): "grpc: received message larger than max (N vs. M)". Pinned by a
+// test, so an upgrade that rewords it goes red instead of silently turning
+// these calls back into overload.
+const sizeLimit = "larger than max"
 
 // categorize maps a finished call onto the engine's categories. answered says
 // whether the target sent a status of its own: the same code means different
@@ -30,6 +38,15 @@ func categorize(err error, answered bool) engine.Category {
 	}
 
 	code := status.Code(err)
+
+	// A message over a size limit, whoever holds it: the client cutting a
+	// reply off before the trailer, or the target refusing a request too big.
+	// Both carry RESOURCE_EXHAUSTED, the code a target out of capacity also
+	// uses, and only the text tells them apart. A request that does not fit
+	// will not fit at any rate, so it is the request's fault, not the load's.
+	if code == codes.ResourceExhausted && strings.Contains(status.Convert(err).Message(), sizeLimit) {
+		return engine.CategoryClientFault
+	}
 
 	if !answered {
 		// Nothing came back from the target. A deadline is still a bound on the

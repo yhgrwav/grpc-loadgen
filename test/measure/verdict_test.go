@@ -497,3 +497,45 @@ func TestReport_AStoppedRunRatesOverTheTimeItSent(t *testing.T) {
 			got, rateRPS, report.Methods[0].Sent)
 	}
 }
+
+// A target that answers "no such method" refuses every call in microseconds.
+// Counted as refusals they would read as a target shedding load; nothing about
+// the load was tested at all.
+func TestReport_ATargetThatRejectsEveryRequestInvalidatesTheRun(t *testing.T) {
+	target := stand.Start(stand.FailEvery(1, codes.Unimplemented, 0))
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), silentRPS, time.Second, silentTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	m := report.Methods[0]
+	if m.Rejected.Count != m.Sent || m.Sent == 0 {
+		t.Errorf("rejected %d of %d, want all", m.Rejected.Count, m.Sent)
+	}
+	if m.Refusal.Count != 0 {
+		t.Errorf("refused %d, want none: a bad request is not the target shedding load", m.Refusal.Count)
+	}
+	if !report.RequestRejected {
+		t.Error("run not marked as one whose requests the target rejected")
+	}
+}
+
+// One method rejected, another served: the run still measured something.
+func TestReport_ARejectedMethodAloneDoesNotInvalidateTheRun(t *testing.T) {
+	target := stand.Start(stand.FailEvery(3, codes.ResourceExhausted, 0))
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), silentRPS, time.Second, silentTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if report.RequestRejected {
+		t.Error("an overloaded target was read as a bad request")
+	}
+	if got := report.Methods[0].Refusal.Count; got == 0 {
+		t.Error("refusals not counted")
+	}
+}
