@@ -268,7 +268,8 @@ func TestPrintReportStatesWhatTheTargetDidNotAnswer(t *testing.T) {
 	PrintReport(&out, "localhost:50051", report)
 	text := out.String()
 
-	for _, want := range []string{"at 50 rps", "150 of 150", "100.0%", "no answer within 300ms", "from second 0", "4"} {
+	for _, want := range []string{"at 50 rps", "150 of 150", "100.0%", "no answer within 300ms",
+		"answered nothing at all", "4"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report does not mention %q:\n%s", want, text)
 		}
@@ -295,7 +296,7 @@ func TestPrintReportStatesARateRangeAndNoSilenceClauseWithoutOne(t *testing.T) {
 	if !strings.Contains(text, "at 20-40 rps") || !strings.Contains(text, "50 of 150") {
 		t.Errorf("report lacks the range and the count:\n%s", text)
 	}
-	if strings.Contains(text, "from second") {
+	if strings.Contains(text, "nothing after") || strings.Contains(text, "answered nothing at all") {
 		t.Errorf("report names a silent second, yet the target answered to the end:\n%s", text)
 	}
 }
@@ -409,5 +410,31 @@ func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
 		if strings.Contains(verdict, served) {
 			t.Errorf("the verdict names %s, which the target does serve:\n%s", served, verdict)
 		}
+	}
+}
+
+// A bucket number moves the start of the silence by up to a second and reads
+// as a clock time anyway: the moment the last answered call was scheduled for
+// does not.
+func TestPrintReportNamesTheMomentTheAnswersStopped(t *testing.T) {
+	last := 8 * time.Second
+	from := 8
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration: 15 * time.Second,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 7500, Failed: 3499, TimedOut: 3499,
+			SilentFrom: &from, LastAnswerAt: &last, RPSLow: 500, RPSHigh: 500,
+			Timeout: 2 * time.Second,
+		}},
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "8.0s") {
+		t.Errorf("report does not name the moment of the last answer:\n%s", text)
+	}
+	if strings.Contains(text, "second 8") || strings.Contains(text, "second 9") {
+		t.Errorf("report still counts buckets:\n%s", text)
 	}
 }

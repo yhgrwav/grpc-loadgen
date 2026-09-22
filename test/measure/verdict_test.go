@@ -590,3 +590,28 @@ func TestReport_OneRejectedMethodAmongServedOnesIsStillAVerdict(t *testing.T) {
 		t.Errorf("methods rejected outright = %v, want the typo and the streaming one", rejected)
 	}
 }
+
+// The moment the answers stopped, measured end to end: the stand goes silent
+// 1s after its first call, and the statement must name that moment rather than
+// the second it falls into.
+func TestReport_TheLastAnswerIsWhereTheSilenceBegins(t *testing.T) {
+	// Frozen for a minute from the first second: every later call waits out
+	// its own timeout, so the target is silent from then on.
+	target := stand.Start(stand.Frozen(time.Second, time.Minute, time.Millisecond))
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), silentRPS, silentRun, silentTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	m := report.Methods[0]
+	if m.LastAnswerAt == nil {
+		t.Fatal("no last answer, yet the target answered the first second")
+	}
+	// The stand counts from its first arrival, which comes after the run
+	// starts, so the moment lands just past a second, never before it.
+	if *m.LastAnswerAt < time.Second || *m.LastAnswerAt > 1200*time.Millisecond {
+		t.Errorf("last answer at %v, want about 1s", *m.LastAnswerAt)
+	}
+}
