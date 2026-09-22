@@ -155,24 +155,65 @@ func TestPoolSendsConcurrently(t *testing.T) {
 	}
 }
 
-// Ground: contract — the pool stops with ErrInFlightCapExceeded once the cap is full. Not exact:
-// 16 requests against a cap of 2, so an off-by-one in the check stays green.
-func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
+// Ground: boundary — exactly at the cap and one past it. The slot is taken when the call is
+// launched, not when it reaches the sender, so the count does not depend on goroutine timing.
+func TestPoolAtTheInFlightCapRefusesNothing(t *testing.T) {
 	const limit = 2
 
-	in := make(chan Request, 16)
-	for range 16 {
+	h := newHoldingSender()
+	in := make(chan Request, limit)
+	for range limit {
 		in <- Request{ScheduledAt: time.Now()}
 	}
 	close(in)
 
-	out := make(chan Result, 16)
+	out := make(chan Result, limit)
+	done := make(chan error, 1)
+	go func() { done <- NewWorkerPool(h, limit).Run(t.Context(), in, out) }()
 
-	pool := NewWorkerPool(slowSender(time.Second), limit)
-	err := pool.Run(context.Background(), in, out)
+	for range limit {
+		select {
+		case <-h.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the calls did not reach the sender")
+		}
+	}
+	close(h.release)
 
-	if !errors.Is(err, ErrInFlightCapExceeded) {
+	if err := waitRun(t, done); err != nil {
+		t.Fatalf("Run = %v, want nil: %d calls fit a cap of %d", err, limit, limit)
+	}
+	if got := len(out); got != limit {
+		t.Errorf("%d results, want %d", got, limit)
+	}
+}
+
+// Ground: boundary — one call past the cap is refused, and only that one: the two before it
+// are sent.
+func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
+	const limit = 2
+
+	h := newHoldingSender()
+	in := make(chan Request, limit+1)
+	for range limit + 1 {
+		in <- Request{ScheduledAt: time.Now()}
+	}
+	close(in)
+
+	// The held calls end only on cancellation: were the third one sent too,
+	// Run would wait for them for ever, and the test must fail, not hang.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	out := make(chan Result, limit+1)
+	done := make(chan error, 1)
+	go func() { done <- NewWorkerPool(h, limit).Run(ctx, in, out) }()
+
+	if err := waitRun(t, done); !errors.Is(err, ErrInFlightCapExceeded) {
 		t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
+	}
+	if got := h.calls.Load(); got != limit {
+		t.Errorf("sender got %d calls, want %d: the cap refuses the third and nothing else", got, limit)
 	}
 }
 
