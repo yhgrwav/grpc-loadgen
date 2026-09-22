@@ -109,6 +109,49 @@ func TestPrintReportShowsUnmeasuredPercentileAsDash(t *testing.T) {
 	}
 }
 
+func TestPrintReportShowsPeakSecond(t *testing.T) {
+	// Two methods share the busiest second: the peak is their sum, an exact
+	// count, not a per-method figure.
+	report := engine.Report{
+		Duration: 3 * time.Second,
+		Sent:     830,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/One", Sent: 540, Windows: []engine.Window{
+				{Second: 0, Sent: 100}, {Second: 1, Sent: 300}, {Second: 2, Sent: 140},
+			}},
+			{Method: "a.B/Two", Sent: 290, Windows: []engine.Window{
+				{Second: 0, Sent: 90}, {Second: 1, Sent: 130}, {Second: 2, Sent: 70},
+			}},
+		},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	text := out.String()
+	if !strings.Contains(text, "peak") || !strings.Contains(text, "430") {
+		t.Errorf("report must name the busiest second (300+130=430 calls):\n%s", text)
+	}
+}
+
+func TestPrintReportOmitsPeakSecondForShortRun(t *testing.T) {
+	// A run that filled no more than one second has no peak to compare.
+	report := engine.Report{
+		Duration: time.Second,
+		Sent:     100,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/One", Sent: 100, Windows: []engine.Window{{Second: 0, Sent: 100}}},
+		},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	if strings.Contains(out.String(), "peak") {
+		t.Errorf("a single-second run must not print a peak-second line:\n%s", out.String())
+	}
+}
+
 func TestPrintReportShowsTheMethodAsTheConfigWritesIt(t *testing.T) {
 	report := engine.Report{Methods: []engine.MethodReport{{Method: "/a.B/One", Sent: 1}}}
 

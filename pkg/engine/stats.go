@@ -67,6 +67,30 @@ type MethodReport struct {
 	// Unanswered counts calls that never reached the target, so they are absent
 	// from the distribution rather than recorded as very fast replies.
 	Unanswered int
+	// Windows holds one entry per second of the measured run, dense and indexed
+	// by second (Windows[i].Second == i), so a consumer can see how load and its
+	// latency decomposition moved over time. Empty for a run shorter than a
+	// second or with no recorded calls.
+	Windows []Window
+}
+
+// Window is one second of a method's run: how many calls were launched in it and
+// the summed latency decomposition of the ones fully observed. Sums, not
+// averages — the engine keeps the exact primitives and leaves any ratio to the
+// consumer. Calls are placed by ScheduledAt, the second the load was meant for.
+type Window struct {
+	Second int
+	// Sent counts every recorded call scheduled in this second, whatever its
+	// outcome.
+	Sent int
+	// Decomposed counts the calls behind the sums below: those with a fully
+	// observed latency. Unanswered calls (unreachable, unknown) and censored
+	// ones (timeout, aborted) are counted in Sent but not here — their transport
+	// and service times are unknown or only a lower bound, and adding them would
+	// quietly understate the sums.
+	Decomposed         int
+	Queue              time.Duration
+	Transport, Service time.Duration
 }
 
 type Report struct {
@@ -98,6 +122,30 @@ type methodStats struct {
 	failed     int
 	unanswered int
 	latency    *metrics.Latencies
+	// windows is dense and indexed by second since the measured run began; it
+	// grows as the run advances and is never capped, so a long run keeps a
+	// window per second.
+	windows []windowCounters
+}
+
+// windowCounters is a window's live state, kept apart from the exported Window
+// so recording touches ints and durations rather than building report structs.
+type windowCounters struct {
+	sent               int
+	decomposed         int
+	queue              time.Duration
+	transport, service time.Duration
+}
+
+// window returns the counters for second idx, growing the slice to reach it. The
+// pointer is used at once, under the same lock that guards every growth, so a
+// later append relocating the backing array cannot strand it.
+func (m *methodStats) window(idx int) *windowCounters {
+	for len(m.windows) <= idx {
+		m.windows = append(m.windows, windowCounters{})
+	}
+
+	return &m.windows[idx]
 }
 
 func NewStats() *Stats {
@@ -158,6 +206,21 @@ func (s *Stats) Record(r Result) {
 	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable
 	if unanswered {
 		method.unanswered++
+	}
+
+	if idx := s.windowIndex(r.ScheduledAt); idx >= 0 {
+		w := method.window(idx)
+		w.sent++
+
+		// Only a fully observed latency joins the decomposition. A censored call
+		// (timeout, aborted) knows its service time only as a lower bound, and an
+		// unanswered one has none; either would understate the sums.
+		if !unanswered && r.Category != CategoryTimeout && r.Category != CategoryAborted {
+			w.decomposed++
+			w.queue += r.QueueTime()
+			w.transport += r.TransportWait()
+			w.service += r.ServiceTime()
+		}
 	}
 
 	s.mu.Unlock()
@@ -272,6 +335,8 @@ func (s *Stats) Report() Report {
 	aborted := s.aborted
 	s.mu.Unlock()
 
+	windows := s.windowsByMethod()
+
 	report := Report{
 		Duration: elapsed,
 		Sent:     sent,
@@ -294,6 +359,7 @@ func (s *Stats) Report() Report {
 			P95:        v.dist.Percentile(0.95),
 			P99:        v.dist.Percentile(0.99),
 			Max:        v.dist.Percentile(1),
+			Windows:    windows[v.name],
 		}
 		if measured > 0 {
 			entry.RPS = float64(v.sent) / measured.Seconds()
@@ -303,6 +369,50 @@ func (s *Stats) Report() Report {
 	}
 
 	return report
+}
+
+// windowIndex returns the second, counted from the first measured moment, that a
+// call scheduled at scheduledAt belongs to, or -1 before the run has a start.
+func (s *Stats) windowIndex(scheduledAt time.Time) int {
+	if s.startedAt.IsZero() {
+		return -1
+	}
+
+	since := scheduledAt.Sub(s.startedAt.Add(s.warmup))
+	if since < 0 {
+		return -1
+	}
+
+	return int(since / time.Second)
+}
+
+// windowsByMethod copies each method's windows into exported form under the lock.
+// It is used only by Report at the end of the run, never on the Snapshot path,
+// so the live view never pays to copy a run's worth of windows on every tick.
+func (s *Stats) windowsByMethod() map[string][]Window {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make(map[string][]Window, len(s.byMethod))
+
+	for name, method := range s.byMethod {
+		if len(method.windows) == 0 {
+			continue
+		}
+
+		windows := make([]Window, len(method.windows))
+		for i := range method.windows {
+			c := &method.windows[i]
+			windows[i] = Window{
+				Second: i, Sent: c.sent, Decomposed: c.decomposed,
+				Queue: c.queue, Transport: c.transport, Service: c.service,
+			}
+		}
+
+		out[name] = windows
+	}
+
+	return out
 }
 
 func (s *Stats) elapsed() time.Duration {

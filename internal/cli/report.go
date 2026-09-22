@@ -48,6 +48,14 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 	}
 
+	// The busiest second is an exact count, not the mean rate: a generator that
+	// fell behind and then caught up drives more in one second than the average
+	// shows. Only worth printing once the run spans more than a single second.
+	if peak, second, filled := busiestSecond(report.Methods); filled > 1 {
+		fmt.Fprintf(w, "\npeak load: %d calls sent in one second (second %d of the measured run).\n",
+			peak, second)
+	}
+
 	// Aborted calls are censored too, but raising the timeout would not show
 	// their tail: the stop cut them off, not the deadline.
 	if timedOut := censored - report.Aborted; timedOut > 0 {
@@ -75,6 +83,30 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		fmt.Fprintf(w, "\nwarning: %d measurements were impossible (negative latency) and left out.\n"+
 			"This is a bug in grpc-loadgen, not in the target. Please report it.\n", invalid)
 	}
+}
+
+// busiestSecond finds the second in which the most calls were sent across all
+// methods, its index, and how many seconds the run filled. Seconds are summed
+// across methods because a peak is a property of the whole run, not one method.
+func busiestSecond(methods []engine.MethodReport) (peak, second, filled int) {
+	var totals []int
+
+	for i := range methods {
+		for _, w := range methods[i].Windows {
+			for w.Second >= len(totals) {
+				totals = append(totals, 0)
+			}
+			totals[w.Second] += w.Sent
+		}
+	}
+
+	for s, total := range totals {
+		if total > peak {
+			peak, second = total, s
+		}
+	}
+
+	return peak, second, len(totals)
 }
 
 // formatQuantile prints a percentile the way it is known: an exact value, a
