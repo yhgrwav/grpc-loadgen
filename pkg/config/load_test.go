@@ -21,7 +21,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/config"
 )
 
 func TestLoadParsesDurations(t *testing.T) {

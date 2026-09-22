@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // holdingTarget answers only after release is closed and reports each call

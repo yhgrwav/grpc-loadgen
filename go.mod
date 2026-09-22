@@ -1,4 +1,4 @@
-module github.com/yhgrwav/grpc-loadgen
+module github.com/yhgrwav/leettest
 
 go 1.25.0
 

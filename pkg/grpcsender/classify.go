@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // categorize maps a finished call onto the engine's categories. answered says

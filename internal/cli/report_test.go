@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 func TestFormatDuration(t *testing.T) {

@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // CallsFromConfig turns the calls of a parsed config into engine calls.

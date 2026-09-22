@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/descriptor"
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/descriptor"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 const checkMethod = "/grpc.health.v1.Health/Check"

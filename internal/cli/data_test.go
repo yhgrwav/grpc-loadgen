@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/yhgrwav/grpc-loadgen/internal/cli"
+	"github.com/yhgrwav/leettest/internal/cli"
 )
 
 // testMessages builds the messages the hint tests run against. The names are
@@ -56,8 +56,8 @@ func testMessages(t *testing.T) (item, empty protoreflect.MessageDescriptor) {
 	}
 
 	file, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
-		Name:    proto.String("loadgen/test/item.proto"),
-		Package: proto.String("loadgen.test"),
+		Name:    proto.String("leettest/test/item.proto"),
+		Package: proto.String("leettest.test"),
 		Syntax:  proto.String("proto3"),
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
@@ -68,8 +68,8 @@ func testMessages(t *testing.T) (item, empty protoreflect.MessageDescriptor) {
 					field("id_x_ray", 3, str, ""),
 					field("count_total", 4, i32, ""),
 					field("note_text", 5, str, ""),
-					field("nested_item", 6, msg, ".loadgen.test.Inner"),
-					field("child_item", 7, msg, ".loadgen.test.Item"),
+					field("nested_item", 6, msg, ".leettest.test.Inner"),
+					field("child_item", 7, msg, ".leettest.test.Item"),
 					field("user_id", 8, i32, ""),
 				},
 			},

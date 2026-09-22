@@ -1,4 +1,4 @@
-# What problem does grpc-loadgen solve?
+# What problem does LeetTest solve?
 
 [← Back to docs](README.md)
 
@@ -15,7 +15,7 @@ payment service at any moment handles hundreds of balance requests, dozens of tr
 handful of sign-ups — and it breaks on that mix, not on each method alone. A service that holds
 800 RPS of reads and 50 RPS of writes separately can fall over on their sum — through a shared
 connection pool, database locks, contention for the same cache. `ghz` takes one method per run:
-three methods mean three runs and no answer to what happens when they run together. grpc-loadgen
+three methods mean three runs and no answer to what happens when they run together. LeetTest
 describes the whole load: a list of methods, each at its own RPS, one run, one report.
 
 **Numbers you can trust.** A load tool produces a number that decisions are made on. A number

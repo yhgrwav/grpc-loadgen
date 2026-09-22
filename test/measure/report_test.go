@@ -22,10 +22,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
-	"github.com/yhgrwav/grpc-loadgen/pkg/grpcsender"
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
-	"github.com/yhgrwav/grpc-loadgen/test/stand"
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/grpcsender"
+	"github.com/yhgrwav/leettest/pkg/metrics"
+	"github.com/yhgrwav/leettest/test/stand"
 )
 
 // ceiling bounds a run that should take about a second. A regression must

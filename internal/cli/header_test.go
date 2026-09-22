@@ -64,10 +64,10 @@ func TestProjectNameMovesToTheFooter(t *testing.T) {
 	m := testModel(t)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	if line := firstLine(m.header(contentWidth(120))); strings.Contains(line, "grpc-loadgen") {
+	if line := firstLine(m.header(contentWidth(120))); strings.Contains(line, "LeetTest") {
 		t.Errorf("header %q still leads with the project name", line)
 	}
-	if footer := m.footer(); !strings.Contains(footer, "grpc-loadgen") {
+	if footer := m.footer(); !strings.Contains(footer, "LeetTest") {
 		t.Errorf("footer %q does not carry the project name", footer)
 	}
 }

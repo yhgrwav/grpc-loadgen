@@ -1,4 +1,4 @@
-# Welches Problem löst grpc-loadgen?
+# Welches Problem löst LeetTest?
 
 [← Zur Übersicht](README.md)
 
@@ -16,7 +16,7 @@ Endpunkt. Ein Zahlungsdienst verarbeitet zu jedem Zeitpunkt Hunderte Saldoabfrag
 Methode einzeln. Ein Dienst, der getrennt 800 RPS Lesen und 50 RPS Schreiben hält, kann an ihrer
 Summe kippen — gemeinsamer Verbindungspool, Datenbanksperren, Konkurrenz um denselben Cache. `ghz`
 nimmt eine Methode pro Lauf: drei Methoden sind drei Läufe und keine Antwort darauf, was passiert,
-wenn sie zusammen laufen. grpc-loadgen beschreibt die ganze Last: eine Liste von Methoden, jede
+wenn sie zusammen laufen. LeetTest beschreibt die ganze Last: eine Liste von Methoden, jede
 mit eigener RPS, ein Lauf, ein Bericht.
 
 **Zahlen, denen man trauen kann.** Ein Lastwerkzeug liefert eine Zahl, auf der Entscheidungen

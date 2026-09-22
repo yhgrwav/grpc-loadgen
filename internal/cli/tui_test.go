@@ -24,7 +24,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 func TestSettingsRoundTrip(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/metrics"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 type Snapshot struct {

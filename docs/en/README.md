@@ -1,10 +1,16 @@
 <div align="center">
 
-# grpc-loadgen
+<h1><img src="../../assets/logo.png" width="360" alt="LeetTest"></h1>
 
 **gRPC load testing that doesn't lie.**
 
 [Русский](../ru/) · [English](../en/) · [Deutsch](../de/) · [中文](../zh-CN/)
+
+[![CI](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yhgrwav/leettest/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yhgrwav/leettest.svg)](https://pkg.go.dev/github.com/yhgrwav/leettest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/yhgrwav/leettest)](https://goreportcard.com/report/github.com/yhgrwav/leettest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/yhgrwav/leettest)](../../go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 
 </div>
 
@@ -36,7 +42,7 @@ unclear error message is as much a defect as a wrong number.
 ## Install
 
 ```console
-$ go install github.com/yhgrwav/grpc-loadgen/cmd/grpc-loadgen@latest
+$ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
 ## Config
@@ -122,7 +128,7 @@ A method without `data` works without reflection.
 ## Run
 
 ```console
-$ grpc-loadgen -c loadgen.yaml
+$ leettest -c leettest.yaml
 ```
 
 Before the start the tool connects to the service. An unreachable address is an error right
@@ -159,7 +165,7 @@ of failures by code in the report, export to Prometheus.
 
 | Question | |
 |---|---|
-| What problem does grpc-loadgen solve? | [Read](problem.md) |
+| What problem does LeetTest solve? | [Read](problem.md) |
 | Why this tool? | [Read](why.md) |
 | Which load-testing problems does it fix? | [Read](pitfalls.md) |
 | What is call chaining and why does it matter? | [Read](chaining.md) |

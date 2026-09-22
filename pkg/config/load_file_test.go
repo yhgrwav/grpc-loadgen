@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/leettest/pkg/config"
 )
 
 const validYAML = `
@@ -118,7 +118,7 @@ app:
 }
 
 func TestLoadFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "loadgen.yaml")
+	path := filepath.Join(t.TempDir(), "leettest.yaml")
 	if err := os.WriteFile(path, []byte(validYAML), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

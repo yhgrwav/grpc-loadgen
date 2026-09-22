@@ -21,8 +21,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/yhgrwav/grpc-loadgen/internal/cli"
-	"github.com/yhgrwav/grpc-loadgen/pkg/config"
+	"github.com/yhgrwav/leettest/internal/cli"
+	"github.com/yhgrwav/leettest/pkg/config"
 )
 
 func TestCallsFromConfig(t *testing.T) {
@@ -73,7 +73,7 @@ func TestServiceLabel(t *testing.T) {
 		{
 			name:  "one service gives its short name",
 			cfg:   config.MasterConfig{Load: config.Load{Calls: []config.Call{call("wallet.v1.WalletService/Get"), call("wallet.v1.WalletService/Put")}}},
-			path:  "configs/loadgen.yaml",
+			path:  "configs/leettest.yaml",
 			label: "WalletService",
 		},
 		{
@@ -85,7 +85,7 @@ func TestServiceLabel(t *testing.T) {
 		{
 			name:  "an explicit name wins over the service",
 			cfg:   config.MasterConfig{Name: named("wallet smoke"), Load: config.Load{Calls: []config.Call{call("wallet.v1.WalletService/Get")}}},
-			path:  "loadgen.yaml",
+			path:  "leettest.yaml",
 			label: "wallet smoke",
 		},
 	}

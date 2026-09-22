@@ -7,7 +7,7 @@
 
 ## GitHub Issues
 
-Основной канал — [issues репозитория](https://github.com/yhgrwav/grpc-loadgen/issues). Это
+Основной канал — [issues репозитория](https://github.com/yhgrwav/leettest/issues). Это
 встроенный в GitHub трекер: любой человек с аккаунтом создаёт запись, она получает номер, её
 видно всем, в ней можно переписываться и на неё можно ссылаться из коммитов.
 

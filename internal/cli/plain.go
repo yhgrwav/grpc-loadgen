@@ -22,7 +22,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
-	"github.com/yhgrwav/grpc-loadgen/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // Interactive reports whether the live view can be drawn.

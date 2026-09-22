@@ -58,7 +58,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/yhgrwav/grpc-loadgen
+        - github.com/yhgrwav/leettest
 
 issues:
   max-issues-per-linter: 0

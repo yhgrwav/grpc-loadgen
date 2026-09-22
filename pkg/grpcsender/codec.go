@@ -18,7 +18,7 @@ import "fmt"
 
 // codecName is unique to this package so it cannot collide with a codec
 // registered elsewhere in the process.
-const codecName = "grpc-loadgen-raw"
+const codecName = "leettest-raw"
 
 // discarded stands in for a response nobody asked to keep. Handing it to the
 // codec instead of a byte slice means the body is never copied: at a few

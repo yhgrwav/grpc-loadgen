@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	"github.com/yhgrwav/grpc-loadgen/test/stand"
+	"github.com/yhgrwav/leettest/test/stand"
 )
 
 // The stand is the source of truth for every measurement test built on it, so

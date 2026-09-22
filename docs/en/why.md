@@ -4,7 +4,7 @@
 
 > This translation may lag behind the [Russian original](../ru/why.md).
 
-grpc-loadgen is built on one principle: a load test result is worth something only when it can
+LeetTest is built on one principle: a load test result is worth something only when it can
 be trusted without caveats. Everything else in the tool follows from that.
 
 The priorities are ordered: **measurement correctness**, then **usability**, then **speed**. On
@@ -54,7 +54,7 @@ defect.
 
 ## How it compares with existing tools
 
-| Capability | ghz | k6 | JMeter | grpc-loadgen |
+| Capability | ghz | k6 | JMeter | LeetTest |
 |---|---|---|---|---|
 | Several methods at different rates in one run | one method per run | via script | via several thread groups | **in the config** |
 | Latency from the scheduled request time | partly | closed model by default | no | **yes** |
