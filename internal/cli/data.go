@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -107,29 +105,60 @@ func AttachData(ctx context.Context, resolver descriptor.Resolver, cfg *config.M
 // name: the config is usually written with response_type, and an error about
 // responseType reads like a different field.
 func withProtoNames(err error, desc protoreflect.MessageDescriptor) error {
-	text := err.Error()
-
-	var names []string
-
-	for jsonName, name := range protoNames(desc, map[protoreflect.FullName]bool{}) {
-		if strings.Contains(text, "field "+jsonName) {
-			names = append(names, name)
-		}
-	}
-
-	if len(names) == 0 {
+	jsonName := fieldInError(err.Error())
+	if jsonName == "" {
 		return err
 	}
 
-	slices.Sort(names)
+	// protojson names the field by JSON name alone: when fields of different
+	// messages share it, any one name could send the user to a field that is fine.
+	names := protoNames(desc, map[protoreflect.FullName]bool{}, map[string]map[string]bool{})[jsonName]
+	if len(names) != 1 {
+		return err
+	}
 
-	return fmt.Errorf("%w (field %s in the .proto)", err, strings.Join(names, ", "))
+	var name string
+	for n := range names {
+		name = n
+	}
+	if name == jsonName {
+		return err
+	}
+
+	return fmt.Errorf("%w (field %s in the .proto)", err, name)
 }
 
-// protoNames maps the JSON name of every field reachable from desc to its
-// .proto name, where the two differ. seen stops at recursive messages.
-func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) map[string]string {
-	names := map[string]string{}
+// fieldInError returns the JSON name protojson put in the text of an error, or
+// "" if it named no field.
+//
+// protojson spells a field by its JSON name in exactly one message —
+// "invalid value for <kind> field <jsonName>: <value>". On an unknown or a
+// duplicate field it quotes the key as the config wrote it, and there is
+// nothing to translate. The name is read out of that shape rather than looked
+// up by substring: JSON names nest (idX inside idXRay), and the rejected value
+// printed after the colon can name any field it likes.
+func fieldInError(text string) string {
+	_, rest, ok := strings.Cut(text, "invalid value for ")
+	if !ok {
+		return ""
+	}
+
+	_, rest, ok = strings.Cut(rest, " field ")
+	if !ok {
+		return ""
+	}
+
+	name, _, ok := strings.Cut(rest, ":")
+	if !ok {
+		return ""
+	}
+
+	return name
+}
+
+// protoNames collects, for the JSON name of every field reachable from desc,
+// the .proto names spelled that way. seen stops at recursive messages.
+func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool, names map[string]map[string]bool) map[string]map[string]bool {
 	if seen[desc.FullName()] {
 		return names
 	}
@@ -138,11 +167,12 @@ func protoNames(desc protoreflect.MessageDescriptor, seen map[protoreflect.FullN
 	fields := desc.Fields()
 	for i := range fields.Len() {
 		field := fields.Get(i)
-		if field.JSONName() != string(field.Name()) {
-			names[field.JSONName()] = string(field.Name())
+		if names[field.JSONName()] == nil {
+			names[field.JSONName()] = map[string]bool{}
 		}
+		names[field.JSONName()][string(field.Name())] = true
 		if inner := field.Message(); inner != nil {
-			maps.Copy(names, protoNames(inner, seen))
+			protoNames(inner, seen, names)
 		}
 	}
 
