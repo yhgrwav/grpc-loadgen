@@ -176,3 +176,43 @@ func TestPrintReportWarnsAboutUnclassifiedCalls(t *testing.T) {
 		t.Errorf("no unclassified calls, no warning:\n%s", out.String())
 	}
 }
+
+// A target that refuses 99% of calls in 2ms must not show a 2ms p99: the
+// method's row is the time to serve, and refusals get a row of their own.
+func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
+	q := func(d time.Duration) metrics.Quantile { return metrics.Quantile{Value: d, Exact: true, Defined: true} }
+	report := engine.Report{
+		Duration: time.Second,
+		Sent:     1000,
+		Failed:   990,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 1000, Failed: 990,
+			P50: q(200 * time.Millisecond), P99: q(201 * time.Millisecond),
+			Refusal: engine.RefusalLatency{Count: 990, P50: q(2 * time.Millisecond), P99: q(3 * time.Millisecond)},
+		}},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+	text := out.String()
+
+	var row string
+	for line := range strings.Lines(text) {
+		if strings.Contains(line, "refused") && strings.Contains(line, "990") {
+			row = line
+		}
+	}
+	if row == "" || !strings.Contains(row, "2ms") || !strings.Contains(row, "3ms") {
+		t.Errorf("want a refused row with 990 calls, p50 2ms and p99 3ms:\n%s", text)
+	}
+	if !strings.Contains(text, "time to serve") {
+		t.Errorf("the report must say the method's percentiles are the time to serve:\n%s", text)
+	}
+
+	out.Reset()
+	report.Methods[0].Refusal = engine.RefusalLatency{}
+	PrintReport(&out, "localhost:50051", report)
+	if strings.Contains(out.String(), "refused") {
+		t.Errorf("no refusals, no refused row:\n%s", out.String())
+	}
+}

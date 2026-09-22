@@ -118,9 +118,9 @@ func checkCounts(t *testing.T, method engine.MethodReport, sent int) {
 	if method.Invalid != 0 {
 		t.Errorf("%d observations were rejected as impossible", method.Invalid)
 	}
-	if method.Latencies+method.Unanswered != sent {
-		t.Errorf("%d calls have a latency and %d never reached the target, for %d calls",
-			method.Latencies, method.Unanswered, sent)
+	if method.Latencies+method.Refusal.Count+method.Unanswered != sent {
+		t.Errorf("%d calls have a service time, %d a refusal time and %d never reached the target, for %d calls",
+			method.Latencies, method.Refusal.Count, method.Unanswered, sent)
 	}
 }
 
@@ -297,10 +297,11 @@ func TestReport_FailuresOnAScheduleAreCountedExactly(t *testing.T) {
 	if want := sent / every; method.Failed != want {
 		t.Errorf("%d calls failed, the stand was told to fail %d of %d", method.Failed, want, sent)
 	}
-	// A failure that came back from the target is an observation like any
-	// other: dropping it would hide exactly the calls load testing is about.
-	if method.Latencies != sent {
-		t.Errorf("%d calls of %d carry a latency; every one was answered", method.Latencies, sent)
+	// A refusal that came back from the target is an observation, but of how
+	// long it took to refuse, not to serve: it has its own distribution.
+	if want := sent / every; method.Refusal.Count != want || method.Latencies != sent-want {
+		t.Errorf("%d refusal times and %d service times, want %d and %d",
+			method.Refusal.Count, method.Latencies, want, sent-want)
 	}
 	if method.Censored != 0 {
 		t.Errorf("%d answered calls were recorded as cut short", method.Censored)

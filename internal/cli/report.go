@@ -35,7 +35,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
 		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
 
-	censored, invalid, unanswered, unclassified, outside := 0, 0, 0, 0, 0
+	censored, invalid, unanswered, unclassified, outside, refused := 0, 0, 0, 0, 0, 0
 
 	for i := range report.Methods {
 		m := &report.Methods[i]
@@ -44,10 +44,21 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		unanswered += m.Unanswered
 		unclassified += m.Unclassified
 		outside += m.OutsideTimeline
+		refused += m.Refusal.Count
 
 		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
 			displayMethod(m.Method), m.Sent, m.Failed, m.RPS,
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
+
+		if r := m.Refusal; r.Count > 0 {
+			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  refused", "", r.Count, "",
+				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
+		}
+	}
+
+	if refused > 0 {
+		fmt.Fprint(w, "\nA method's percentiles are the time to serve a call: successes, and timeouts\n"+
+			"as lower bounds. The \"refused\" rows are how long the target took to say no.\n")
 	}
 
 	// Aborted calls are censored too, but raising the timeout would not show
