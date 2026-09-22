@@ -454,8 +454,10 @@ func (m *model) footerHints() string {
 		return fade[stage].Render(m.text.UnknownKey(m.hintKey))
 	}
 
+	width := contentWidth(m.viewWidth())
+
 	if m.done {
-		return keyHint(m.styles, m.text.HintTabs(), m.text.PressToExit())
+		return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.PressToExit(), 0})
 	}
 
 	if m.notice != "" {
@@ -463,18 +465,22 @@ func (m *model) footerHints() string {
 	}
 
 	if m.active == m.settingsTab() {
+		// The phrases list their keys in reading order, three spaces apart;
+		// the drop order is given here: esc, the way out, never goes.
 		if !m.editing {
-			return m.styles.muted.Render(fitHints(m.text.SettingsLocked(), contentWidth(m.viewWidth())))
+			return fitKeyHints(m.styles, width, append(phraseHints(m.text.SettingsLocked(), 2, 1, 0),
+				hint{m.text.HintQuit(), 0})...)
 		}
 
-		return m.styles.muted.Render(fitHints(m.text.SettingsHint(), contentWidth(m.viewWidth())))
+		return fitKeyHints(m.styles, width, append(phraseHints(m.text.SettingsHint(), 3, 2, 0, 1),
+			hint{m.text.HintQuit(), 0})...)
 	}
 
 	if m.showHelp {
-		return keyHint(m.styles, m.text.HintBack(), m.text.HintQuit())
+		return fitKeyHints(m.styles, width, hint{m.text.HintBack(), 0}, hint{m.text.HintQuit(), 0})
 	}
 
-	return keyHint(m.styles, m.text.HintTabs(), m.text.HintHelp(), m.text.HintQuit())
+	return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.HintHelp(), 2}, hint{m.text.HintQuit(), 0})
 }
 
 func (m *model) settingsView(width int) string {
@@ -667,8 +673,8 @@ func (m *model) finalReport(width int) string {
 		name := truncate(shortMethod(method.Method), nameWidth)
 
 		sent := formatCount(method.Sent)
-		if lipgloss.Width(sent) > sentColumn {
-			sent = compactCount(uint64(max(method.Sent, 0)))
+		if lipgloss.Width(sent) > sentColumn && method.Sent >= 0 {
+			sent = compactCount(uint64(method.Sent))
 		}
 
 		errors := m.styles.value
@@ -843,13 +849,45 @@ func wrapText(text string, width int) []string {
 	return append(lines, line)
 }
 
-// fitHints keeps as many of the key hints, separated by three spaces and
-// most important first, as fit in width.
-func fitHints(text string, width int) string {
-	hints := strings.Split(text, "   ")
-	for len(hints) > 1 && lipgloss.Width(strings.Join(hints, "   ")) > width {
-		hints = hints[:len(hints)-1]
+// hint is one key hint of a footer. drop orders what goes when the footer
+// does not fit, lowest first; 0 never goes: quitting and leaving a mode must
+// stay on screen whatever the width.
+type hint struct {
+	text string
+	drop int
+}
+
+// phraseHints splits a phrase that lists its keys three spaces apart and
+// gives each its drop order, in the phrase's order.
+func phraseHints(phrase string, drops ...int) []hint {
+	parts := strings.Split(phrase, "   ")
+	hints := make([]hint, len(parts))
+	for i, part := range parts {
+		hints[i] = hint{part, drops[min(i, len(drops)-1)]}
 	}
 
-	return truncate(strings.Join(hints, "   "), width)
+	return hints
+}
+
+// fitKeyHints lays the hints out in width, dropping them by their order
+// until the line fits.
+func fitKeyHints(s styles, width int, hints ...hint) string {
+	for dropped := 0; ; dropped++ {
+		var kept []string
+		last := true
+		for _, h := range hints {
+			if h.drop != 0 && h.drop <= dropped {
+				continue
+			}
+			if h.drop > dropped {
+				last = false
+			}
+			kept = append(kept, h.text)
+		}
+
+		line := keyHint(s, kept...)
+		if lipgloss.Width(line) <= width || last {
+			return line
+		}
+	}
 }

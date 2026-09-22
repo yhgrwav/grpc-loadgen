@@ -244,6 +244,11 @@ func fitStatLine(s styles, width int, fields ...statField) string {
 }
 
 // countField is a count shown exactly where it fits and compact where not.
+// A negative count can only come from a bug, and is shown as it is.
 func countField(label string, n, drop int) statField {
-	return statField{label: label, value: formatCount(n), compact: compactCount(uint64(max(n, 0))), drop: drop}
+	if n < 0 {
+		return statField{label: label, value: strconv.Itoa(n), drop: drop}
+	}
+
+	return statField{label: label, value: formatCount(n), compact: compactCount(uint64(n)), drop: drop}
 }

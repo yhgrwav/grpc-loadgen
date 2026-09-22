@@ -486,3 +486,74 @@ func TestSparkline_NoHistoryStillFillsTheRow(t *testing.T) {
 		t.Errorf("empty sparkline width = %d, want 20", got)
 	}
 }
+
+func TestFooterKeepsTheWayOutAtTheNarrowestFrame(t *testing.T) {
+	for _, lang := range allLangs {
+		t.Run(string(lang), func(t *testing.T) {
+			m := testModel(t)
+			m.text = NewText(lang)
+			m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+
+			quit := m.text.HintQuit()
+			if f := m.footer(); !strings.Contains(f, quit) {
+				t.Errorf("live view footer lost %q: %q", quit, f)
+			}
+
+			m.active = m.settingsTab()
+			for _, editing := range []bool{false, true} {
+				m.editing = editing
+				f := m.footer()
+				if !strings.Contains(f, quit) || !strings.Contains(f, "esc") {
+					t.Errorf("settings footer (editing %v) lost q or esc: %q", editing, f)
+				}
+			}
+		})
+	}
+}
+
+func TestFooterDropsHintsByOrderNotPosition(t *testing.T) {
+	s := newStyles(ThemeFor("mono", ModeDark))
+	hints := []hint{{"aaaa", 2}, {"bbbb", 0}, {"cccc", 1}, {"q quit", 0}}
+
+	// All four: 4+3+4+3+4+3+6 = 27. Without cccc: 20. Without both: 13.
+	for _, tt := range []struct {
+		width int
+		want  string
+	}{
+		{27, "aaaa   bbbb   cccc   q quit"},
+		{26, "aaaa   bbbb   q quit"},
+		{19, "bbbb   q quit"},
+		{5, "bbbb   q quit"}, // what never goes stays, even too wide
+	} {
+		if got := fitKeyHints(s, tt.width, hints...); got != tt.want {
+			t.Errorf("width %d: %q, want %q", tt.width, got, tt.want)
+		}
+	}
+}
+
+func TestNegativeCountIsShownAsItIs(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	tickN(m, 3)
+	m.snapshot.InFlight = -3
+
+	if line := statLineWith(t, m.body(120), m.text.InFlight()); !strings.Contains(line, "-3") {
+		t.Errorf("a negative count is a bug and must show: %q", line)
+	}
+}
+
+func TestWrapKeepsEveryCharacterOfALongWord(t *testing.T) {
+	token := strings.Repeat("abcdefghij", 20)
+	lines := wrapText("token "+token+" end", 52)
+
+	// Spaces between words may land at a line break; every other character
+	// must arrive, in order.
+	if got := strings.ReplaceAll(strings.Join(lines, ""), " ", ""); got != "token"+token+"end" {
+		t.Errorf("characters lost or added: %q", got)
+	}
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > 52 {
+			t.Errorf("line %d is %d wide: %q", i, w, line)
+		}
+	}
+}
