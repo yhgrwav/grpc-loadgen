@@ -253,7 +253,7 @@ func TestEngineTimelineHoldsTheDrain(t *testing.T) {
 	var begun, failed int
 	for _, s := range m.Seconds {
 		begun += s.Begun
-		failed += s.Failed
+		failed += s.TargetFailed
 	}
 	if begun != 20 || failed != 20 {
 		t.Errorf("begun %d, failed %d; want all 20 timed out on the timeline", begun, failed)

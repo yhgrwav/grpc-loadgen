@@ -35,13 +35,14 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
 		"method", "sent", "failed", "rps", "p50", "p90", "p95", "p99")
 
-	censored, invalid, unanswered, outside := 0, 0, 0, 0
+	censored, invalid, unanswered, unclassified, outside := 0, 0, 0, 0, 0
 
 	for i := range report.Methods {
 		m := &report.Methods[i]
 		censored += m.Censored
 		invalid += m.Invalid
 		unanswered += m.Unanswered
+		unclassified += m.Unclassified
 		outside += m.OutsideTimeline
 
 		fmt.Fprintf(w, "%-44s %8d %8d %9.0f %9s %9s %9s %9s\n",
@@ -76,6 +77,11 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		fmt.Fprintf(w, "\nwarning: %d requests fell outside the per-second timeline and are missing\n"+
 			"from it. The generator ran far behind its schedule or a clock jumped; the\n"+
 			"totals above still count them.\n", outside)
+	}
+
+	if unclassified > 0 {
+		fmt.Fprintf(w, "\nwarning: %d requests came back without a category and are left out of the\n"+
+			"percentiles. This is a bug in the sender, not in the target. Please report it.\n", unclassified)
 	}
 
 	if invalid > 0 {

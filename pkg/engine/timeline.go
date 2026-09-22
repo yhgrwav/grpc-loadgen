@@ -17,25 +17,50 @@ package engine
 import "time"
 
 // Second is one method's counters for one second of the run, counted from its
-// start. Begun is by the moment a call began, the four outcomes by the moment
-// it finished, the lag by the moment it was scheduled for.
+// start. Begun is by the moment a call began, the outcomes by the moment it
+// finished, the lag and the latency terms by the moment it was scheduled for.
 type Second struct {
-	Begun      int
-	Succeeded  int
-	Failed     int
-	Unanswered int
-	Aborted    int
+	Begun     int
+	Succeeded int
+	// TargetFailed is the target's own failures: server faults, overload and
+	// timeouts of requests that went out.
+	TargetFailed int
+	// RequestFailed is client faults: the request itself was wrong, and the
+	// target said so.
+	RequestFailed int
+	// UnsentLate and UnsentQuota are timeouts whose request never went out,
+	// split by who ate more of the budget: the generator's lag, or the wait
+	// on the connection from the start of the call to the deadline.
+	UnsentLate  int
+	UnsentQuota int
+	Unanswered  int
+	Aborted     int
+	// Unclassified is calls the sender left without a category: a defect of
+	// the sender, not an observation about the target.
+	Unclassified int
 	// InFlight is how many calls had begun and not finished by the end of
 	// this second. While the run goes on, the last timeout's worth of seconds
 	// is not final yet: calls from them are still in flight and unrecorded.
 	InFlight int
+	// LagSum and LagMax are over every call begun, answered or not: LagCalls.
 	LagSum   time.Duration
 	LagMax   time.Duration
+	LagCalls int
+	// The observed sums are over successes only: ObservedCalls. They add up to
+	// those calls' latencies. A refusal in 2ms would pass for a faster target,
+	// and a timeout's service time is only a lower bound. So a drowning target
+	// keeps a fine average here; its signal is TargetFailed.
+	ObservedCalls    int
+	ObservedLagSum   time.Duration
+	TransportWaitSum time.Duration
+	ServiceTimeSum   time.Duration
 }
 
 type second struct {
-	begun, succeeded, failed, unanswered, aborted int64
-	lagSum, lagMax                                time.Duration
+	begun, succeeded, targetFailed, requestFailed         int64
+	unsentLate, unsentQuota, unanswered, aborted, unknown int64
+	lagCalls, observedCalls                               int64
+	lagSum, lagMax, observedLag, transportWait, service   time.Duration
 }
 
 // timeline never grows while recording: growing means copying it under the
@@ -82,12 +107,21 @@ func (t *timeline) record(start time.Time, r Result) {
 
 	t.secs[begun].begun++
 
-	if lag := r.QueueTime(); lag < 0 {
+	lag := r.QueueTime()
+	if lag < 0 {
 		t.invalidLag++
 	} else {
 		s := &t.secs[scheduled]
+		s.lagCalls++
 		s.lagSum += lag
 		s.lagMax = max(s.lagMax, lag)
+
+		if r.Category == CategorySuccess {
+			s.observedCalls++
+			s.observedLag += lag
+			s.transportWait += r.TransportWait()
+			s.service += r.ServiceTime()
+		}
 	}
 
 	s := &t.secs[done]
@@ -95,13 +129,39 @@ func (t *timeline) record(start time.Time, r Result) {
 	switch r.Category {
 	case CategorySuccess:
 		s.succeeded++
-	case CategoryUnknown, CategoryUnreachable:
+	case CategoryClientFault:
+		s.requestFailed++
+	case CategoryUnreachable:
 		s.unanswered++
 	case CategoryAborted:
 		s.aborted++
+	case CategoryUnknown:
+		s.unknown++
+	case CategoryTimeout:
+		switch {
+		case !r.NotSent:
+			s.targetFailed++
+		case lateMoreThanQueued(r):
+			s.unsentLate++
+		default:
+			s.unsentQuota++
+		}
 	default:
-		s.failed++
+		s.targetFailed++
 	}
+}
+
+// lateMoreThanQueued reports whether the generator's lag ate more of an unsent
+// call's budget than the wait on the connection did. A generator running
+// behind starts calls just before their deadline, and a short quota wait
+// then finishes them off; blaming the connection would advise more
+// connections, which would not help.
+func lateMoreThanQueued(r Result) bool {
+	if r.Deadline.IsZero() {
+		return false
+	}
+
+	return r.QueueTime() >= r.Deadline.Sub(r.BegunAt)
 }
 
 func (t *timeline) export() []Second {
@@ -109,17 +169,28 @@ func (t *timeline) export() []Second {
 
 	var inFlight int64
 
-	for i, s := range t.secs[:t.used] {
-		inFlight += s.begun - s.succeeded - s.failed - s.unanswered - s.aborted
+	for i := range t.secs[:t.used] {
+		s := &t.secs[i]
+		inFlight += s.begun - s.succeeded - s.targetFailed - s.requestFailed - s.unsentLate -
+			s.unsentQuota - s.unanswered - s.aborted - s.unknown
 		out[i] = Second{
-			Begun:      int(s.begun),
-			Succeeded:  int(s.succeeded),
-			Failed:     int(s.failed),
-			Unanswered: int(s.unanswered),
-			Aborted:    int(s.aborted),
-			InFlight:   int(inFlight),
-			LagSum:     s.lagSum,
-			LagMax:     s.lagMax,
+			Begun:            int(s.begun),
+			Succeeded:        int(s.succeeded),
+			TargetFailed:     int(s.targetFailed),
+			RequestFailed:    int(s.requestFailed),
+			UnsentLate:       int(s.unsentLate),
+			UnsentQuota:      int(s.unsentQuota),
+			Unanswered:       int(s.unanswered),
+			Aborted:          int(s.aborted),
+			Unclassified:     int(s.unknown),
+			InFlight:         int(inFlight),
+			LagSum:           s.lagSum,
+			LagMax:           s.lagMax,
+			LagCalls:         int(s.lagCalls),
+			ObservedCalls:    int(s.observedCalls),
+			ObservedLagSum:   s.observedLag,
+			TransportWaitSum: s.transportWait,
+			ServiceTimeSum:   s.service,
 		}
 	}
 
