@@ -155,24 +155,65 @@ func TestPoolSendsConcurrently(t *testing.T) {
 	}
 }
 
-// Ground: contract — the pool stops with ErrInFlightCapExceeded once the cap is full. Not exact:
-// 16 requests against a cap of 2, so an off-by-one in the check stays green.
-func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
+// Ground: boundary — exactly at the cap and one past it. The slot is taken when the call is
+// launched, not when it reaches the sender, so the count does not depend on goroutine timing.
+func TestPoolAtTheInFlightCapRefusesNothing(t *testing.T) {
 	const limit = 2
 
-	in := make(chan Request, 16)
-	for range 16 {
+	h := newHoldingSender()
+	in := make(chan Request, limit)
+	for range limit {
 		in <- Request{ScheduledAt: time.Now()}
 	}
 	close(in)
 
-	out := make(chan Result, 16)
+	out := make(chan Result, limit)
+	done := make(chan error, 1)
+	go func() { done <- NewWorkerPool(h, limit).Run(t.Context(), in, out) }()
 
-	pool := NewWorkerPool(slowSender(time.Second), limit)
-	err := pool.Run(context.Background(), in, out)
+	for range limit {
+		select {
+		case <-h.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the calls did not reach the sender")
+		}
+	}
+	close(h.release)
 
-	if !errors.Is(err, ErrInFlightCapExceeded) {
+	if err := waitRun(t, done); err != nil {
+		t.Fatalf("Run = %v, want nil: %d calls fit a cap of %d", err, limit, limit)
+	}
+	if got := len(out); got != limit {
+		t.Errorf("%d results, want %d", got, limit)
+	}
+}
+
+// Ground: boundary — one call past the cap is refused, and only that one: the two before it
+// are sent.
+func TestPoolFailsWhenInFlightLimitIsReached(t *testing.T) {
+	const limit = 2
+
+	h := newHoldingSender()
+	in := make(chan Request, limit+1)
+	for range limit + 1 {
+		in <- Request{ScheduledAt: time.Now()}
+	}
+	close(in)
+
+	// The held calls end only on cancellation: were the third one sent too,
+	// Run would wait for them for ever, and the test must fail, not hang.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	out := make(chan Result, limit+1)
+	done := make(chan error, 1)
+	go func() { done <- NewWorkerPool(h, limit).Run(ctx, in, out) }()
+
+	if err := waitRun(t, done); !errors.Is(err, ErrInFlightCapExceeded) {
 		t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
+	}
+	if got := h.calls.Load(); got != limit {
+		t.Errorf("sender got %d calls, want %d: the cap refuses the third and nothing else", got, limit)
 	}
 }
 
@@ -461,7 +502,27 @@ func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 
 	out := make(chan Result)
 
-	pool := NewWorkerPool(slowSender(10*time.Millisecond), 1)
+	// A sender failure is fatal: nobody may read after it, so the pool must
+	// not wait for its results to be taken. (The cap is not fatal: its calls
+	// are cut off and delivered, and the engine reads them.) The first call
+	// fails only once the second has returned and is waiting to deliver.
+	boom := errors.New("boom")
+	var (
+		calls    atomic.Int32
+		returned sync.Once
+	)
+	second := make(chan struct{})
+	failing := senderFunc(func(context.Context, Request) (Outcome, error) {
+		if calls.Add(1) == 1 {
+			<-second
+
+			return Outcome{}, boom
+		}
+		returned.Do(func() { close(second) })
+
+		return Outcome{Category: CategorySuccess}, nil
+	})
+	pool := NewWorkerPool(failing, 8)
 
 	done := make(chan error, 1)
 	go func() {
@@ -470,10 +531,88 @@ func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrInFlightCapExceeded) {
-			t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
+		if !errors.Is(err, boom) {
+			t.Fatalf("error = %v, want %v", err, boom)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not return while results were left unread")
+	}
+}
+
+// Ground: concurrency — the caller's abort landing after a cap hit, while the calls the cap cut
+// off have not yet read the moment.
+func TestPoolKeepsCapMomentWhenCallerAbortsAfter(t *testing.T) {
+	const limit = 2
+
+	started := make(chan struct{}, limit)
+	cut := make(chan struct{}, limit)
+	gate := make(chan struct{})
+	sender := senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		cut <- struct{}{}
+		<-gate
+
+		return Outcome{}, ctx.Err()
+	})
+	pool := NewWorkerPool(sender, limit)
+	out := make(chan Result, limit)
+
+	r := newPoolRun(t.Context(), limit)
+	defer r.close()
+
+	for range limit {
+		if err := r.launch(pool, Request{ScheduledAt: time.Now()}, out); err != nil {
+			t.Fatalf("launch within the cap: %v", err)
+		}
+	}
+	for range limit {
+		<-started
+	}
+
+	err := r.launch(pool, Request{ScheduledAt: time.Now()}, out)
+	var capErr *InFlightCapError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("launch past the cap: error = %v, want %T", err, capErr)
+	}
+
+	// The cap alone cuts the calls off, before any caller abort.
+	for range limit {
+		select {
+		case <-cut:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the cap hit did not cut the calls in flight off")
+		}
+	}
+
+	// The calls wait at the gate. The caller's abort must come strictly later
+	// on the clock, or overwriting the moment would go unseen.
+	for !time.Now().After(capErr.At) {
+		runtime.Gosched()
+	}
+	r.abortByCaller()
+	close(gate)
+
+	if got := r.finish(err); !errors.Is(got, ErrInFlightCapExceeded) {
+		t.Fatalf("finish: error = %v, want %v", got, ErrInFlightCapExceeded)
+	}
+	close(out)
+
+	if at, _ := r.aborted(); !at.Equal(capErr.At) {
+		t.Errorf("abort moment = %v, want the cap hit %v", at, capErr.At)
+	}
+	n := 0
+	for res := range out {
+		n++
+		if res.Category != CategoryAborted {
+			t.Errorf("category = %v, want %v", res.Category, CategoryAborted)
+		}
+		if !res.DoneAt.Equal(capErr.At) {
+			t.Errorf("DoneAt = %v, want the cap hit %v: later is time nobody watched",
+				res.DoneAt, capErr.At)
+		}
+	}
+	if n != limit {
+		t.Errorf("got %d results, want %d", n, limit)
 	}
 }

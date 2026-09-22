@@ -79,10 +79,15 @@ func run(t *testing.T, s *stand.Stand, call engine.Call, maxInFlight int) (engin
 
 	t.Cleanup(func() { _ = sender.Close() })
 
+	// The tests size the cap by rps × timeout; the engine's own reserve, the
+	// edge slot and room for late release, goes on top.
+	rps := call.Stages[0].TargetRPS
+	reserve := 1 + int((time.Duration(rps)*engine.ReleaseMargin+time.Second-1)/time.Second)
+
 	eng, err := engine.New(engine.Options{
 		Calls:       []engine.Call{call},
 		Sender:      sender,
-		MaxInFlight: maxInFlight,
+		MaxInFlight: maxInFlight + reserve,
 	})
 	if err != nil {
 		t.Fatalf("build the engine: %v", err)

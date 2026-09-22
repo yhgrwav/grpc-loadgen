@@ -51,30 +51,53 @@ func TestNew_RejectsCallsThatOutgrowTheCapWhenTheTargetHangs(t *testing.T) {
 	if !errors.As(err, &budget) {
 		t.Fatalf("err = %T, want *InFlightBudgetError carrying the numbers", err)
 	}
-	if budget.Need != 20_000 || budget.Cap != 5000 || budget.PeakRPS != 1000 {
-		t.Errorf("budget = %+v, want Need 20000, Cap 5000, PeakRPS 1000", *budget)
+	// 20 000 in the window, one at its closing edge, 100 for 100ms of late
+	// slot release.
+	if budget.Need != 20_101 || budget.Cap != 5000 || budget.PeakRPS != 1000 {
+		t.Errorf("budget = %+v, want Need 20101, Cap 5000, PeakRPS 1000", *budget)
 	}
 }
 
-// Ground: boundary — exactly at the cap.
+// Ground: boundary — exactly the budget is accepted. A hung target at a cap of exactly
+// ⌈rps × timeout⌉ hit it 9 runs of 9 at the first deadline (stand, 2026-09-22): the call scheduled
+// on that deadline starts before the slot is released.
 func TestNew_BudgetExactlyAtTheCapIsAccepted(t *testing.T) {
-	if err := newWithCap(5000, budgetCall("a", 100, 50*time.Second)); err != nil {
-		t.Errorf("100 RPS x 50s = 5000 against a cap of 5000: err = %v, want nil", err)
+	// 100 x 50s = 5000 in the window, 1 at its edge, 100 x 100ms = 10 for
+	// late release.
+	if err := newWithCap(5011, budgetCall("a", 100, 50*time.Second)); err != nil {
+		t.Errorf("a budget of 5011 against a cap of 5011: err = %v, want nil", err)
 	}
 }
 
-// Ground: boundary — one over the cap, rounded up.
+// Ground: boundary — one slot below the budget is rejected.
 func TestNew_BudgetOneOverTheCapIsRejected(t *testing.T) {
-	// 100 x 50.001s = 5000.1, which rounds up: a request is either in flight
-	// or not.
-	err := newWithCap(5000, budgetCall("a", 100, 50*time.Second+time.Millisecond))
+	err := newWithCap(5010, budgetCall("a", 100, 50*time.Second))
 
 	var budget *InFlightBudgetError
 	if !errors.As(err, &budget) {
 		t.Fatalf("err = %v, want *InFlightBudgetError", err)
 	}
-	if budget.Need != 5001 {
-		t.Errorf("Need = %d, want 5001", budget.Need)
+	if budget.Need != 5011 {
+		t.Errorf("Need = %d, want 5011", budget.Need)
+	}
+}
+
+// Ground: boundary — the window and the margin round up each: 100 x 50.001s is 5000.1, and
+// 3 x 100ms is 0.3.
+func TestNew_BudgetRoundsEveryPartUp(t *testing.T) {
+	var budget *InFlightBudgetError
+	if err := newWithCap(1, budgetCall("a", 100, 50*time.Second+time.Millisecond)); !errors.As(err, &budget) {
+		t.Fatalf("err = %v, want *InFlightBudgetError", err)
+	}
+	if budget.Need != 5012 {
+		t.Errorf("Need = %d, want 5001 + 1 + 10", budget.Need)
+	}
+
+	if err := newWithCap(1, budgetCall("a", 3, time.Second)); !errors.As(err, &budget) {
+		t.Fatalf("err = %v, want *InFlightBudgetError", err)
+	}
+	if budget.Need != 5 {
+		t.Errorf("Need = %d, want 3 + 1 + 1", budget.Need)
 	}
 }
 
@@ -91,8 +114,8 @@ func TestNew_BudgetSumsEveryCall(t *testing.T) {
 	if !errors.As(err, &budget) {
 		t.Fatalf("err = %v, want *InFlightBudgetError", err)
 	}
-	if budget.Need != 6000 || budget.PeakRPS != 3000 {
-		t.Errorf("budget = %+v, want Need 6000, PeakRPS 3000", *budget)
+	if budget.Need != 6302 || budget.PeakRPS != 3000 {
+		t.Errorf("budget = %+v, want Need 2 x (3000 + 1 + 150), PeakRPS 3000", *budget)
 	}
 }
 
@@ -130,8 +153,8 @@ func TestNew_StagesShorterThanTheTimeoutAddUp(t *testing.T) {
 		},
 	}
 
-	if err := newWithCap(1999, call); !errors.Is(err, ErrInFlightBudget) {
-		t.Errorf("err = %v, want ErrInFlightBudget: 2000 requests fit no cap of 1999", err)
+	if err := newWithCap(2100, call); !errors.Is(err, ErrInFlightBudget) {
+		t.Errorf("err = %v, want ErrInFlightBudget: 2000 + 1 + 100 fit no cap of 2100", err)
 	}
 }
 
@@ -152,8 +175,8 @@ func TestNew_BudgetUsesThePeakStage(t *testing.T) {
 	if err := newWithCap(1, call); !errors.As(err, &budget) {
 		t.Fatalf("err = %v, want *InFlightBudgetError", err)
 	}
-	if budget.PeakRPS != 900 || budget.Need != 900 {
-		t.Errorf("budget = %+v, want PeakRPS 900 and Need 900", *budget)
+	if budget.PeakRPS != 900 || budget.Need != 991 {
+		t.Errorf("budget = %+v, want PeakRPS 900 and Need 900 + 1 + 90", *budget)
 	}
 }
 
@@ -165,5 +188,22 @@ func TestNew_HugeBudgetDoesNotOverflowIntoAPass(t *testing.T) {
 	err := newWithCap(math.MaxInt/2, budgetCall("a", math.MaxInt32, time.Duration(math.MaxInt64)))
 	if !errors.Is(err, ErrInFlightBudget) {
 		t.Errorf("err = %v, want ErrInFlightBudget", err)
+	}
+}
+
+// Ground: contract — the report is keyed by method: two calls to one method would merge into a
+// row that states one call's rate and timeout for both (review of #52: 500 + 500 RPS read as 500).
+func TestNew_MethodInTwoCallsIsRejected(t *testing.T) {
+	err := newWithCap(5000,
+		budgetCall("a", 500, time.Second),
+		budgetCall("b", 10, time.Second),
+		budgetCall("a", 500, 2*time.Second),
+	)
+
+	if !errors.Is(err, ErrDuplicateMethod) {
+		t.Fatalf("err = %v, want %v", err, ErrDuplicateMethod)
+	}
+	if want := "call 2: method appears in more than one call: a, as call 0"; err.Error() != want {
+		t.Errorf("err = %q, want %q: the user must see which calls collide", err, want)
 	}
 }

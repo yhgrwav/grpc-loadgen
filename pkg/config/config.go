@@ -32,6 +32,7 @@ var (
 	ErrInvalidDuration = errors.New("duration must be positive")
 	ErrInvalidWarmup   = errors.New("warmup must not be negative")
 	ErrEmptyName       = errors.New("name must not be empty: leave it out to use the service or file name")
+	ErrDuplicateMethod = errors.New("method appears in more than one call: the report is per method, keep one call for it")
 	ErrInvalidTimeout  = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
 )
 
@@ -115,10 +116,16 @@ func (l Load) Validate() error {
 	if len(l.Calls) == 0 {
 		errs = append(errs, ErrNoCalls)
 	}
+	first := make(map[string]int, len(l.Calls))
 	for i, call := range l.Calls {
 		if err := call.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("call %d: %w", i, err))
 		}
+		if j, ok := first[call.Method]; ok && call.Method != "" {
+			errs = append(errs, fmt.Errorf("call %d: %w: %q, as call %d", i, ErrDuplicateMethod, call.Method, j))
+			continue
+		}
+		first[call.Method] = i
 	}
 
 	return errors.Join(errs...)

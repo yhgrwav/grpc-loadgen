@@ -24,8 +24,11 @@ import (
 )
 
 var (
-	ErrNoCalls     = errors.New("engine has no calls")
-	ErrFakeFailure = errors.New("fake sender failure")
+	ErrNoCalls = errors.New("engine has no calls")
+	// The report is per method: two calls to one would merge into a row
+	// stating one call's rate and timeout for both.
+	ErrDuplicateMethod = errors.New("method appears in more than one call")
+	ErrFakeFailure     = errors.New("fake sender failure")
 )
 
 type Call struct {
@@ -56,6 +59,10 @@ type Engine struct {
 	stopped  chan struct{}
 	// incomplete is set when the run ended before its plan: stopped or aborted.
 	incomplete atomic.Bool
+	// capHit is set when the run ended on the in-flight cap.
+	capHit atomic.Pointer[InFlightCapError]
+	// startedAt is when Run started, for the moment of a cap hit.
+	startedAt time.Time
 }
 
 // CheckOptions validates everything about the calls and limits that New does,
@@ -67,6 +74,13 @@ func CheckOptions(opts Options) error {
 	}
 	if opts.MaxInFlight < 1 {
 		return fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
+	}
+	first := make(map[string]int, len(opts.Calls))
+	for i, call := range opts.Calls {
+		if j, ok := first[call.Method]; ok {
+			return fmt.Errorf("call %d: %w: %s, as call %d", i, ErrDuplicateMethod, call.Method, j)
+		}
+		first[call.Method] = i
 	}
 
 	return checkInFlightBudget(opts.Calls, opts.MaxInFlight)
@@ -174,8 +188,54 @@ func (e *Engine) longestTimeout() time.Duration {
 func (e *Engine) Report() Report {
 	report := e.stats.Report()
 	report.Incomplete = e.incomplete.Load()
+	report.Planned = e.plannedDuration()
+
+	if hit := e.capHit.Load(); hit != nil {
+		report.CapHit = &CapHit{At: hit.At.Sub(e.startedAt), Unsent: 1, OverDeadline: report.overDeadline}
+	}
+
+	for i := range report.Methods {
+		m := &report.Methods[i]
+		for _, call := range e.opts.Calls {
+			if call.Method != m.Method {
+				continue
+			}
+
+			from := time.Duration(0)
+			if m.SilentFrom != nil {
+				from = time.Duration(*m.SilentFrom) * time.Second
+			}
+			m.Timeout = call.Timeout
+			m.RPSLow, m.RPSHigh = ratesFrom(call.Stages, from)
+		}
+	}
 
 	return report
+}
+
+// ratesFrom is the lowest and highest planned rate of the stages that run at
+// or after from.
+func ratesFrom(stages []Stage, from time.Duration) (low, high int) {
+	var at time.Duration
+
+	first := true
+	for _, stage := range stages {
+		end := at + stage.Duration
+		at = end
+		if end <= from {
+			continue
+		}
+
+		lo, hi := min(stage.StartRPS, stage.TargetRPS), max(stage.StartRPS, stage.TargetRPS)
+		if first {
+			low, high, first = lo, hi, false
+
+			continue
+		}
+		low, high = min(low, lo), max(high, hi)
+	}
+
+	return low, high
 }
 
 // Run executes the plan once; an Engine is not reused. Cancelling ctx aborts
@@ -192,7 +252,8 @@ func (e *Engine) Run(ctx context.Context) error {
 		methods = append(methods, call.Method)
 	}
 	e.stats.Reserve(e.plannedDuration()+e.longestTimeout()+timelineSlack, methods...)
-	e.stats.Start(time.Now(), e.opts.Warmup)
+	e.startedAt = time.Now()
+	e.stats.Start(e.startedAt, e.opts.Warmup)
 
 	scheduleCtx, stopScheduling := context.WithCancel(runCtx)
 	defer stopScheduling()
@@ -258,6 +319,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.stats.Finish(time.Now())
 
 	if ctx.Err() != nil {
+		e.incomplete.Store(true)
+	}
+
+	if capErr := (*InFlightCapError)(nil); errors.As(sendErr, &capErr) {
+		e.capHit.Store(capErr)
 		e.incomplete.Store(true)
 	}
 

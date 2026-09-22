@@ -536,15 +536,17 @@ func TestRun_OverBudgetConfigFailsBeforeConnecting(t *testing.T) {
 }
 
 func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
-	// Cap 10 at 50 RPS allows a timeout of 10/50 = 200ms; keeping 2s needs a
-	// cap of 50 x 2 = 100.
 	res := runCLI(t.Context(), t, 3*time.Second,
 		"-max-in-flight", "10", "-c", writeConfig(t, closedPort(t), checkMethod, plaintext))
 	if res.err == nil {
 		t.Fatal("run succeeded, want the in-flight budget to reject the config")
 	}
 
-	for _, want := range []string{"timeout", "200ms", "-max-in-flight", "100"} {
+	// Cap 10 at 50 RPS: a slot for the call on the window's edge, 5 for 100ms
+	// of late release and one for rounding rps × timeout up leave 3, a timeout
+	// of 60ms; keeping 2s needs 100 + 1 + 5 = 106. The error says why the
+	// numbers are not 200ms and 100.
+	for _, want := range []string{"timeout", "60ms", "-max-in-flight", "106", "100ms"} {
 		if !strings.Contains(res.err.Error(), want) {
 			t.Errorf("error %q lacks %q", res.err, want)
 		}
@@ -894,5 +896,75 @@ func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
 	}
 	if strings.Contains(res.stderr, "stopping") {
 		t.Errorf("SIGTERM went through the gentle stop:\n%s", res.stderr)
+	}
+}
+
+func TestRunResult_CapHitIsAnIncompleteRunNotAnError(t *testing.T) {
+	report := engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}
+	err := runResult(report, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
+
+	if !errors.Is(err, ErrIncomplete) {
+		t.Errorf("err = %v, want ErrIncomplete: the report and its verdict were printed", err)
+	}
+	if errors.Is(err, engine.ErrInFlightCapExceeded) {
+		t.Errorf("err = %v: a cap hit is a verdict in the report, not an error printed without one", err)
+	}
+}
+
+func TestRunResult_OtherFailuresStayErrors(t *testing.T) {
+	boom := errors.New("boom")
+	if err := runResult(engine.Report{}, boom); !errors.Is(err, boom) {
+		t.Errorf("err = %v, want the failure itself", err)
+	}
+}
+
+func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
+	// Each call rounds its own rps × timeout up: dividing the cap by the summed
+	// rate once advised 600ms for 3 and 7 RPS under a cap of 10, which New
+	// then rejected with a budget of 11.
+	for _, maxInFlight := range []int{3, 10, 57, 500, 5000, 12345} {
+		for _, rates := range [][]int{{1}, {50}, {3, 7}, {999, 1}, {2500}, {100, 200, 300}} {
+			calls := make([]engine.Call, len(rates))
+			for i, rps := range rates {
+				calls[i] = engine.Call{Method: strconv.Itoa(i), Timeout: 2 * time.Second,
+					Stages: []engine.Stage{{StartRPS: rps, TargetRPS: rps, Duration: time.Second}}}
+			}
+			fresh := func(timeout time.Duration, cap int) error {
+				for i := range calls {
+					calls[i].Timeout = timeout
+				}
+				_, err := engine.New(engine.Options{Calls: calls, Sender: engine.FakeSender{}, MaxInFlight: cap})
+
+				return err
+			}
+
+			var budget *engine.InFlightBudgetError
+			if !errors.As(fresh(2*time.Second, maxInFlight), &budget) {
+				continue
+			}
+
+			advice := withBudgetAdvice(budget).Error()
+			if err := fresh(2*time.Second, budget.Need); err != nil {
+				t.Errorf("cap %d, rates %v: advised -max-in-flight %d, New says %v", maxInFlight, rates, budget.Need, err)
+			}
+
+			at := strings.Index(advice, "at most ")
+			if at < 0 {
+				if !strings.Contains(advice, "no timeout fits") {
+					t.Errorf("cap %d, rates %v: advice names neither a timeout nor why not: %q", maxInFlight, rates, advice)
+				}
+				continue
+			}
+			fits, err := time.ParseDuration(strings.Fields(advice[at+len("at most "):])[0])
+			if err != nil {
+				t.Fatalf("advice %q: %v", advice, err)
+			}
+			if fits <= 0 {
+				t.Errorf("cap %d, rates %v: advised a timeout of %v", maxInFlight, rates, fits)
+			}
+			if err := fresh(fits, maxInFlight); err != nil {
+				t.Errorf("cap %d, rates %v: advised %v, New says %v", maxInFlight, rates, fits, err)
+			}
+		}
 	}
 }

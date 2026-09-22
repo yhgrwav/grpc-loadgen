@@ -120,7 +120,7 @@ func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 4 * time.Millisecond, Stages: []Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Hour}}}},
 		Sender:      sender,
-		MaxInFlight: 4,
+		MaxInFlight: 105,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -241,7 +241,7 @@ func TestEngineTimelineHoldsTheDrain(t *testing.T) {
 	var begun, failed int
 	for _, s := range m.Seconds {
 		begun += s.Begun
-		failed += s.TargetFailed
+		failed += s.TimedOut
 	}
 	if begun != 20 || failed != 20 {
 		t.Errorf("begun %d, failed %d; want all 20 timed out on the timeline", begun, failed)
