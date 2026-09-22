@@ -240,12 +240,12 @@ func (s *Stats) Record(r Result) {
 		return
 	}
 
-	if r.Category == CategorySuccess {
+	switch r.Category {
+	case CategorySuccess:
 		method.latency.Record(r.Latency())
-		return
+	case CategoryServerFault, CategoryOverload, CategoryClientFault:
+		method.refusal.Record(r.Latency())
 	}
-
-	method.refusal.Record(r.Latency())
 }
 
 // methodView is one method's counters taken under the lock together with a
@@ -264,8 +264,9 @@ type methodView struct {
 // views copies the counters under the lock and takes each distribution's
 // snapshot outside it: every snapshot briefly locks its own distribution, and
 // nesting those under the Stats lock would stall recording for as long as all
-// methods together take to copy.
-func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out []methodView) {
+// methods together take to copy. The refusal times are snapshot only on
+// request: the live view does not show them, and every snapshot allocates.
+func (s *Stats) views(withRefusals bool) (elapsed, measured time.Duration, sent, failed int, out []methodView) {
 	s.mu.Lock()
 	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
 
@@ -291,7 +292,9 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 
 	for i, src := range sources {
 		out[i].dist = src.latency.Snapshot()
-		out[i].refusal = src.refusal.Snapshot()
+		if withRefusals {
+			out[i].refusal = src.refusal.Snapshot()
+		}
 	}
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
@@ -300,7 +303,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	elapsed, measured, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views(false)
 
 	snapshot := Snapshot{
 		Elapsed: elapsed,
@@ -344,7 +347,7 @@ func (s *Stats) Snapshot() Snapshot {
 // Report copies every method's timeline under the lock Record takes: call it
 // once the run is over. For live data use Snapshot.
 func (s *Stats) Report() Report {
-	elapsed, measured, sent, failed, views := s.views()
+	elapsed, measured, sent, failed, views := s.views(true)
 
 	// The timelines are copied only here, once a run is over, never for the
 	// snapshots the interface takes several times a second.

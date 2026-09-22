@@ -15,8 +15,11 @@
 package engine
 
 import (
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 func answered(start time.Time, category Category, latency time.Duration) Result {
@@ -112,5 +115,53 @@ func TestStats_LiveViewShowsServiceTime(t *testing.T) {
 
 	if got := stats.Snapshot().P50; !got.Defined || got.Value < 199*time.Millisecond {
 		t.Errorf("live p50 = %+v, want 200ms", got)
+	}
+}
+
+// bytesPerCall is how much fn allocates per call, on average.
+func bytesPerCall(fn func()) uint64 {
+	const runs = 20
+
+	fn()
+
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+	for range runs {
+		fn()
+	}
+	runtime.ReadMemStats(&after)
+
+	return (after.TotalAlloc - before.TotalAlloc) / runs
+}
+
+// The live view snapshots several times a second and shows only the time to
+// serve. Snapshotting the refusal times too would double the garbage, and a
+// collector pause is generator lag: the tool measuring itself.
+func TestStats_LiveViewDoesNotSnapshotRefusals(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+	stats.Record(answered(start, CategorySuccess, 200*time.Millisecond))
+	stats.Record(answered(start, CategoryOverload, 2*time.Millisecond))
+
+	// What the live view needs: one distribution, its percentiles, and the
+	// merge across methods.
+	service := metrics.NewLatencies()
+	service.Record(200 * time.Millisecond)
+	needed := bytesPerCall(func() {
+		snapshot := service.Snapshot()
+		merged := metrics.Merge(snapshot)
+		for _, p := range []float64{0.5, 0.9, 0.99} {
+			_ = snapshot.Percentile(p)
+			_ = merged.Percentile(p)
+		}
+	})
+	extra := bytesPerCall(func() { _ = metrics.NewLatencies().Snapshot() })
+	live := bytesPerCall(func() { _ = stats.Snapshot() })
+
+	if live > needed+extra/2 {
+		t.Errorf("a live snapshot allocates %d bytes, what it shows needs %d; one more distribution is %d",
+			live, needed, extra)
 	}
 }
