@@ -120,19 +120,16 @@ func TestReport_SlotsHeldPastTheAllowanceHitTheCap(t *testing.T) {
 	if report.CapHit.Unsent != 1 {
 		t.Errorf("unsent = %d, want 1: the cap refuses the call that did not fit, and the run stops", report.CapHit.Unsent)
 	}
-	// The cap fills with calls past their deadline only while the generator
-	// itself keeps up: every millisecond it starts a call late puts another
-	// slot in flight, and a generator more than the allowance behind fills
-	// the cap before any deadline passes. That is a valid cap hit for another
-	// reason, and it is what a loaded CI runner produces; the claim under
-	// test is about the other case.
-	if report.StartLagMax >= releaseMargin {
-		t.Skipf("generator started calls up to %v late, past the %v allowance: the cap filled with calls that were still within their deadline",
-			report.StartLagMax, releaseMargin)
-	}
+	// Flaky on CI, cause not yet known (2026-09-22): the run below hit the
+	// cap with nothing past its deadline while the generator was only 1.35ms
+	// behind, so generator lateness is not the explanation. The numbers the
+	// failure needs are printed with it.
 	if report.CapHit.OverDeadline == 0 {
-		t.Errorf("no call in flight was past its deadline (start lag max %v), yet only such calls fill the cap",
-			report.StartLagMax)
+		t.Errorf("no call in flight was past its deadline, yet only such calls fill the cap
+"+
+			"start lag max %v, run %v of the planned %v, cap hit at %v, unsent %d, aborted %d, timed out %d",
+			report.StartLagMax, report.Duration, report.Planned, report.CapHit.At, report.CapHit.Unsent,
+			report.Aborted, report.Methods[0].TimedOut)
 	}
 	if !report.Incomplete {
 		t.Error("a run stopped by the cap must be incomplete")
