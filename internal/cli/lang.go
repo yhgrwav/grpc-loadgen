@@ -118,6 +118,39 @@ func (t Text) InFlight() string {
 	return t.get(phrase{LangRU: "в полёте", LangEN: "in flight", LangDE: "unterwegs", LangZH: "在途"})
 }
 
+// InFlightCount is the header's count of calls still waiting for an answer;
+// n is already formatted.
+func (t Text) InFlightCount(n string) string {
+	return t.get(phrase{
+		LangRU: n + " в полёте",
+		LangEN: n + " in flight",
+		LangDE: n + " unterwegs",
+		LangZH: n + " 在途",
+	})
+}
+
+// StopAgainAborts says what another press of the stop key does while the
+// calls in flight drain.
+func (t Text) StopAgainAborts() string {
+	return t.get(phrase{
+		LangRU: "q ещё раз — оборвать",
+		LangEN: "q again cuts them off",
+		LangDE: "nochmal q — abbrechen",
+		LangZH: "再按 q 立即中断",
+	})
+}
+
+// StopAgainExits is the way out once the abort is under way: it records the
+// results and builds the report, and if that hangs only this leaves.
+func (t Text) StopAgainExits() string {
+	return t.get(phrase{
+		LangRU: "q ещё раз — выйти без отчёта",
+		LangEN: "q again exits without a report",
+		LangDE: "nochmal q — ohne Bericht beenden",
+		LangZH: "再按 q 退出，不输出报告",
+	})
+}
+
 func (t Text) Target() string {
 	return t.get(phrase{LangRU: "цель", LangEN: "target", LangDE: "Ziel", LangZH: "目标"})
 }
