@@ -158,33 +158,6 @@ func TestThemeForPicksMode(t *testing.T) {
 	}
 }
 
-func TestSparklineFitsWidth(t *testing.T) {
-	s := newStyles(ThemeFor("mono", ModeDark))
-
-	values := make([]float64, 0, 100)
-	for i := range 100 {
-		values = append(values, float64(i))
-	}
-
-	if got := lipglossWidth(sparkline(s, values, 20)); got != 20 {
-		t.Errorf("sparkline width = %d, want 20", got)
-	}
-	if got := lipglossWidth(sparkline(s, nil, 20)); got != 20 {
-		t.Errorf("empty sparkline width = %d, want 20", got)
-	}
-}
-
-func TestGaugeClampsToWidth(t *testing.T) {
-	s := newStyles(ThemeFor("mono", ModeDark))
-
-	if got := lipglossWidth(gauge(s, 500, 100, 10)); got != 10 {
-		t.Errorf("gauge width with an over-limit value = %d, want 10", got)
-	}
-	if got := lipglossWidth(gauge(s, -5, 100, 10)); got != 10 {
-		t.Errorf("gauge width with a negative value = %d, want 10", got)
-	}
-}
-
 func TestProgressAtEdges(t *testing.T) {
 	s := newStyles(ThemeFor("mono", ModeDark))
 
@@ -480,7 +453,7 @@ func TestSparklineGapsInsteadOfZeroes(t *testing.T) {
 	s := newStyles(ThemeFor("mono", ModeDark))
 
 	withGap := sparkline(s, []float64{10, math.NaN(), 12}, 3)
-	if !strings.Contains(withGap, "·") {
+	if !strings.Contains(withGap, ".") {
 		t.Errorf("a tick with no measurement must be a gap, got %q", withGap)
 	}
 

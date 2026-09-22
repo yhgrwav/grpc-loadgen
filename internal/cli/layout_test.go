@@ -1,0 +1,439 @@
+// Copyright 2026 yhgrwav
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cli
+
+import (
+	"math"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/metrics"
+)
+
+var allLangs = []Lang{LangRU, LangEN, LangDE, LangZH}
+
+func TestCompactCount_UnitIsChosenAfterRounding(t *testing.T) {
+	for _, tt := range []struct {
+		n    uint64
+		want string
+	}{
+		{0, "0"},
+		{9_999, "9999"},
+		{10_000, "10.0k"},
+		{999_949, "999.9k"},
+		{999_950, "1.0M"},
+		{999_949_999, "999.9M"},
+		{999_950_000, "1.0G"},
+		{3_600_000_000, "3.6G"},         // 100k rps for 10 hours
+		{3_153_600_000_000, "3153.6G"},  // 100k rps for a year
+		{9_999_949_999_999, "9999.9G"},  // the widest form
+		{9_999_950_000_000, ">9999.9G"}, // past it, a bound
+		{math.MaxUint64, ">9999.9G"},
+	} {
+		if got := compactCount(tt.n); got != tt.want {
+			t.Errorf("compactCount(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+// widestCount is the widest a compact count gets.
+const widestCount = 9_999_950_000_000
+
+// widestBound is the widest percentile the report prints: a bound of hours.
+var widestBound = metrics.Quantile{Value: 999*time.Minute + 59*time.Second, Defined: true}
+
+type screenState struct {
+	name  string
+	setup func(m *model)
+}
+
+// liveStates cover every note and the widest value of every field: the
+// scales must clamp, the history must cut, the stat lines must fit.
+var liveStates = []screenState{
+	{"normal", func(*model) {}},
+	{"widest", widest},
+	{"warmup note", func(m *model) {
+		m.warmup = time.Hour
+		m.snapshot.Elapsed = time.Second
+	}},
+	{"errors note", func(m *model) {
+		m.snapshot.Sent, m.snapshot.Failed = 100, 100
+	}},
+	{"in-flight note", func(m *model) {
+		m.snapshot.InFlight = 1_000_000
+	}},
+}
+
+func widest(m *model) {
+	s := &m.snapshot
+	s.Sent, s.Failed = widestCount, widestCount
+	s.InFlight = widestCount
+	s.RPS = 9_999_999
+	s.P50, s.P90, s.P99 = widestBound, widestBound, widestBound
+
+	for i := range s.Methods {
+		mm := &s.Methods[i]
+		mm.Method = "/wallet.v1.WalletService/GetBalanceWithAVeryLongNameIndeed"
+		mm.Sent, mm.Failed = widestCount, widestCount
+		mm.RPS, mm.TargetRPS = 99_999_999, 9_999_999
+		mm.P50, mm.P90, mm.P99 = widestBound, widestBound, widestBound
+	}
+
+	// A history longer than any row, with a spike ten times the usual latency.
+	usual, spike := exact(30), exact(300)
+	for i := range historyLimit + 10 {
+		q := usual
+		if i%7 == 0 {
+			q = spike
+		}
+
+		m.overall.push(s.RPS, q, q, q)
+		for _, h := range m.perMethod {
+			h.push(s.RPS, q, q, q)
+		}
+	}
+}
+
+func widestReport() engine.Report {
+	method := engine.MethodReport{
+		Method: "/wallet.v1.WalletService/GetBalanceWithAVeryLongNameIndeed",
+		Sent:   widestCount, Failed: widestCount,
+		P50: widestBound, P90: widestBound, P99: widestBound,
+	}
+
+	return engine.Report{
+		Sent: widestCount, Failed: widestCount, Duration: 999*time.Minute + 59*time.Second,
+		Methods: []engine.MethodReport{method, method},
+	}
+}
+
+func TestNothingWrapsInsideTheFrame(t *testing.T) {
+	// The frame does not let a line out past the terminal: it wraps it inside,
+	// which is how "running" ended up alone on the next line. So the check is
+	// on the body against the width the frame leaves, not on the whole view.
+	for _, lang := range allLangs {
+		for width := minWidth; width <= 120; width++ {
+			for _, state := range liveStates {
+				t.Run(string(lang)+"/"+strconv.Itoa(width)+"/"+state.name, func(t *testing.T) {
+					m := testModel(t)
+					m.text = NewText(lang)
+					m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+					tickN(m, 3)
+					state.setup(m)
+
+					for tab := range m.tabs {
+						m.active = tab
+						checkFits(t, m, width, "tab "+strconv.Itoa(tab))
+					}
+
+					m.done = true
+					m.active = 0
+					m.report = widestReport()
+					checkFits(t, m, width, "final report")
+				})
+			}
+		}
+	}
+}
+
+func checkFits(t *testing.T, m *model, width int, screen string) {
+	t.Helper()
+
+	limit := contentWidth(width)
+	for i, line := range strings.Split(m.body(width), "\n") {
+		if w := lipgloss.Width(line); w > limit {
+			t.Errorf("%s, line %d is %d wide, the frame leaves %d: %q", screen, i, w, limit, line)
+		}
+	}
+}
+
+// ambiguousInText are the characters a CJK terminal may draw two columns
+// wide while lipgloss counts one. Text lines use ASCII instead; the frame,
+// bars and spinner are graphics and stay.
+const ambiguousInText = "›·—≥…←→↑↓«»"
+
+func TestTextLinesUseNoAmbiguousWidthCharacters(t *testing.T) {
+	for _, lang := range allLangs {
+		for _, state := range liveStates {
+			t.Run(string(lang)+"/"+state.name, func(t *testing.T) {
+				m := testModel(t)
+				m.text = NewText(lang)
+				m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+				tickN(m, 3)
+				state.setup(m)
+
+				var screens []string
+				for tab := range m.tabs {
+					m.active = tab
+					screens = append(screens, m.body(120))
+				}
+				m.showHelp = true
+				screens = append(screens, m.body(120))
+				m.showHelp = false
+				press(m, "x")
+				screens = append(screens, m.footer())
+				m.done, m.active, m.report = true, 0, widestReport()
+				screens = append(screens, m.body(120))
+
+				for _, screen := range screens {
+					if i := strings.IndexAny(screen, ambiguousInText); i >= 0 {
+						line := screen[strings.LastIndex(screen[:i], "\n")+1:]
+						line, _, _ = strings.Cut(line, "\n")
+						t.Errorf("ambiguous-width character in a text line: %q", line)
+					}
+				}
+			})
+		}
+	}
+}
+
+// statLineWith returns the body line holding label, or fails.
+func statLineWith(t *testing.T, body, label string) string {
+	t.Helper()
+
+	for line := range strings.Lines(body) {
+		if strings.Contains(line, label) {
+			return strings.TrimRight(line, "\n")
+		}
+	}
+	t.Fatalf("no line with %q in:\n%s", label, body)
+
+	return ""
+}
+
+func TestStatLineNeverDropsInFlightOrErrors(t *testing.T) {
+	for _, lang := range allLangs {
+		t.Run(string(lang), func(t *testing.T) {
+			m := testModel(t)
+			m.text = NewText(lang)
+			m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+			tickN(m, 3)
+			widest(m)
+
+			line := statLineWith(t, m.body(minWidth), m.text.InFlight())
+			if !strings.Contains(line, m.text.Errors()) {
+				t.Errorf("errors dropped from %q", line)
+			}
+			if !strings.Contains(line, ">9999.9G") {
+				t.Errorf("in flight not compact in %q", line)
+			}
+		})
+	}
+}
+
+func TestStatLineCompactsBeforeItDrops(t *testing.T) {
+	m := testModel(t)
+	m.text = NewText(LangEN)
+	const width = 62
+	m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+	tickN(m, 3)
+	m.snapshot.Sent, m.snapshot.InFlight = 1_000_000, 1_000_000
+
+	// The frame leaves 54. Exact, "sent 1 000 000  |  rps 0  |  in flight
+	// 1 000 000  |  errors 0.0%" is 64; compact, with 1.0M twice, is 54 and
+	// fits: nothing drops.
+	line := statLineWith(t, m.body(width), m.text.InFlight())
+	for _, want := range []string{"sent 1.0M", "rps", "in flight 1.0M", "errors"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("%q missing from %q", want, line)
+		}
+	}
+}
+
+func TestStatLineDropsSentFirstThenRate(t *testing.T) {
+	m := testModel(t)
+	m.text = NewText(LangDE)
+	m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+	tickN(m, 3)
+	widest(m)
+
+	line := statLineWith(t, m.body(minWidth), m.text.InFlight())
+	if strings.Contains(line, m.text.Sent()) && !strings.Contains(line, "rps") {
+		t.Errorf("rate dropped before sent: %q", line)
+	}
+	if strings.Contains(line, m.text.Sent()) {
+		t.Errorf("sent kept on a line that had to drop something: %q", line)
+	}
+}
+
+func TestStatLineIsExactWhenItFits(t *testing.T) {
+	m := testModel(t)
+	m.text = NewText(LangEN)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	tickN(m, 3)
+	m.snapshot.InFlight = 1_000_000
+
+	if line := statLineWith(t, m.body(120), m.text.InFlight()); !strings.Contains(line, "1 000 000") {
+		t.Errorf("want the exact count where it fits: %q", line)
+	}
+}
+
+func TestNoteFallsBackToTheShortForm(t *testing.T) {
+	for _, lang := range allLangs {
+		t.Run(string(lang), func(t *testing.T) {
+			m := testModel(t)
+			m.text = NewText(lang)
+			tickN(m, 3)
+			m.snapshot.InFlight = 1_000_000
+
+			m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+			if body := m.body(120); !strings.Contains(body, m.text.InFlightNote()) {
+				t.Errorf("width 120: want the full note")
+			}
+
+			m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+			body := m.body(minWidth)
+			full := lipgloss.Width("> "+m.text.InFlightNote()) <= contentWidth(minWidth)
+			if full {
+				return
+			}
+			if strings.Contains(body, m.text.InFlightNote()) {
+				t.Errorf("width %d: the full note does not fit, yet it is shown", minWidth)
+			}
+			if want := m.text.InFlightNoteShort(); want == "" || !strings.Contains(body, "> "+want) {
+				t.Errorf("width %d: want the short note %q", minWidth, want)
+			}
+		})
+	}
+}
+
+func TestShortNotesFitTheNarrowestFrame(t *testing.T) {
+	room := contentWidth(minWidth) - lipgloss.Width("> ")
+
+	for _, lang := range allLangs {
+		text := NewText(lang)
+		for name, note := range map[string]string{
+			"warmup":    text.WarmupNoteShort(),
+			"errors":    text.ErrorsNoteShort(),
+			"in flight": text.InFlightNoteShort(),
+		} {
+			if w := lipgloss.Width(note); w > room || note == "" {
+				t.Errorf("%s %s: %q is %d wide, room %d", lang, name, note, w, room)
+			}
+		}
+	}
+}
+
+func TestFinalTableColumnsLineUp(t *testing.T) {
+	for _, lang := range allLangs {
+		for _, width := range []int{minWidth, 80, 120} {
+			t.Run(string(lang)+"/"+strconv.Itoa(width), func(t *testing.T) {
+				m := testModel(t)
+				m.text = NewText(lang)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+				m.done, m.report = true, widestReport()
+
+				var widths []int
+				inTable := false
+				for line := range strings.Lines(m.finalReport(contentWidth(width))) {
+					line = strings.TrimRight(line, "\n")
+					if strings.HasPrefix(line, m.text.ColumnMethod()) {
+						inTable = true
+					}
+					if inTable && line == "" {
+						break
+					}
+					if inTable {
+						widths = append(widths, lipgloss.Width(line))
+					}
+				}
+
+				if len(widths) < 2 {
+					t.Fatalf("table not found")
+				}
+				for i, w := range widths {
+					if w != widths[0] {
+						t.Errorf("row %d is %d wide, the header %d: columns do not line up", i, w, widths[0])
+					}
+				}
+			})
+		}
+	}
+}
+
+// --- below the minimum width ---------------------------------------------
+
+func TestNarrowTerminalAsksToWiden(t *testing.T) {
+	for _, width := range []int{minWidth - 1, 20, 1} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			m := testModel(t)
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+
+			view := m.View()
+			if strings.Contains(view, "\n") {
+				t.Errorf("want one line, got %q", view)
+			}
+			if w := lipgloss.Width(view); w > width {
+				t.Errorf("message is %d wide on a terminal of %d: %q", w, width, view)
+			}
+			if width >= 30 && !strings.Contains(view, strconv.Itoa(minWidth)) {
+				t.Errorf("message does not say how wide: %q", view)
+			}
+		})
+	}
+}
+
+func TestUnknownWidthKeepsTheFrame(t *testing.T) {
+	m := testModel(t)
+
+	if view := m.View(); !strings.Contains(view, "╭") {
+		t.Errorf("before the first size message the frame must be drawn, got %q", view)
+	}
+}
+
+func TestNarrowTerminalKeepsTheKeys(t *testing.T) {
+	c := newStopCalls()
+	m := testModel(t)
+	m.stopper = c.stopper(time.Hour)
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 40})
+
+	q := tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("q")})
+	m.Update(q)
+	m.Update(q)
+	m.Update(q)
+
+	if c.stop.Load() != 1 || c.abort.Load() != 1 || c.exit.Load() != 1 {
+		t.Errorf("stop/abort/exit = %d/%d/%d, want 1/1/1: the three presses must work below the minimum width",
+			c.stop.Load(), c.abort.Load(), c.exit.Load())
+	}
+}
+
+func TestNarrowTerminalKeepsTheRunGoing(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 40})
+
+	before := len(m.overall.rps)
+	tickN(m, 2)
+
+	if got := len(m.overall.rps); got != before+2 {
+		t.Errorf("history %d after 2 ticks from %d: the live view stopped while narrow", got, before)
+	}
+}
+
+func TestWideningBringsTheFrameBack(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 40})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	if view := m.View(); !strings.Contains(view, "╭") {
+		t.Errorf("after widening to 100 the frame is not back: %q", firstLine(view))
+	}
+}

@@ -16,6 +16,7 @@ package cli
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -133,9 +134,9 @@ func (t Text) InFlightCount(n string) string {
 // calls in flight drain.
 func (t Text) StopAgainAborts() string {
 	return t.get(phrase{
-		LangRU: "q ещё раз — оборвать",
+		LangRU: "q ещё раз - оборвать",
 		LangEN: "q again cuts them off",
-		LangDE: "nochmal q — abbrechen",
+		LangDE: "nochmal q - abbrechen",
 		LangZH: "再按 q 立即中断",
 	})
 }
@@ -144,9 +145,9 @@ func (t Text) StopAgainAborts() string {
 // results and builds the report, and if that hangs only this leaves.
 func (t Text) StopAgainExits() string {
 	return t.get(phrase{
-		LangRU: "q ещё раз — выйти без отчёта",
+		LangRU: "q ещё раз - выйти без отчёта",
 		LangEN: "q again exits without a report",
-		LangDE: "nochmal q — ohne Bericht beenden",
+		LangDE: "nochmal q - ohne Bericht beenden",
 		LangZH: "再按 q 退出，不输出报告",
 	})
 }
@@ -164,7 +165,7 @@ func (t Text) Rate() string {
 }
 
 func (t Text) HintTabs() string {
-	return t.get(phrase{LangRU: "←→ вкладки", LangEN: "←→ tabs", LangDE: "←→ Reiter", LangZH: "←→ 标签页"})
+	return t.get(phrase{LangRU: "<- -> вкладки", LangEN: "<- -> tabs", LangDE: "<- -> Reiter", LangZH: "<- -> 标签页"})
 }
 
 func (t Text) HintHelp() string {
@@ -180,10 +181,10 @@ func (t Text) HintQuit() string {
 // is the usual reason.
 func (t Text) UnknownKey(key string) string {
 	return t.get(phrase{
-		LangRU: "«" + key + "» не команда — проверьте раскладку · ? помощь",
-		LangEN: "«" + key + "» is not a key here — check the layout · ? help",
-		LangDE: "«" + key + "» ist kein Befehl — Layout prüfen · ? Hilfe",
-		LangZH: "«" + key + "» 不是命令 — 请检查键盘布局 · ? 帮助",
+		LangRU: `"` + key + `" не команда - проверьте раскладку | ? помощь`,
+		LangEN: `"` + key + `" is not a key here - check the layout | ? help`,
+		LangDE: `"` + key + `" ist kein Befehl - Layout prüfen | ? Hilfe`,
+		LangZH: `"` + key + `" 不是命令 - 请检查键盘布局 | ? 帮助`,
 	})
 }
 
@@ -217,10 +218,10 @@ func (t Text) InFlightNote() string {
 
 func (t Text) ErrorsNote() string {
 	return t.get(phrase{
-		LangRU: "растёт доля ошибок — смотри разбивку на вкладке метода",
-		LangEN: "the error share is growing — see the per-method tab",
-		LangDE: "der Fehleranteil steigt — siehe den Reiter der Methode",
-		LangZH: "错误占比正在上升——请查看对应方法的标签页",
+		LangRU: "растёт доля ошибок - смотри разбивку на вкладке метода",
+		LangEN: "the error share is growing - see the per-method tab",
+		LangDE: "der Fehleranteil steigt - siehe den Reiter der Methode",
+		LangZH: "错误占比正在上升，请查看对应方法的标签页",
 	})
 }
 
@@ -264,7 +265,7 @@ func (t Text) HelpSettings() string {
 }
 
 func (t Text) PickLanguage() string {
-	return "Язык интерфейса · Interface language · Sprache · 界面语言"
+	return "Язык интерфейса | Interface language | Sprache | 界面语言"
 }
 
 func (t Text) Settings() string {
@@ -293,19 +294,19 @@ func (t Text) ModeLight() string {
 
 func (t Text) SettingsHint() string {
 	return t.get(phrase{
-		LangRU: "↑↓ строка   ←→ значение   esc к вкладкам   сохраняется сразу",
-		LangEN: "↑↓ row   ←→ value   esc back to the tabs   saved immediately",
-		LangDE: "↑↓ Zeile   ←→ Wert   esc zurück zu den Reitern   sofort gespeichert",
-		LangZH: "↑↓ 选择行   ←→ 切换值   esc 返回标签页   立即保存",
+		LangRU: "up/down строка   <- -> значение   esc к вкладкам   сохраняется сразу",
+		LangEN: "up/down row   <- -> value   esc back to the tabs   saved immediately",
+		LangDE: "up/down Zeile   <- -> Wert   esc zurück zu den Reitern   sofort gespeichert",
+		LangZH: "up/down 选择行   <- -> 切换值   esc 返回标签页   立即保存",
 	})
 }
 
 func (t Text) SettingsLocked() string {
 	return t.get(phrase{
-		LangRU: "enter изменить   ←→ вкладки   esc к сводке",
-		LangEN: "enter to edit   ←→ tabs   esc to the summary",
-		LangDE: "enter zum Ändern   ←→ Reiter   esc zur Übersicht",
-		LangZH: "enter 编辑   ←→ 标签页   esc 返回概览",
+		LangRU: "enter изменить   <- -> вкладки   esc к сводке",
+		LangEN: "enter to edit   <- -> tabs   esc to the summary",
+		LangDE: "enter zum Ändern   <- -> Reiter   esc zur Übersicht",
+		LangZH: "enter 编辑   <- -> 标签页   esc 返回概览",
 	})
 }
 
@@ -362,5 +363,46 @@ func (t Text) PickHint() string {
 		LangEN: "↑↓ move   enter confirm",
 		LangDE: "↑↓ wählen   enter bestätigen",
 		LangZH: "↑↓ 选择   enter 确认",
+	})
+}
+
+// WarmupNoteShort is WarmupNote for a narrow frame. It leaves out the time
+// left, which the header shows, so its width does not depend on the warmup.
+func (t Text) WarmupNoteShort() string {
+	return t.get(phrase{
+		LangRU: "прогрев: p99 пока пуст",
+		LangEN: "warming up: no p99 yet",
+		LangDE: "Aufwärmphase: p99 noch leer",
+		LangZH: "预热中：p99 暂为空",
+	})
+}
+
+func (t Text) ErrorsNoteShort() string {
+	return t.get(phrase{
+		LangRU: "ошибок больше - см. вкладку метода",
+		LangEN: "error share growing - see method tab",
+		LangDE: "Fehleranteil steigt - siehe Methode",
+		LangZH: "错误占比上升，见方法标签页",
+	})
+}
+
+func (t Text) InFlightNoteShort() string {
+	return t.get(phrase{
+		LangRU: "запросы копятся: сервис не успевает",
+		LangEN: "requests piling up: service slower than send rate",
+		LangDE: "Anfragen stauen sich: Dienst zu langsam",
+		LangZH: "请求堆积：服务跟不上",
+	})
+}
+
+// TooNarrow replaces the frame on a terminal narrower than minimum columns.
+func (t Text) TooNarrow(minimum int) string {
+	n := strconv.Itoa(minimum)
+
+	return t.get(phrase{
+		LangRU: "окно уже " + n + " колонок - расширьте",
+		LangEN: "window narrower than " + n + " columns - widen it",
+		LangDE: "Fenster schmaler als " + n + " Spalten - bitte verbreitern",
+		LangZH: "窗口不足 " + n + " 列，请加宽",
 	})
 }

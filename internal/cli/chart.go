@@ -88,7 +88,7 @@ func latencyCells(s styles, values []float64, bounds []bool, low, high float64, 
 
 	for i, v := range values {
 		if math.IsNaN(v) {
-			b.WriteString(s.faint.Render("·"))
+			b.WriteString(s.faint.Render("."))
 
 			continue
 		}
