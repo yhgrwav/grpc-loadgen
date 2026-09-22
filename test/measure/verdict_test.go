@@ -609,9 +609,12 @@ func TestReport_TheLastAnswerIsWhereTheSilenceBegins(t *testing.T) {
 	if m.LastAnswerAt == nil {
 		t.Fatal("no last answer, yet the target answered the first second")
 	}
-	// The stand counts from its first arrival, which comes after the run
-	// starts, so the moment lands just past a second, never before it.
-	if *m.LastAnswerAt < time.Second || *m.LastAnswerAt > 1200*time.Millisecond {
+	// The stand counts from its own first arrival, which comes after the run
+	// starts, so the last answered call was scheduled slightly before the
+	// stand's one-second mark. The nearest wrong answer is the moment the
+	// call ended, 300ms later at its timeout; 150ms of slack stays well
+	// clear of it.
+	if *m.LastAnswerAt < 850*time.Millisecond || *m.LastAnswerAt > 1150*time.Millisecond {
 		t.Errorf("last answer at %v, want about 1s", *m.LastAnswerAt)
 	}
 }
