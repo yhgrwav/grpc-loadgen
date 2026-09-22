@@ -397,6 +397,9 @@ func TestSend_DeadlineInThePastTimesOutWithoutSending(t *testing.T) {
 	if n := srv.calls.Load(); n != 0 {
 		t.Errorf("target received %d calls, want none: the request had no budget left", n)
 	}
+	if !out.NotSent {
+		t.Errorf("NotSent = false, want true: the request never went out")
+	}
 }
 
 func TestSend_ZeroDeadlineMeansNoDeadline(t *testing.T) {

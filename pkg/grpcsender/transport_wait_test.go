@@ -130,6 +130,9 @@ func TestSend_QuotaWaitUntilDeadlineIsNotServiceTime(t *testing.T) {
 		t.Errorf("DoneAt %v is before the deadline %v: the quota wait was cut short",
 			out.DoneAt, req.Deadline)
 	}
+	if !out.NotSent {
+		t.Errorf("NotSent = false: the request never left, and the engine must not blame the target")
+	}
 }
 
 func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
@@ -141,19 +144,24 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 		call     callTimes
 		category engine.Category
 		wantSent time.Time
+		notSent  bool
 	}{
-		{"payload went out: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategoryTimeout, payload},
+		{"payload went out: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategoryTimeout, payload, false},
 		// Headers out means the stream existed and the target saw it; waiting on
 		// its flow-control window after that is the target's doing.
-		{"stream opened, body stuck: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryTimeout, header},
-		{"no stream: quota wait, nothing is service", callTimes{doneAt: end}, engine.CategoryTimeout, end},
-		{"unreachable: left as is", callTimes{doneAt: end}, engine.CategoryUnreachable, time.Time{}},
-		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload},
+		{"stream opened, body stuck: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryTimeout, header, false},
+		{"no stream: quota wait, nothing is service", callTimes{doneAt: end}, engine.CategoryTimeout, end, true},
+		{"unreachable: left as is", callTimes{doneAt: end}, engine.CategoryUnreachable, time.Time{}, false},
+		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sent, done := timestamps(tt.call, tt.category)
+			sent, done, notSent := timestamps(tt.call, tt.category)
+
+			if notSent != tt.notSent {
+				t.Errorf("not sent = %v, want %v", notSent, tt.notSent)
+			}
 
 			if !sent.Equal(tt.wantSent) {
 				t.Errorf("SentAt = %v, want %v", sent, tt.wantSent)

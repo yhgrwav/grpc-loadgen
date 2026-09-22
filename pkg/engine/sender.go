@@ -71,7 +71,12 @@ type Outcome struct {
 	// SentAt is when the request actually went out on the wire, after the
 	// sender was granted transport quota. Zero if the sender does not track
 	// this; the worker pool then falls back to the moment Send was called.
-	SentAt   time.Time
+	SentAt time.Time
+	// NotSent marks a timeout whose request never went out. The engine tells
+	// from the deadline whose fault it was: a call begun past its deadline was
+	// started too late by the generator, one begun before it waited on the
+	// connection. False when the sender does not track this.
+	NotSent  bool
 	DoneAt   time.Time
 	Category Category
 	// Err is the error as reported by the transport, including any text from

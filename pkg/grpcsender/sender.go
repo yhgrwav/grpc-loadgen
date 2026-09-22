@@ -207,6 +207,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 
 		return engine.Outcome{
 			SentAt:   now,
+			NotSent:  true,
 			DoneAt:   now,
 			Category: engine.CategoryTimeout,
 			Code:     codes.DeadlineExceeded.String(),
@@ -241,10 +242,11 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 
 	times := call.read()
 	category := categorize(err, times.answered)
-	sentAt, doneAt := timestamps(times, category)
+	sentAt, doneAt, notSent := timestamps(times, category)
 
 	outcome := engine.Outcome{
 		SentAt:   sentAt,
+		NotSent:  notSent,
 		DoneAt:   doneAt,
 		Category: category,
 		Code:     status.Code(err).String(),
@@ -285,18 +287,18 @@ func (s *Sender) Conn() grpc.ClientConnInterface {
 // for stream quota, so nothing counts as service; with headers the target saw
 // the stream and the rest is its own doing, such as a closed flow-control
 // window.
-func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.Time) {
+func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.Time, notSent bool) {
 	sentAt, doneAt = call.sentAt, call.doneAt
 	if category != engine.CategoryTimeout || !sentAt.IsZero() {
-		return sentAt, doneAt
+		return sentAt, doneAt, false
 	}
 
 	if doneAt.IsZero() {
 		doneAt = time.Now()
 	}
 	if !call.headerAt.IsZero() {
-		return call.headerAt, doneAt
+		return call.headerAt, doneAt, false
 	}
 
-	return doneAt, doneAt
+	return doneAt, doneAt, true
 }

@@ -67,6 +67,10 @@ type MethodReport struct {
 	// Unanswered counts calls that never reached the target, so they are absent
 	// from the distribution rather than recorded as very fast replies.
 	Unanswered int
+	// Unclassified counts calls the sender left without a category: a defect
+	// of the sender, kept apart so it does not pass for an unreachable target.
+	// They are absent from the distribution too.
+	Unclassified int
 	// Seconds covers the whole run, warmup included, up to the last second
 	// anything happened in. Unlike the totals it keeps every call.
 	Seconds []Second
@@ -108,6 +112,7 @@ type methodStats struct {
 	sent       int
 	failed     int
 	unanswered int
+	unknown    int
 	latency    *metrics.Latencies
 	timeline   timeline
 }
@@ -193,8 +198,11 @@ func (s *Stats) Record(r Result) {
 	// connection comes back in microseconds and would pull both the median and
 	// the tail down while the target is in fact unreachable.
 	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable
-	if unanswered {
+	switch r.Category {
+	case CategoryUnreachable:
 		method.unanswered++
+	case CategoryUnknown:
+		method.unknown++
 	}
 
 	s.mu.Unlock()
@@ -221,6 +229,7 @@ type methodView struct {
 	sent       int
 	failed     int
 	unanswered int
+	unknown    int
 	dist       *metrics.Snapshot
 }
 
@@ -246,6 +255,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
 			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
+			unknown: method.unknown,
 		})
 		sources = append(sources, method.latency)
 	}
@@ -331,19 +341,20 @@ func (s *Stats) Report() Report {
 
 	for _, v := range views {
 		entry := MethodReport{
-			Method:     v.name,
-			Sent:       v.sent,
-			Failed:     v.failed,
-			Latencies:  int(v.dist.Count()),
-			Censored:   int(v.dist.CensoredCount()),
-			Invalid:    int(v.dist.InvalidCount()),
-			Unanswered: v.unanswered,
-			Min:        v.dist.Percentile(0),
-			P50:        v.dist.Percentile(0.50),
-			P90:        v.dist.Percentile(0.90),
-			P95:        v.dist.Percentile(0.95),
-			P99:        v.dist.Percentile(0.99),
-			Max:        v.dist.Percentile(1),
+			Method:       v.name,
+			Sent:         v.sent,
+			Failed:       v.failed,
+			Latencies:    int(v.dist.Count()),
+			Censored:     int(v.dist.CensoredCount()),
+			Invalid:      int(v.dist.InvalidCount()),
+			Unanswered:   v.unanswered,
+			Unclassified: v.unknown,
+			Min:          v.dist.Percentile(0),
+			P50:          v.dist.Percentile(0.50),
+			P90:          v.dist.Percentile(0.90),
+			P95:          v.dist.Percentile(0.95),
+			P99:          v.dist.Percentile(0.99),
+			Max:          v.dist.Percentile(1),
 
 			Seconds:         timelines[v.name].Seconds,
 			OutsideTimeline: timelines[v.name].OutsideTimeline,

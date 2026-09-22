@@ -110,7 +110,7 @@ func TestTimeline_FastRefusalsAreFailuresNotServedCalls(t *testing.T) {
 
 	got := seconds(t, stats)
 	for i := range 2 {
-		if got[i].Succeeded != 0 || got[i].Failed < 998 {
+		if got[i].Succeeded != 0 || got[i].TargetFailed < 998 {
 			t.Errorf("second %d = %+v, want only failures", i, got[i])
 		}
 		if got[i].InFlight > 2 {
@@ -124,19 +124,169 @@ func TestTimeline_OutcomesAreSplit(t *testing.T) {
 	stats := reserved(start, 0)
 
 	for _, c := range []Category{
-		CategorySuccess, CategoryOverload, CategoryTimeout, CategoryServerFault,
+		CategorySuccess, CategoryOverload, CategoryTimeout, CategoryServerFault, CategoryClientFault,
 		CategoryUnreachable, CategoryUnknown, CategoryAborted,
 	} {
 		stats.Record(call(start, 0, time.Millisecond, c))
 	}
+	stats.Record(unsent(start, 0, time.Millisecond))
+	stats.Record(unsent(start, 0, -time.Millisecond))
 
 	got := seconds(t, stats)[0]
-	if got.Begun != 7 || got.Succeeded != 1 || got.Failed != 3 || got.Unanswered != 2 || got.Aborted != 1 {
-		t.Errorf("second 0 = %+v, want begun 7: 1 succeeded, 3 failed, 2 unanswered, 1 aborted", got)
+	want := Second{
+		Begun: 10, Succeeded: 1, TargetFailed: 3, RequestFailed: 1, UnsentQuota: 1, UnsentLate: 1,
+		Unanswered: 1, Aborted: 1, Unclassified: 1,
 	}
+	got.LagSum, got.LagMax, got.LagCalls = 0, 0, 0
+	got.ObservedCalls, got.ObservedLagSum, got.TransportWaitSum, got.ServiceTimeSum = 0, 0, 0, 0
 	// Every outcome ends a call, so nothing is left in flight.
-	if got.InFlight != 0 {
-		t.Errorf("in flight = %d, want 0", got.InFlight)
+	if got != want {
+		t.Errorf("second 0 = %+v, want %+v", got, want)
+	}
+}
+
+// unsent is a timeout whose request never went out. Its deadline is begun+
+// untilDeadline: past the call's start when the call waited for the
+// connection, before it when the generator started it too late to go out.
+func unsent(start time.Time, begun, untilDeadline time.Duration) Result {
+	r := call(start, begun, begun+max(untilDeadline, 0), CategoryTimeout)
+	r.Deadline = r.BegunAt.Add(untilDeadline)
+	r.SentAt = r.DoneAt
+	r.NotSent = true
+
+	return r
+}
+
+// A config that sends the same entity every time gets AlreadyExists from the
+// second call on. The target copes fine; the verdict reads TargetFailed, so
+// these must not land there.
+func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	for i := range 100 {
+		begun := time.Duration(i) * time.Millisecond
+		stats.Record(call(start, begun, begun+time.Millisecond, CategoryClientFault))
+	}
+
+	got := seconds(t, stats)[0]
+	if got.RequestFailed != 100 || got.TargetFailed != 0 {
+		t.Errorf("request failed %d, target failed %d; want 100 and 0", got.RequestFailed, got.TargetFailed)
+	}
+}
+
+// A request that never went out tells two different stories: stuck behind
+// the connection's stream quota, or started by a generator already past the
+// deadline. Opening more connections helps only the first.
+func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	for range 3 {
+		stats.Record(unsent(start, 0, 100*time.Millisecond))
+	}
+	for range 5 {
+		stats.Record(unsent(start, 0, -time.Millisecond))
+	}
+	// Started exactly at the deadline: no budget left, the generator's doing.
+	stats.Record(unsent(start, 0, 0))
+
+	got := seconds(t, stats)[0]
+	if got.UnsentQuota != 3 || got.UnsentLate != 6 || got.TargetFailed != 0 {
+		t.Errorf("quota %d, late %d, target failed %d; want 3, 6 and 0",
+			got.UnsentQuota, got.UnsentLate, got.TargetFailed)
+	}
+}
+
+func TestTimeline_UnknownIsUnclassifiedNotUnanswered(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	stats.Record(call(start, 0, time.Millisecond, CategoryUnknown))
+	stats.Record(call(start, 0, time.Millisecond, CategoryUnreachable))
+
+	m := stats.Report().Methods[0]
+	if s := m.Seconds[0]; s.Unclassified != 1 || s.Unanswered != 1 {
+		t.Errorf("second: unclassified %d, unanswered %d; want 1 and 1", s.Unclassified, s.Unanswered)
+	}
+	if m.Unclassified != 1 || m.Unanswered != 1 {
+		t.Errorf("method: unclassified %d, unanswered %d; want 1 and 1", m.Unclassified, m.Unanswered)
+	}
+}
+
+// decomposed is a call with each latency term set apart, all in the second
+// the call was scheduled for.
+func decomposed(start time.Time, category Category, lag, wait, service time.Duration) Result {
+	r := call(start, 0, 0, category)
+	r.BegunAt = r.ScheduledAt.Add(lag)
+	r.SentAt = r.BegunAt.Add(wait)
+	r.DoneAt = r.SentAt.Add(service)
+
+	return r
+}
+
+// Only fully observed calls carry a transport wait and a service time: for a
+// refused connection SentAt means nothing, and a timeout knows its service
+// time only as a lower bound.
+func TestTimeline_OnlyObservedCallsEnterTransportAndService(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	for _, c := range []Category{CategorySuccess, CategoryClientFault, CategoryServerFault, CategoryOverload} {
+		stats.Record(decomposed(start, c, time.Millisecond, 2*time.Millisecond, 3*time.Millisecond))
+	}
+	for _, c := range []Category{CategoryUnreachable, CategoryAborted, CategoryTimeout, CategoryUnknown} {
+		stats.Record(decomposed(start, c, time.Millisecond, 20*time.Millisecond, 30*time.Millisecond))
+	}
+	stats.Record(unsent(start, 0, 50*time.Millisecond))
+
+	got := seconds(t, stats)[0]
+	if got.ObservedCalls != 4 || got.TransportWaitSum != 8*time.Millisecond || got.ServiceTimeSum != 12*time.Millisecond {
+		t.Errorf("observed %d, transport %s, service %s; want 4, 8ms, 12ms",
+			got.ObservedCalls, got.TransportWaitSum, got.ServiceTimeSum)
+	}
+	// The lag stays over every call begun, answered or not.
+	if got.LagCalls != 9 || got.LagSum != 8*time.Millisecond || got.ObservedLagSum != 4*time.Millisecond {
+		t.Errorf("lag calls %d, lag %s, observed lag %s; want 9, 8ms, 4ms",
+			got.LagCalls, got.LagSum, got.ObservedLagSum)
+	}
+}
+
+// The three sums over the observed calls of a second add up to their
+// latencies with nothing left over.
+func TestTimeline_ObservedTermsAddUpToLatency(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	var latencies time.Duration
+	for i := range 500 {
+		d := time.Duration(i)
+		r := decomposed(start, CategorySuccess, d*time.Microsecond, d*3*time.Microsecond, d*7*time.Microsecond)
+		r.ScheduledAt = r.ScheduledAt.Add(d * time.Millisecond)
+		r.BegunAt = r.BegunAt.Add(d * time.Millisecond)
+		r.SentAt = r.SentAt.Add(d * time.Millisecond)
+		r.DoneAt = r.DoneAt.Add(d * time.Millisecond)
+		latencies += r.Latency()
+		stats.Record(r)
+	}
+
+	got := seconds(t, stats)[0]
+	if sum := got.ObservedLagSum + got.TransportWaitSum + got.ServiceTimeSum; sum != latencies {
+		t.Errorf("lag + transport + service = %s, want %s", sum, latencies)
+	}
+}
+
+func TestTimeline_InvalidLagIsNotALagCall(t *testing.T) {
+	start := time.Now()
+	stats := reserved(start, 0)
+
+	r := call(start, 100*time.Millisecond, 200*time.Millisecond, CategorySuccess)
+	r.BegunAt = r.ScheduledAt.Add(-time.Millisecond)
+	stats.Record(r)
+	stats.Record(call(start, 100*time.Millisecond, 200*time.Millisecond, CategorySuccess))
+
+	if got := seconds(t, stats)[0]; got.LagCalls != 1 || got.ObservedCalls != 1 {
+		t.Errorf("lag calls %d, observed %d; want 1 and 1", got.LagCalls, got.ObservedCalls)
 	}
 }
 
@@ -209,7 +359,7 @@ func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	}
 
 	got := report.Methods[0].Seconds
-	if got[0].Failed != 1 || got[2].Succeeded != 1 {
+	if got[0].TargetFailed != 1 || got[2].Succeeded != 1 {
 		t.Errorf("seconds = %+v, want the warmup failure in 0 and the success in 2", got)
 	}
 }
@@ -224,7 +374,7 @@ func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	stats.Record(call(start, 90*time.Second, 91*time.Second, CategorySuccess))
 
 	got := stats.Report().Methods[0]
-	if got.Seconds[5].Failed != 1 {
+	if got.Seconds[5].TargetFailed != 1 {
 		t.Errorf("second 5 = %+v, want the call inside the span counted", got.Seconds[5])
 	}
 	if len(got.Seconds) != 6 || got.OutsideTimeline != 1 {
