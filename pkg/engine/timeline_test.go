@@ -102,7 +102,7 @@ func TestTimeline_InFlightAtTheEndOfEachSecond(t *testing.T) {
 // A target shedding load answers every call with a refusal in two
 // milliseconds: nothing piles up in flight and the generator keeps pace, so
 // only the split of finished calls by outcome shows it serves nothing.
-// Ground: contract — Second outcomes; no stand scenario refuses on a schedule yet.
+// Ground: contract — Second outcomes, until a test/measure test reads Report.Timeline.
 func TestTimeline_FastRefusalsAreFailuresNotServedCalls(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -395,7 +395,8 @@ func TestTimeline_NegativeLagIsInvalidNotZero(t *testing.T) {
 	}
 }
 
-// Ground: contract — Options.Warmup; no end-to-end test reaches warmup yet.
+// Ground: contract — Options.Warmup, until the stand switches its delay by time instead of call
+// number.
 func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 2*time.Second)

@@ -55,8 +55,8 @@ func TestEngineRunsEveryCall(t *testing.T) {
 	}
 }
 
-// Ground: contract — Options.Warmup; the stand switches delay by call number, not time, so no
-// end-to-end test reaches warmup yet.
+// Ground: contract — Options.Warmup, until the stand switches its delay by time instead of call
+// number.
 func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},

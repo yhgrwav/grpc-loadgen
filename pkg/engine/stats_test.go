@@ -130,8 +130,8 @@ func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 	}
 }
 
-// Ground: contract — a refused connection is not latency; end-to-end an unreachable target ends the
-// run before any report.
+// Ground: contract — a refused connection is not latency, until the stand can drop connections
+// mid-run; end-to-end an unreachable target ends at connect.
 func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -194,7 +194,8 @@ func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
 	}
 }
 
-// Ground: contract — Options.Warmup; no end-to-end test reaches warmup yet.
+// Ground: contract — Options.Warmup, until the stand switches its delay by time instead of call
+// number.
 func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()

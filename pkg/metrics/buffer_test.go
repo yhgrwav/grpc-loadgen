@@ -268,7 +268,7 @@ func TestUncensored_WorksLikeLatenciesWithoutTheSecondHistogram(t *testing.T) {
 	}
 }
 
-// Ground: hot path — the point of the constructor is memory.
+// Ground: contract — the point of the constructor is memory.
 func TestUncensored_TakesHalfTheMemory(t *testing.T) {
 	var before, after runtime.MemStats
 

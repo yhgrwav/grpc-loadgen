@@ -178,12 +178,10 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 	}
 }
 
-// Ground: concurrency — the transport writes timings while the call reads them.
-// TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded pins the contract the
-// timings live under: grpc-go reports a stream from the transport's own
+// Ground: concurrency — dropping the lock goes red under -race (checked 2026-09-22).
+// The timings live under this: grpc-go reports a stream from the transport's own
 // goroutine, which keeps working on a call the caller has already given up on.
-// Reading and writing the same struct at once must therefore be safe — under
-// -race this test goes red the moment the lock is dropped.
+// Reading and writing the same struct at once must therefore be safe.
 func TestHandleRPC_WritesWhileTheCallReadsWhatItRecorded(t *testing.T) {
 	call := &callStats{}
 	ctx := context.WithValue(t.Context(), callKey{}, call)
