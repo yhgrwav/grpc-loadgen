@@ -160,6 +160,12 @@ func (t Text) Latency() string {
 	return t.get(phrase{LangRU: "латенси", LangEN: "latency", LangDE: "Latenz", LangZH: "延迟"})
 }
 
+// Duration is how long the run went on, as a label for the run itself: the
+// same number under "latency" would read as a measurement of the target.
+func (t Text) Duration() string {
+	return t.get(phrase{LangRU: "длительность", LangEN: "duration", LangDE: "Dauer", LangZH: "时长"})
+}
+
 func (t Text) Rate() string {
 	return t.get(phrase{LangRU: "частота", LangEN: "rate", LangDE: "Rate", LangZH: "速率"})
 }

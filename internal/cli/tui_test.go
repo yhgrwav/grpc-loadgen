@@ -480,3 +480,51 @@ func TestModel_TerminateDuringTheRunQuitsWhenTheRunReturns(t *testing.T) {
 		t.Fatal("the view waits for q after SIGTERM; the stopper's grace then exits without a report")
 	}
 }
+
+// The screen and the log are two renderings of one run: a verdict that the
+// text report carries and the screen drops means the person watching never
+// learns the run was invalid.
+func TestFinalScreenCarriesEveryVerdictOfTheTextReport(t *testing.T) {
+	from := 1
+	report := engine.Report{
+		Duration: 3 * time.Second, Planned: 5 * time.Second, Sent: 150, Failed: 150,
+		Incomplete: true,
+		CapHit:     &engine.CapHit{At: 1200 * time.Millisecond, Unsent: 1, OverDeadline: 21},
+		Methods: []engine.MethodReport{{
+			Method: "pkg.Svc/One", Sent: 150, Failed: 150, TimedOut: 150, Unanswered: 3,
+			SilentFrom: &from, RPSLow: 50, RPSHigh: 50, Timeout: 300 * time.Millisecond,
+		}},
+	}
+
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.done, m.report = true, report
+
+	screen := m.finalReport(contentWidth(100))
+
+	var text strings.Builder
+	PrintReport(&text, "localhost:50051", report)
+
+	for _, note := range reportNotes(report) {
+		want := strings.Fields(note)[0]
+		if !strings.Contains(text.String(), want) {
+			t.Fatalf("the text report lost %q: the test no longer compares the two", want)
+		}
+		if !strings.Contains(strings.Join(strings.Fields(screen), " "), strings.Join(strings.Fields(note), " ")) {
+			t.Errorf("the final screen does not carry:\n%s\n\nscreen:\n%s", note, screen)
+		}
+	}
+}
+
+// The run's own length is not a measurement of the target.
+func TestFinalScreenDoesNotLabelTheRunsLengthAsLatency(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.done, m.report = true, engine.Report{Duration: 3 * time.Second, Sent: 10}
+
+	head := strings.SplitN(m.finalReport(contentWidth(100)), "\n", 4)
+
+	if strings.Contains(strings.Join(head, " "), m.text.Latency()) {
+		t.Errorf("the run's length is labelled %q:\n%s", m.text.Latency(), strings.Join(head, "\n"))
+	}
+}
