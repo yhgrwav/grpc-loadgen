@@ -145,3 +145,34 @@ func TestPrintReportWarnsAboutCallsOffTheTimeline(t *testing.T) {
 		t.Errorf("no warning is due when nothing fell off the timeline:\n%s", out.String())
 	}
 }
+
+// A call without a category is the sender's defect. Counted as unanswered it
+// would read as a target that is down.
+func TestPrintReportWarnsAboutUnclassifiedCalls(t *testing.T) {
+	report := engine.Report{
+		Duration: time.Second,
+		Sent:     10,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/One", Sent: 7, Unclassified: 2},
+			{Method: "a.B/Two", Sent: 3, Unclassified: 1},
+		},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+
+	if !strings.Contains(out.String(), "warning: 3 requests came back without a category") {
+		t.Errorf("the report must say how many calls the sender left unclassified:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "never reached the target") {
+		t.Errorf("unclassified calls must not pass for an unreachable target:\n%s", out.String())
+	}
+
+	out.Reset()
+	report.Methods = report.Methods[:0]
+	PrintReport(&out, "localhost:50051", report)
+
+	if strings.Contains(out.String(), "without a category") {
+		t.Errorf("no unclassified calls, no warning:\n%s", out.String())
+	}
+}
