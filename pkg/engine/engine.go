@@ -140,6 +140,21 @@ func (e *Engine) plannedDuration() time.Duration {
 	return longest
 }
 
+// timelineSlack covers what a lagging generator begins past the plan. The
+// drain ends within the longest timeout and an abort records the abort moment,
+// so only a generator more than this far behind lands outside — and a run
+// that far behind is invalid by its lag anyway.
+const timelineSlack = 10 * time.Second
+
+func (e *Engine) longestTimeout() time.Duration {
+	var longest time.Duration
+	for _, call := range e.opts.Calls {
+		longest = max(longest, call.Timeout)
+	}
+
+	return longest
+}
+
 func (e *Engine) Report() Report {
 	report := e.stats.Report()
 	report.Incomplete = e.incomplete.Load()
@@ -156,6 +171,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	requests := make(chan Request, e.opts.MaxInFlight)
 	results := make(chan Result, e.opts.MaxInFlight)
 
+	methods := make([]string, 0, len(e.opts.Calls))
+	for _, call := range e.opts.Calls {
+		methods = append(methods, call.Method)
+	}
+	e.stats.Reserve(e.plannedDuration()+e.longestTimeout()+timelineSlack, methods...)
 	e.stats.Start(time.Now(), e.opts.Warmup)
 
 	scheduleCtx, stopScheduling := context.WithCancel(runCtx)
