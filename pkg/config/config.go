@@ -24,16 +24,18 @@ import (
 )
 
 var (
-	ErrInvalidIP       = errors.New("got empty IP")
-	ErrInvalidPort     = errors.New("got invalid port")
-	ErrNoCalls         = errors.New("no calls configured")
-	ErrInvalidMethod   = errors.New("method must look like package.Service/Method")
-	ErrInvalidRPS      = errors.New("rps must be positive")
-	ErrInvalidDuration = errors.New("duration must be positive")
-	ErrInvalidWarmup   = errors.New("warmup must not be negative")
-	ErrEmptyName       = errors.New("name must not be empty: leave it out to use the service or file name")
-	ErrDuplicateMethod = errors.New("method appears in more than one call: the report is per method, keep one call for it")
-	ErrInvalidTimeout  = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
+	ErrInvalidIP           = errors.New("got empty IP")
+	ErrInvalidPort         = errors.New("got invalid port")
+	ErrNoCalls             = errors.New("no calls configured")
+	ErrInvalidMethod       = errors.New("method must look like package.Service/Method")
+	ErrInvalidRPS          = errors.New("rps must be positive")
+	ErrInvalidDuration     = errors.New("duration must be positive")
+	ErrInvalidWarmup       = errors.New("warmup must not be negative")
+	ErrEmptyName           = errors.New("name must not be empty: leave it out to use the service or file name")
+	ErrDuplicateMethod     = errors.New("method appears in more than one call: the report is per method, keep one call for it")
+	ErrFractionalRPS       = errors.New("rps must be a whole number of requests")
+	ErrWarmupCoversTheCall = errors.New("warmup must be shorter than the call: otherwise nothing of it is measured")
+	ErrInvalidTimeout      = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
 )
 
 type MasterConfig struct {
@@ -62,9 +64,25 @@ type Load struct {
 	Calls  []Call        `yaml:"calls"`
 }
 
+// Rate is a whole number of requests per second. A fractional one is refused
+// rather than truncated: the run would drive a load nobody asked for.
+type Rate int
+
+func (r *Rate) UnmarshalYAML(raw []byte) error {
+	text := strings.Trim(strings.TrimSpace(string(raw)), `"'`)
+
+	n, err := strconv.Atoi(text)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrFractionalRPS, text)
+	}
+	*r = Rate(n)
+
+	return nil
+}
+
 type Call struct {
 	Method   string        `yaml:"method"`
-	RPS      int           `yaml:"rps"`
+	RPS      Rate          `yaml:"rps"`
 	Duration time.Duration `yaml:"duration"`
 	// Data is the request body as written, built into the method's message
 	// before the run; nil sends an empty message.
@@ -119,16 +137,30 @@ func (l Load) Validate() error {
 	first := make(map[string]int, len(l.Calls))
 	for i, call := range l.Calls {
 		if err := call.Validate(); err != nil {
-			errs = append(errs, fmt.Errorf("call %d: %w", i, err))
+			errs = append(errs, fmt.Errorf("%s: %w", call.where(i), err))
+		}
+		if call.Duration > 0 && l.Warmup >= call.Duration {
+			errs = append(errs, fmt.Errorf("%s: %w: warmup %s, duration %s",
+				call.where(i), ErrWarmupCoversTheCall, l.Warmup, call.Duration))
 		}
 		if j, ok := first[call.Method]; ok && call.Method != "" {
-			errs = append(errs, fmt.Errorf("call %d: %w: %q, as call %d", i, ErrDuplicateMethod, call.Method, j))
+			errs = append(errs, fmt.Errorf("%s: %w: %q, as call %d", call.where(i), ErrDuplicateMethod, call.Method, j))
 			continue
 		}
 		first[call.Method] = i
 	}
 
 	return errors.Join(errs...)
+}
+
+// where names a call the way the user can find it in the config: by its
+// method when there is one, and by its place in the list either way.
+func (c Call) where(i int) string {
+	if c.Method == "" {
+		return fmt.Sprintf("call %d", i)
+	}
+
+	return fmt.Sprintf("call %d (%s)", i, c.Method)
 }
 
 func (c Call) Validate() error {

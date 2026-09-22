@@ -32,8 +32,8 @@ func CallsFromConfig(cfg *config.MasterConfig) []engine.Call {
 			Method:  "/" + call.Method,
 			Timeout: call.Timeout,
 			Stages: []engine.Stage{{
-				StartRPS:  call.RPS,
-				TargetRPS: call.RPS,
+				StartRPS:  int(call.RPS),
+				TargetRPS: int(call.RPS),
 				Duration:  call.Duration,
 			}},
 		})
