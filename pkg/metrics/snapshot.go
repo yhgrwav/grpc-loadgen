@@ -69,7 +69,10 @@ type cumBar struct {
 func (l *Latencies) Snapshot() *Snapshot {
 	l.mu.Lock()
 	measuredRaw := l.measured.Export()
-	censoredRaw := l.censored.Export()
+	censoredRaw := emptyExport()
+	if l.censored != nil {
+		censoredRaw = l.censored.Export()
+	}
 	l.mu.Unlock()
 
 	measuredN := hdrhistogram.Import(measuredRaw).TotalCount()
@@ -89,6 +92,10 @@ func (l *Latencies) Snapshot() *Snapshot {
 		invalidN:    l.invalid.Load(),
 	}
 }
+
+// emptyExport stands in for the censored histogram an uncensored distribution
+// does not have. Shared and never written: Merge and Import copy what they read.
+var emptyExport = sync.OnceValue(func() *hdrhistogram.Snapshot { return newHistogram().Export() })
 
 // Count reports every observation, measured and censored alike.
 func (s *Snapshot) Count() int64 {

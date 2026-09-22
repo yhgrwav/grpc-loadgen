@@ -57,7 +57,9 @@ func (l *Latencies) CopyInto(b *Buffer) {
 	// Merge re-records every bucket by its lowest value, which lands in the
 	// same bucket of an identical histogram: the counts are copied exactly.
 	b.measured.Merge(l.measured)
-	b.censored.Merge(l.censored)
+	if l.censored != nil {
+		b.censored.Merge(l.censored)
+	}
 	l.mu.Unlock()
 
 	b.invalidN = l.invalid.Load()

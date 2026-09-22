@@ -158,7 +158,7 @@ func (s *Stats) Reserve(span time.Duration, methods ...string) {
 func (s *Stats) newMethod() *methodStats {
 	return &methodStats{
 		latency:  metrics.NewLatencies(),
-		refusal:  metrics.NewLatencies(),
+		refusal:  metrics.NewUncensoredLatencies(),
 		timeline: newTimeline(s.reserve),
 	}
 }

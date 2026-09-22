@@ -17,6 +17,7 @@ package metrics
 import (
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -227,4 +228,64 @@ func ExampleBuffer() {
 	l.CopyInto(buf)
 	fmt.Println(buf.Percentile(0.5).Value.Round(time.Millisecond))
 	// Output: 10ms
+}
+
+// Ground: public pkg/ API contract — refusals are never cut short, so their
+// distribution carries no censored histogram until a value above its range
+// needs one.
+func TestUncensored_WorksLikeLatenciesWithoutTheSecondHistogram(t *testing.T) {
+	empty := NewUncensoredLatencies()
+	empty.Record(time.Millisecond)
+	emptyBuf := NewBuffer()
+	empty.CopyInto(emptyBuf)
+	for name, got := range map[string]Quantile{
+		"snapshot": empty.Snapshot().Percentile(0.5), "buffer": emptyBuf.Percentile(0.5),
+	} {
+		if !got.Exact || got.Value > 2*time.Millisecond {
+			t.Errorf("%s p50 = %+v, want about 1ms, exact", name, got)
+		}
+	}
+
+	l := NewUncensoredLatencies()
+	l.Record(2 * time.Millisecond)
+	l.Record(2 * time.Hour)
+
+	buf := NewBuffer()
+	l.CopyInto(buf)
+
+	for name, got := range map[string]interface {
+		Count() int64
+		CensoredCount() int64
+	}{"snapshot": l.Snapshot(), "buffer": buf} {
+		if got.Count() != 2 || got.CensoredCount() != 1 {
+			t.Errorf("%s: count %d censored %d, want 2 and 1: past the range is a lower bound",
+				name, got.Count(), got.CensoredCount())
+		}
+	}
+
+	if merged := Merge(empty.Snapshot(), l.Snapshot()); merged.Count() != 3 {
+		t.Errorf("merged count = %d, want 3", merged.Count())
+	}
+}
+
+// Ground: public pkg/ API contract — the point of the constructor is memory.
+func TestUncensored_TakesHalfTheMemory(t *testing.T) {
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+	full := NewLatencies()
+	runtime.ReadMemStats(&after)
+	fullBytes := after.TotalAlloc - before.TotalAlloc
+
+	runtime.ReadMemStats(&before)
+	half := NewUncensoredLatencies()
+	runtime.ReadMemStats(&after)
+	halfBytes := after.TotalAlloc - before.TotalAlloc
+
+	runtime.KeepAlive(full)
+	runtime.KeepAlive(half)
+
+	if halfBytes*3 > fullBytes*2 {
+		t.Errorf("uncensored takes %d bytes, the full one %d: want about half", halfBytes, fullBytes)
+	}
 }
