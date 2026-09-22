@@ -190,3 +190,17 @@ func TestNew_HugeBudgetDoesNotOverflowIntoAPass(t *testing.T) {
 		t.Errorf("err = %v, want ErrInFlightBudget", err)
 	}
 }
+
+// Ground: contract — the report is keyed by method: two calls to one method would merge into a
+// row that states one call's rate and timeout for both (review of #52: 500 + 500 RPS read as 500).
+func TestNew_MethodInTwoCallsIsRejected(t *testing.T) {
+	err := newWithCap(5000,
+		budgetCall("a", 500, time.Second),
+		budgetCall("b", 10, time.Second),
+		budgetCall("a", 500, 2*time.Second),
+	)
+
+	if !errors.Is(err, ErrDuplicateMethod) {
+		t.Fatalf("err = %v, want %v", err, ErrDuplicateMethod)
+	}
+}

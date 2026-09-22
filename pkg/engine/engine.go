@@ -24,8 +24,11 @@ import (
 )
 
 var (
-	ErrNoCalls     = errors.New("engine has no calls")
-	ErrFakeFailure = errors.New("fake sender failure")
+	ErrNoCalls = errors.New("engine has no calls")
+	// The report is per method: two calls to one would merge into a row
+	// stating one call's rate and timeout for both.
+	ErrDuplicateMethod = errors.New("method appears in more than one call")
+	ErrFakeFailure     = errors.New("fake sender failure")
 )
 
 type Call struct {
@@ -71,6 +74,13 @@ func CheckOptions(opts Options) error {
 	}
 	if opts.MaxInFlight < 1 {
 		return fmt.Errorf("%w: %d", ErrInvalidInFlightCap, opts.MaxInFlight)
+	}
+	seen := make(map[string]bool, len(opts.Calls))
+	for _, call := range opts.Calls {
+		if seen[call.Method] {
+			return fmt.Errorf("%w: %s", ErrDuplicateMethod, call.Method)
+		}
+		seen[call.Method] = true
 	}
 
 	return checkInFlightBudget(opts.Calls, opts.MaxInFlight)

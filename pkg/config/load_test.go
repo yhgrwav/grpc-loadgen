@@ -128,6 +128,7 @@ func TestLoadValidate(t *testing.T) {
 		{name: "no calls", load: config.Load{}, wantErr: config.ErrNoCalls},
 		{name: "negative warmup", load: config.Load{Warmup: -time.Second, Calls: []config.Call{call}}, wantErr: config.ErrInvalidWarmup},
 		{name: "broken call", load: config.Load{Calls: []config.Call{{}}}, wantErr: config.ErrInvalidMethod},
+		{name: "method in two calls", load: config.Load{Calls: []config.Call{call, call}}, wantErr: config.ErrDuplicateMethod},
 	}
 
 	for _, tt := range tests {
