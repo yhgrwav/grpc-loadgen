@@ -216,3 +216,90 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 		t.Errorf("no refusals, no refused row:\n%s", out.String())
 	}
 }
+
+func TestPrintReportSaysACapHitIsTheGenerators(t *testing.T) {
+	report := engine.Report{
+		Duration: 1200 * time.Millisecond, Planned: 2 * time.Second, Incomplete: true,
+		CapHit:  &engine.CapHit{At: 1200 * time.Millisecond, Unsent: 1, OverDeadline: 21},
+		Methods: []engine.MethodReport{{Method: "a.B/One", Sent: 1200}},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+	text := out.String()
+
+	// The verdict names the allowance and both causes, and gives no delay:
+	// at the moment of the cap it is always about the allowance.
+	for _, want := range []string{"invalid", "more than 100ms", "CPU", "sender", "deadline", "21", "ran 1.2s of the planned 2.0s"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report does not mention %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestPrintReportStatesWhatTheTargetDidNotAnswer(t *testing.T) {
+	zero := 0
+	report := engine.Report{
+		Duration: 3 * time.Second,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 150, Failed: 150, TimedOut: 150, UnsentTimedOut: 4,
+			SilentFrom: &zero, RPSLow: 50, RPSHigh: 50, Timeout: 300 * time.Millisecond,
+		}},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+	text := out.String()
+
+	for _, want := range []string{"at 50 rps", "150 of 150", "100.0%", "no answer within 300ms", "from second 0", "4"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report does not mention %q:\n%s", want, text)
+		}
+	}
+	for _, wrong := range []string{"does not hold", "cannot handle"} {
+		if strings.Contains(text, wrong) {
+			t.Errorf("report says %q: 0a states what was measured, with no threshold:\n%s", wrong, text)
+		}
+	}
+}
+
+func TestPrintReportStatesARateRangeAndNoSilenceClauseWithoutOne(t *testing.T) {
+	report := engine.Report{
+		Duration: 3 * time.Second,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 150, TimedOut: 50, RPSLow: 20, RPSHigh: 40, Timeout: 300 * time.Millisecond,
+		}},
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+	text := out.String()
+
+	if !strings.Contains(text, "at 20-40 rps") || !strings.Contains(text, "50 of 150") {
+		t.Errorf("report lacks the range and the count:\n%s", text)
+	}
+	if strings.Contains(text, "from second") {
+		t.Errorf("report names a silent second, yet the target answered to the end:\n%s", text)
+	}
+}
+
+func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
+	report := engine.Report{
+		Duration:    time.Second,
+		StartLagP99: metrics.Quantile{Value: 3 * time.Millisecond, Exact: true, Defined: true},
+		StartLagMax: 12 * time.Millisecond, LateCancelMax: 7 * time.Millisecond,
+	}
+
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", report)
+	text := out.String()
+
+	for _, want := range []string{"start lag", "3ms", "12ms", "7ms"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report does not mention %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "generator lag") {
+		t.Errorf("start lag is not the generator's lag as a whole: it does not see answers picked up late:\n%s", text)
+	}
+}

@@ -22,9 +22,10 @@ import "time"
 type Second struct {
 	Begun     int
 	Succeeded int
-	// TargetFailed is the target's own failures: server faults, overload and
-	// timeouts of requests that went out.
+	// TargetFailed is the target's refusals: server faults and overload.
 	TargetFailed int
+	// TimedOut is calls that went out and got no answer within the timeout.
+	TimedOut int
 	// RequestFailed is client faults: the request itself was wrong, and the
 	// target said so.
 	RequestFailed int
@@ -57,7 +58,12 @@ type Second struct {
 }
 
 type second struct {
-	begun, succeeded, targetFailed, requestFailed         int64
+	begun, succeeded, targetFailed, timedOut, requestFailed int64
+	// planned, answered and plannedTimedOut count calls by the second they
+	// were scheduled for: how many, how many got a success or a status from
+	// the target, how many went out and got nothing within their timeout.
+	planned, answered, plannedTimedOut int64
+
 	unsentLate, unsentQuota, unanswered, aborted, unknown int64
 	lagCalls, observedCalls                               int64
 	lagSum, lagMax, observedLag, transportWait, service   time.Duration
@@ -107,6 +113,17 @@ func (t *timeline) record(start time.Time, r Result) {
 
 	t.secs[begun].begun++
 
+	p := &t.secs[scheduled]
+	p.planned++
+	switch r.Category {
+	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault:
+		p.answered++
+	case CategoryTimeout:
+		if !r.NotSent {
+			p.plannedTimedOut++
+		}
+	}
+
 	lag := r.QueueTime()
 	if lag < 0 {
 		t.invalidLag++
@@ -140,7 +157,7 @@ func (t *timeline) record(start time.Time, r Result) {
 	case CategoryTimeout:
 		switch {
 		case !r.NotSent:
-			s.targetFailed++
+			s.timedOut++
 		case lateMoreThanQueued(r):
 			s.unsentLate++
 		default:
@@ -171,12 +188,13 @@ func (t *timeline) export() []Second {
 
 	for i := range t.secs[:t.used] {
 		s := &t.secs[i]
-		inFlight += s.begun - s.succeeded - s.targetFailed - s.requestFailed - s.unsentLate -
+		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.unsentLate -
 			s.unsentQuota - s.unanswered - s.aborted - s.unknown
 		out[i] = Second{
 			Begun:            int(s.begun),
 			Succeeded:        int(s.succeeded),
 			TargetFailed:     int(s.targetFailed),
+			TimedOut:         int(s.timedOut),
 			RequestFailed:    int(s.requestFailed),
 			UnsentLate:       int(s.unsentLate),
 			UnsentQuota:      int(s.unsentQuota),
@@ -195,4 +213,24 @@ func (t *timeline) export() []Second {
 	}
 
 	return out
+}
+
+// silentFrom is the first scheduled second from which to the end no call got
+// an answer while some went out and timed out. Seconds with nothing scheduled,
+// or whose calls all ended on our side (cut off, never sent, unreachable), say
+// nothing about the target and neither break nor start the stretch.
+func (t *timeline) silentFrom() (int, bool) {
+	from, found := 0, false
+
+	for i := t.used - 1; i >= 0; i-- {
+		s := &t.secs[i]
+		switch {
+		case s.answered > 0:
+			return from, found
+		case s.plannedTimedOut > 0:
+			from, found = i, true
+		}
+	}
+
+	return from, found
 }

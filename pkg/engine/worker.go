@@ -29,6 +29,19 @@ var (
 	ErrInFlightCapExceeded = errors.New("in-flight cap exceeded")
 )
 
+// InFlightCapError is how a run ended on the in-flight cap: the calls in
+// flight are cut off at At, as in an abort, and recorded rather than lost.
+type InFlightCapError struct {
+	Cap int
+	At  time.Time
+}
+
+func (e *InFlightCapError) Error() string {
+	return fmt.Sprintf("%v: %d", ErrInFlightCapExceeded, e.Cap)
+}
+
+func (e *InFlightCapError) Unwrap() error { return ErrInFlightCapExceeded }
+
 type Result struct {
 	Method      string
 	ScheduledAt time.Time
@@ -182,6 +195,12 @@ func (r *poolRun) fail(err error) {
 }
 
 func (r *poolRun) finish(err error) error {
+	if errors.Is(err, ErrInFlightCapExceeded) {
+		// Not a failure: the results of the calls cut off still reach out.
+		r.wg.Wait()
+
+		return err
+	}
 	if err != nil && r.parent.Err() == nil {
 		r.fail(err)
 	}
@@ -229,7 +248,13 @@ func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
 	select {
 	case r.slots <- struct{}{}:
 	default:
-		return fmt.Errorf("%w: %d", ErrInFlightCapExceeded, cap(r.slots))
+		// Cut the calls in flight off at this moment, as an abort does: each
+		// is recorded as lasting until now instead of being dropped.
+		now := time.Now()
+		r.abortedAt.CompareAndSwap(nil, &now)
+		r.abort()
+
+		return &InFlightCapError{Cap: cap(r.slots), At: *r.abortedAt.Load()}
 	}
 
 	p.inFlight.Add(1)

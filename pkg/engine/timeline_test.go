@@ -139,7 +139,7 @@ func TestTimeline_OutcomesAreSplit(t *testing.T) {
 
 	got := seconds(t, stats)[0]
 	want := Second{
-		Begun: 10, Succeeded: 1, TargetFailed: 3, RequestFailed: 1, UnsentQuota: 1, UnsentLate: 1,
+		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, UnsentQuota: 1, UnsentLate: 1,
 		Unanswered: 1, Aborted: 1, Unclassified: 1,
 	}
 	got.LagSum, got.LagMax, got.LagCalls = 0, 0, 0
@@ -429,7 +429,7 @@ func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	stats.Record(call(start, 90*time.Second, 91*time.Second, CategorySuccess))
 
 	got := stats.Report().Methods[0]
-	if got.Seconds[5].TargetFailed != 1 {
+	if got.Seconds[5].TimedOut != 1 {
 		t.Errorf("second 5 = %+v, want the call inside the span counted", got.Seconds[5])
 	}
 	if len(got.Seconds) != 6 || got.OutsideTimeline != 1 {

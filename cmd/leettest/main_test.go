@@ -536,15 +536,16 @@ func TestRun_OverBudgetConfigFailsBeforeConnecting(t *testing.T) {
 }
 
 func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
-	// Cap 10 at 50 RPS allows a timeout of 10/50 = 200ms; keeping 2s needs a
-	// cap of 50 x 2 = 100.
 	res := runCLI(t.Context(), t, 3*time.Second,
 		"-max-in-flight", "10", "-c", writeConfig(t, closedPort(t), checkMethod, plaintext))
 	if res.err == nil {
 		t.Fatal("run succeeded, want the in-flight budget to reject the config")
 	}
 
-	for _, want := range []string{"timeout", "200ms", "-max-in-flight", "100"} {
+	// Cap 10 at 50 RPS: a slot for the call on the window's edge and 5 for
+	// 100ms of late release leave 4, a timeout of 80ms; keeping 2s needs
+	// 100 + 1 + 5 = 106. The error says why the numbers are not 200ms and 100.
+	for _, want := range []string{"timeout", "80ms", "-max-in-flight", "106", "100ms"} {
 		if !strings.Contains(res.err.Error(), want) {
 			t.Errorf("error %q lacks %q", res.err, want)
 		}
@@ -894,5 +895,24 @@ func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
 	}
 	if strings.Contains(res.stderr, "stopping") {
 		t.Errorf("SIGTERM went through the gentle stop:\n%s", res.stderr)
+	}
+}
+
+func TestRunResult_CapHitIsAnIncompleteRunNotAnError(t *testing.T) {
+	report := engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}
+	err := runResult(report, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
+
+	if !errors.Is(err, ErrIncomplete) {
+		t.Errorf("err = %v, want ErrIncomplete: the report and its verdict were printed", err)
+	}
+	if errors.Is(err, engine.ErrInFlightCapExceeded) {
+		t.Errorf("err = %v: a cap hit is a verdict in the report, not an error printed without one", err)
+	}
+}
+
+func TestRunResult_OtherFailuresStayErrors(t *testing.T) {
+	boom := errors.New("boom")
+	if err := runResult(engine.Report{}, boom); !errors.Is(err, boom) {
+		t.Errorf("err = %v, want the failure itself", err)
 	}
 }

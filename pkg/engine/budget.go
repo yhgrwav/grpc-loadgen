@@ -42,7 +42,11 @@ type InFlightBudgetError struct {
 	Cap  int
 	// PeakRPS is the summed peak rate, so the caller can say which timeout
 	// would fit: Cap / PeakRPS.
-	PeakRPS   int
+	PeakRPS int
+	// Reserved is the part of Need that is not rps × timeout: the edge slot
+	// and the ReleaseMargin of every call. A timeout fits when
+	// PeakRPS × timeout ≤ Cap − Reserved.
+	Reserved  int
 	Unbounded []string
 }
 
@@ -53,16 +57,26 @@ func (e *InFlightBudgetError) Error() string {
 	}
 
 	return fmt.Sprintf("%v: a target that stops answering could hold up to %d requests in flight "+
-		"(rps × timeout), and the cap is %d", ErrInFlightBudget, e.Need, e.Cap)
+		"(rps × timeout, plus %d kept for calls released up to %v past their deadline), and the cap is %d",
+		ErrInFlightBudget, e.Need, e.Reserved, ReleaseMargin, e.Cap)
 }
 
 func (e *InFlightBudgetError) Unwrap() error { return ErrInFlightBudget }
 
-// checkInFlightBudget rejects calls that a hung target would push past the cap.
+// ReleaseMargin is how late past its deadline a slot may be released before
+// the budget runs out: cancellation and scheduling are the generator's side.
+// Measured up to 32ms under -race and 146ms with every core busy
+// (decisions.md, "Запас бюджета…"); the value is a hypothesis.
+const ReleaseMargin = 100 * time.Millisecond
+
+// checkInFlightBudget rejects calls that a hung target would push past the
+// cap. A call needs ⌈rps × timeout⌉ slots for its window, one for the call
+// scheduled on the window's closing edge, which starts before the first slot
+// is released, and ⌈rps × ReleaseMargin⌉ for late release.
 func checkInFlightBudget(calls []Call, maxInFlight int) error {
 	var (
-		need, peak int
-		unbounded  []string
+		need, peak, reserved int
+		unbounded            []string
 	)
 
 	for _, call := range calls {
@@ -79,7 +93,9 @@ func checkInFlightBudget(calls []Call, maxInFlight int) error {
 			continue
 		}
 
-		need = saturatingAdd(need, inFlightFor(rps, call.Timeout))
+		reserve := saturatingAdd(1, inFlightFor(rps, ReleaseMargin))
+		need = saturatingAdd(need, saturatingAdd(inFlightFor(rps, call.Timeout), reserve))
+		reserved = saturatingAdd(reserved, reserve)
 		peak = saturatingAdd(peak, rps)
 	}
 
@@ -87,7 +103,7 @@ func checkInFlightBudget(calls []Call, maxInFlight int) error {
 		return &InFlightBudgetError{Need: math.MaxInt, Cap: maxInFlight, PeakRPS: peak, Unbounded: unbounded}
 	}
 	if need > maxInFlight {
-		return &InFlightBudgetError{Need: need, Cap: maxInFlight, PeakRPS: peak}
+		return &InFlightBudgetError{Need: need, Cap: maxInFlight, PeakRPS: peak, Reserved: reserved}
 	}
 
 	return nil

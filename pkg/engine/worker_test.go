@@ -502,7 +502,27 @@ func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 
 	out := make(chan Result)
 
-	pool := NewWorkerPool(slowSender(10*time.Millisecond), 1)
+	// A sender failure is fatal: nobody may read after it, so the pool must
+	// not wait for its results to be taken. (The cap is not fatal: its calls
+	// are cut off and delivered, and the engine reads them.) The first call
+	// fails only once the second has returned and is waiting to deliver.
+	boom := errors.New("boom")
+	var (
+		calls    atomic.Int32
+		returned sync.Once
+	)
+	second := make(chan struct{})
+	failing := senderFunc(func(context.Context, Request) (Outcome, error) {
+		if calls.Add(1) == 1 {
+			<-second
+
+			return Outcome{}, boom
+		}
+		returned.Do(func() { close(second) })
+
+		return Outcome{Category: CategorySuccess}, nil
+	})
+	pool := NewWorkerPool(failing, 8)
 
 	done := make(chan error, 1)
 	go func() {
@@ -511,8 +531,8 @@ func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrInFlightCapExceeded) {
-			t.Fatalf("error = %v, want %v", err, ErrInFlightCapExceeded)
+		if !errors.Is(err, boom) {
+			t.Fatalf("error = %v, want %v", err, boom)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not return while results were left unread")

@@ -263,7 +263,8 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
 		view.Store(program)
 		runErr = cli.RunLive(program, start, abort)
-	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil && !errors.Is(runErr, context.Canceled) {
+	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil &&
+		!errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
 	}
 
@@ -271,14 +272,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	cli.PrintReport(stdout, target, report)
 	s.Finish()
 
-	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		return runErr
-	}
-	if report.Incomplete {
-		return ErrIncomplete
-	}
-
-	return nil
+	return runResult(report, runErr)
 }
 
 // checkFakeFlags rejects tuning of the fake target when it is not in use: the
@@ -309,15 +303,16 @@ func withBudgetAdvice(err error) error {
 
 	// Rounded down, so the advice still fits; to the millisecond unless that
 	// would round it to zero.
-	fits := time.Duration(budget.Cap) * time.Second / time.Duration(budget.PeakRPS)
+	fits := time.Duration(max(budget.Cap-budget.Reserved, 0)) * time.Second / time.Duration(budget.PeakRPS)
 	if fits >= time.Millisecond {
 		fits = fits.Truncate(time.Millisecond)
 	} else {
 		fits = fits.Truncate(time.Microsecond)
 	}
 
-	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d",
-		err, fits, budget.Need)
+	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d\n"+
+		"(the cap keeps a slot per call for the call on the window's edge, and room for calls released up\n"+
+		"to %s past their deadline)", err, fits, budget.Need, engine.ReleaseMargin)
 }
 
 // connect reaches the target before the run, so an unreachable one is an error
@@ -359,4 +354,17 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	defer l.mu.Unlock()
 
 	return l.w.Write(p)
+}
+
+// runResult is what run returns once the report is printed. A cap hit is not
+// an error: the report printed its verdict, and the run is incomplete.
+func runResult(report engine.Report, runErr error) error {
+	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
+		return runErr
+	}
+	if report.Incomplete {
+		return ErrIncomplete
+	}
+
+	return nil
 }

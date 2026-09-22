@@ -56,6 +56,9 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		}
 	}
 
+	printNoAnswer(w, report.Methods)
+	printStartLag(w, report)
+
 	if refused > 0 {
 		fmt.Fprint(w, "\nA method's percentiles are the time to serve a call: successes, and timeouts\n"+
 			"as lower bounds. The \"refused\" rows are how long the target took to say no.\n")
@@ -74,9 +77,18 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 			"not counted as failures; each is known only to have lasted until the abort.\n", report.Aborted)
 	}
 
+	if hit := report.CapHit; hit != nil {
+		fmt.Fprintf(w, "\ninvalid run: calls held their slots more than %s (the allowance) past their\n"+
+			"deadline, and the in-flight cap was hit at %s. The generator lacked CPU, or the sender\n"+
+			"does not honor deadlines; the target is not what filled the cap. %d calls in flight were\n"+
+			"past their deadline; %d was refused by the cap and never sent.\n",
+			formatDuration(engine.ReleaseMargin), formatDuration(hit.At), hit.OverDeadline, hit.Unsent)
+	}
+
 	if report.Incomplete {
-		fmt.Fprint(w, "\nincomplete: the run stopped before its planned end. The numbers are honest but\n"+
-			"cover only the part that ran; do not compare them with a full run.\n")
+		fmt.Fprintf(w, "\nincomplete: the run stopped before its planned end, and ran %s of the planned %s.\n"+
+			"The numbers are honest but cover only the part that ran; do not compare them with a\n"+
+			"full run.\n", formatDuration(report.Duration), formatDuration(report.Planned))
 	}
 
 	if unanswered > 0 {
@@ -129,5 +141,61 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	default:
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+}
+
+// printNoAnswer states, per method, how many calls went out and got no answer
+// within their timeout, and from which second on none did. It states what was
+// measured and nothing more: whether that means the target cannot take the
+// rate needs a threshold, which is not this report's to pick.
+func printNoAnswer(w io.Writer, methods []engine.MethodReport) {
+	for i := range methods {
+		m := &methods[i]
+		if m.TimedOut == 0 && m.UnsentTimedOut == 0 {
+			continue
+		}
+
+		rate := fmt.Sprintf("%d", m.RPSLow)
+		if m.RPSHigh != m.RPSLow {
+			rate = fmt.Sprintf("%d-%d", m.RPSLow, m.RPSHigh)
+		}
+
+		if m.TimedOut > 0 {
+			fmt.Fprintf(w, "\n%s: at %s rps, %d of %d calls (%.1f%%) got no answer within %s",
+				displayMethod(m.Method), rate, m.TimedOut, m.Sent, share(m.TimedOut, m.Sent), formatDuration(m.Timeout))
+			if m.SilentFrom != nil {
+				fmt.Fprintf(w, ",\nand from second %d on none did (seconds by schedule, warmup counted)", *m.SilentFrom)
+			}
+			fmt.Fprint(w, ".\n")
+		}
+
+		if m.UnsentTimedOut > 0 {
+			fmt.Fprintf(w, "%s: %d calls timed out before going out: they waited on the connection or the\n"+
+				"generator, not the target.\n", displayMethod(m.Method), m.UnsentTimedOut)
+		}
+	}
+}
+
+func share(part, whole int) float64 {
+	if whole == 0 {
+		return 0
+	}
+
+	return float64(part) / float64(whole) * 100
+}
+
+// printStartLag says how late calls started against their schedule. It is
+// named for what it measures: a generator late to pick up answers is not in
+// it, so it does not vouch for the latencies.
+func printStartLag(w io.Writer, report engine.Report) {
+	if !report.StartLagP99.Defined && report.StartLagMax == 0 {
+		return
+	}
+
+	fmt.Fprintf(w, "\nstart lag, how late calls began against their schedule: p99 %s, max %s.\n"+
+		"It does not see answers picked up late.\n",
+		formatQuantile(report.StartLagP99), formatDuration(report.StartLagMax))
+	if report.LateCancelMax > 0 {
+		fmt.Fprintf(w, "Timeouts returned up to %s past their deadline.\n", formatDuration(report.LateCancelMax))
 	}
 }

@@ -84,6 +84,33 @@ type MethodReport struct {
 	// could not be placed on it; InvalidLag, calls begun before their schedule.
 	OutsideTimeline int
 	InvalidLag      int
+	// TimedOut counts calls that went out and got no answer within their
+	// timeout; UnsentTimedOut, timeouts of calls that never went out, which
+	// say nothing about the target.
+	TimedOut       int
+	UnsentTimedOut int
+	// SilentFrom is the first second, by planned time and counting warmup,
+	// from which to the end of the schedule no call got an answer: neither a
+	// success nor a status from the target. Nil if there is none.
+	SilentFrom *int
+	// RPSLow and RPSHigh are the planned rates over the stages the statement
+	// covers: from SilentFrom on if it is set, the whole plan otherwise.
+	RPSLow, RPSHigh int
+	// Timeout is the method's timeout, the T of "no answer within T".
+	Timeout time.Duration
+}
+
+// CapHit is how a run stopped on the in-flight cap. In a run the budget
+// accepted, only slots held past their deadline by more than the budget's
+// margin fill the cap: the generator's side, not the target's.
+type CapHit struct {
+	// At is when the cap was hit, from the start of the run.
+	At time.Duration
+	// Unsent is the calls the cap refused: they were never sent.
+	Unsent int
+	// OverDeadline is the calls in flight at that moment whose deadline had
+	// already passed.
+	OverDeadline int
 }
 
 // RefusalLatency is how long the target took to refuse: server faults,
@@ -108,6 +135,21 @@ type Report struct {
 	// Aborted counts calls cut off by an abort of the run. They are no fault
 	// of the target, so they are not in Failed; each is censored at the abort.
 	Aborted int
+	// Planned is how long the schedule was meant to run; Duration how long it
+	// did.
+	Planned time.Duration
+	// CapHit is set when the run stopped on the in-flight cap.
+	CapHit *CapHit
+	// StartLagP99 and StartLagMax are how late calls started against their
+	// schedule. They do not see a generator late to pick up an answer.
+	StartLagP99 metrics.Quantile
+	StartLagMax time.Duration
+	// LateCancelMax is how far past its deadline a timed-out call returned
+	// on its own: how late cancellation ran.
+	LateCancelMax time.Duration
+
+	// overDeadline is the calls cut off past their deadline, for CapHit.
+	overDeadline int
 	// Incomplete says the run ended before its plan, by Stop or by an abort.
 	// Every number is honest, but it covers less than was asked for.
 	Incomplete bool
@@ -123,6 +165,13 @@ type Stats struct {
 	aborted   int
 	reserve   int
 	byMethod  map[string]*methodStats
+	// startLag is how late calls began against their schedule, startLagMax
+	// its exact maximum; lateCancelMax how far past its deadline a timeout
+	// returned; overDeadline, calls cut off after their deadline had passed.
+	startLag      *metrics.Latencies
+	startLagMax   time.Duration
+	lateCancelMax time.Duration
+	overDeadline  int
 }
 
 type methodStats struct {
@@ -130,13 +179,15 @@ type methodStats struct {
 	failed     int
 	unanswered int
 	unknown    int
+	timedOut   int
+	unsentOut  int
 	latency    *metrics.Latencies
 	refusal    *metrics.Latencies
 	timeline   timeline
 }
 
 func NewStats() *Stats {
-	return &Stats{byMethod: make(map[string]*methodStats)}
+	return &Stats{byMethod: make(map[string]*methodStats), startLag: metrics.NewUncensoredLatencies()}
 }
 
 // Reserve fixes the span of the timeline: calls with a moment past it are
@@ -196,6 +247,10 @@ func (s *Stats) Record(r Result) {
 	// what it should show, and the report says which seconds were warmup.
 	method.timeline.record(s.startedAt, r)
 
+	if r.Category == CategoryAborted && !r.Deadline.IsZero() && r.DoneAt.After(r.Deadline) {
+		s.overDeadline++
+	}
+
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
 		s.mu.Unlock()
 
@@ -214,6 +269,22 @@ func (s *Stats) Record(r Result) {
 	method.sent++
 	if failed {
 		method.failed++
+	}
+
+	if lag := r.QueueTime(); lag >= 0 {
+		s.startLag.Record(lag)
+		s.startLagMax = max(s.startLagMax, lag)
+	}
+
+	if r.Category == CategoryTimeout {
+		if r.NotSent {
+			method.unsentOut++
+		} else {
+			method.timedOut++
+		}
+		if !r.Deadline.IsZero() {
+			s.lateCancelMax = max(s.lateCancelMax, r.DoneAt.Sub(r.Deadline))
+		}
 	}
 
 	// A call that never reached the target has no latency to record: a refused
@@ -412,12 +483,20 @@ func (s *Stats) Report() Report {
 	aborted, warmup := s.aborted, s.warmup
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
-		timelines[name] = MethodReport{
+		entry := MethodReport{
 			Seconds:         method.timeline.export(),
 			OutsideTimeline: method.timeline.outside,
 			InvalidLag:      method.timeline.invalidLag,
+			TimedOut:        method.timedOut,
+			UnsentTimedOut:  method.unsentOut,
 		}
+		if from, ok := method.timeline.silentFrom(); ok {
+			entry.SilentFrom = &from
+		}
+		timelines[name] = entry
 	}
+	startLag := s.startLag.Snapshot()
+	startLagMax, lateCancelMax, overDeadline := s.startLagMax, s.lateCancelMax, s.overDeadline
 	s.mu.Unlock()
 
 	report := Report{
@@ -426,6 +505,11 @@ func (s *Stats) Report() Report {
 		Sent:     sent,
 		Failed:   failed,
 		Aborted:  aborted,
+
+		StartLagP99:   startLag.Percentile(0.99),
+		StartLagMax:   startLagMax,
+		LateCancelMax: lateCancelMax,
+		overDeadline:  overDeadline,
 	}
 
 	for _, v := range views {
@@ -456,6 +540,9 @@ func (s *Stats) Report() Report {
 			Seconds:         timelines[v.name].Seconds,
 			OutsideTimeline: timelines[v.name].OutsideTimeline,
 			InvalidLag:      timelines[v.name].InvalidLag,
+			TimedOut:        timelines[v.name].TimedOut,
+			UnsentTimedOut:  timelines[v.name].UnsentTimedOut,
+			SilentFrom:      timelines[v.name].SilentFrom,
 		}
 		if measured > 0 {
 			entry.RPS = float64(v.sent) / measured.Seconds()
