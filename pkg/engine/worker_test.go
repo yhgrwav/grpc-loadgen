@@ -700,3 +700,72 @@ func TestPoolCountsHeldSlotsExactlyAndDecidesItsEdges(t *testing.T) {
 		t.Errorf("counted %d after a call without a deadline, want 2", got)
 	}
 }
+
+// Ground: concurrency — why the cap can never report a moment other than its
+// own: once the caller has aborted, launch refuses on the cancellation and
+// never reaches the cap at all. Pinned so a reordering there does not quietly
+// create a second way to set the abort moment.
+func TestPoolAfterAnAbortLaunchRefusesOnTheCancellation(t *testing.T) {
+	r := newPoolRun(t.Context(), 1)
+	defer r.close()
+
+	pool := NewWorkerPool(senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		<-ctx.Done()
+
+		return Outcome{}, ctx.Err()
+	}), 1)
+	out := make(chan Result, 1)
+
+	if err := r.launch(pool, Request{ScheduledAt: time.Now()}, out); err != nil {
+		t.Fatalf("launch within the cap: %v", err)
+	}
+
+	r.abortByCaller()
+
+	// The slot is still held by the call in flight: without the cancellation
+	// check this launch would hit the cap and set a second moment.
+	err := r.launch(pool, Request{ScheduledAt: time.Now()}, out)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("launch after the abort: error = %v, want the cancellation", err)
+	}
+
+	var capErr *InFlightCapError
+	if errors.As(err, &capErr) {
+		t.Errorf("the cap reported %v after the caller had already aborted", capErr.At)
+	}
+}
+
+// Ground: concurrency — a call that began after the abort moment: recorded at
+// the abort it would end before it started. The window is nanoseconds wide, so
+// the pool's own send path is driven here instead of a whole run.
+func TestPoolACallBegunAfterTheAbortIsNotRecordedBeforeItBegan(t *testing.T) {
+	r := newPoolRun(t.Context(), 1)
+	defer r.close()
+
+	r.abortByCaller()
+	abortedAt, _ := r.aborted()
+
+	for !time.Now().After(abortedAt) {
+		runtime.Gosched()
+	}
+
+	pool := NewWorkerPool(senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		return Outcome{}, ctx.Err()
+	}), 1)
+	out := make(chan Result, 1)
+
+	scheduled := time.Now()
+	pool.send(r, Request{ScheduledAt: scheduled}, out, func() {})
+
+	result := <-out
+	if result.Category != CategoryAborted {
+		t.Fatalf("category = %v, want %v", result.Category, CategoryAborted)
+	}
+	if result.DoneAt.Before(result.BegunAt) {
+		t.Errorf("ended at %v, began at %v: a call cannot end before it began",
+			result.DoneAt, result.BegunAt)
+	}
+	if result.Latency() < 0 {
+		t.Errorf("latency = %v, want no less than zero", result.Latency())
+	}
+}
