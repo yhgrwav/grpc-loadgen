@@ -91,6 +91,9 @@ func testMessages(t *testing.T) (item, empty protoreflect.MessageDescriptor) {
 	return file.Messages().ByName("Item"), file.Messages().ByName("Empty")
 }
 
+// Ground: signal google.golang.org/protobuf v1.36.12 — fieldInError parses the text of a protojson
+// error, which the library does not promise; a changed wording goes red here instead of the hint
+// silently naming no field.
 func TestRequestBody_TheHintNamesTheFieldTheErrorIsAbout(t *testing.T) {
 	item, _ := testMessages(t)
 

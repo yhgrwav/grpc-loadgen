@@ -46,6 +46,7 @@ func benchStats(methods, perMethod int) *Stats {
 // BenchmarkStatsSnapshot measures what the interface pays per tick: it asks for
 // a snapshot eight times a second, and the old implementation sorted every
 // recorded latency under the recording lock each time.
+// Ground: hot path — nanoseconds and allocations per record and per snapshot.
 func BenchmarkStatsSnapshot(b *testing.B) {
 	for _, perMethod := range []int{1000, 10000, 100000} {
 		b.Run(fmt.Sprintf("obs%d", perMethod), func(b *testing.B) {
@@ -63,6 +64,7 @@ func BenchmarkStatsSnapshot(b *testing.B) {
 // BenchmarkStatsRecord runs at the concurrency a real run reaches: one
 // goroutine per in-flight request, which at 1000 RPS against a target
 // answering in 500ms means five hundred of them writing to one distribution.
+// Ground: hot path — nanoseconds and allocations per record and per snapshot.
 func BenchmarkStatsRecord(b *testing.B) {
 	for _, writers := range []int{8, 100, 500, 1000} {
 		b.Run(fmt.Sprintf("writers%d", writers), func(b *testing.B) {

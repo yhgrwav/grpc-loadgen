@@ -51,6 +51,7 @@ func seconds(t *testing.T, stats *Stats) []Second {
 	return report.Methods[0].Seconds
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_SecondFarIntoALongRunIsItsOwnWindow(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -66,6 +67,7 @@ func TestTimeline_SecondFarIntoALongRunIsItsOwnWindow(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_BoundaryBelongsToTheNextSecond(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -78,6 +80,7 @@ func TestTimeline_BoundaryBelongsToTheNextSecond(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_InFlightAtTheEndOfEachSecond(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -99,6 +102,7 @@ func TestTimeline_InFlightAtTheEndOfEachSecond(t *testing.T) {
 // A target shedding load answers every call with a refusal in two
 // milliseconds: nothing piles up in flight and the generator keeps pace, so
 // only the split of finished calls by outcome shows it serves nothing.
+// Ground: contract — Second outcomes; no stand scenario refuses on a schedule yet.
 func TestTimeline_FastRefusalsAreFailuresNotServedCalls(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -119,6 +123,7 @@ func TestTimeline_FastRefusalsAreFailuresNotServedCalls(t *testing.T) {
 	}
 }
 
+// Ground: contract — the seven outcomes of a Second.
 func TestTimeline_OutcomesAreSplit(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -169,6 +174,7 @@ func unsentAfterLag(start time.Time, lag, wait time.Duration) Result {
 // A config that sends the same entity every time gets AlreadyExists from the
 // second call on. The target copes fine; the verdict reads TargetFailed, so
 // these must not land there.
+// Ground: contract — whose fault an outcome is.
 func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -187,6 +193,7 @@ func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
 // A request that never went out tells two different stories: stuck behind
 // the connection's stream quota, or started by a generator already past the
 // deadline. Opening more connections helps only the first.
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -213,6 +220,7 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_UnknownIsUnclassifiedNotUnanswered(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -243,6 +251,7 @@ func decomposed(start time.Time, category Category, lag, wait, service time.Dura
 // Only successes carry a transport wait and a service time: for a refused
 // connection SentAt means nothing, a timeout knows its service time only as a
 // lower bound, and a fast refusal would pass for a faster target.
+// Ground: contract — which calls enter the sums of a Second.
 func TestTimeline_OnlySuccessesEnterTransportAndService(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -274,6 +283,7 @@ func TestTimeline_OnlySuccessesEnterTransportAndService(t *testing.T) {
 // rest in 200ms. Averaged together that is 101ms: a target twice as fast under
 // overload. Google's SRE book (Monitoring Distributed Systems, the four golden
 // signals) warns of exactly this mix.
+// Ground: contract — which calls enter the sums of a Second.
 func TestTimeline_FastRefusalsDoNotMakeTheTargetLookFaster(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -292,6 +302,7 @@ func TestTimeline_FastRefusalsDoNotMakeTheTargetLookFaster(t *testing.T) {
 
 // The three sums over the observed calls of a second add up to their
 // latencies with nothing left over.
+// Ground: contract — the three terms of a Second add up to its latency.
 func TestTimeline_ObservedTermsAddUpToLatency(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -314,6 +325,7 @@ func TestTimeline_ObservedTermsAddUpToLatency(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_InvalidLagIsNotALagCall(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -330,6 +342,7 @@ func TestTimeline_InvalidLagIsNotALagCall(t *testing.T) {
 
 // The generator's lag is taken before the call and says nothing about the
 // reply, so a refused connection or an aborted call is lag like any other.
+// Ground: contract — which calls enter the lag of a Second.
 func TestTimeline_UnansweredAndAbortedCountInLag(t *testing.T) {
 	lagOf := func(category Category) MethodReport {
 		start := time.Now()
@@ -365,6 +378,7 @@ func TestTimeline_UnansweredAndAbortedCountInLag(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_NegativeLagIsInvalidNotZero(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -381,6 +395,7 @@ func TestTimeline_NegativeLagIsInvalidNotZero(t *testing.T) {
 	}
 }
 
+// Ground: contract — Options.Warmup; no end-to-end test reaches warmup yet.
 func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 2*time.Second)
@@ -402,6 +417,7 @@ func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -420,6 +436,7 @@ func TestTimeline_PastTheReservedSpanIsCountedAside(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_WithoutReserveEverythingIsOutside(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -433,6 +450,7 @@ func TestTimeline_WithoutReserveEverythingIsOutside(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_EventBeforeTheStartIsCountedAside(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -451,6 +469,7 @@ func TestTimeline_EventBeforeTheStartIsCountedAside(t *testing.T) {
 	}
 }
 
+// Ground: boundary — second boundaries and edge values a run cannot place reliably.
 func TestTimeline_FinishedBeforeBegunIsCountedAside(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)
@@ -472,6 +491,7 @@ func TestTimeline_FinishedBeforeBegunIsCountedAside(t *testing.T) {
 
 // CI runs no benchmarks, so an allocation creeping into recording would go
 // unnoticed without this.
+// Ground: hot path — the timeline is written on every call.
 func TestTimeline_RecordDoesNotAllocate(t *testing.T) {
 	start := time.Now()
 	stats := NewStats()
@@ -485,6 +505,7 @@ func TestTimeline_RecordDoesNotAllocate(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — recording from many goroutines.
 func TestTimeline_ConcurrentRecordingLosesNothing(t *testing.T) {
 	start := time.Now()
 	stats := reserved(start, 0)

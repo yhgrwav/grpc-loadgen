@@ -36,6 +36,8 @@ load:
 
 // The YAML decoder reads 0123 as octal 83 and 08 as the string "08"; both
 // reach the target as numbers the user did not write, without an error.
+// Ground: contract — pkg/config is a library API; a number read other than written reaches the
+// target silently.
 func TestParse_LeadingZeroNumberIsRejected(t *testing.T) {
 	for _, value := range []string{"0123", "-012", "+07", "08", "00", "0_1"} {
 		t.Run(value, func(t *testing.T) {
@@ -51,6 +53,8 @@ func TestParse_LeadingZeroNumberIsRejected(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; a number read other than written reaches the
+// target silently.
 func TestParse_UnambiguousNumbersAreAccepted(t *testing.T) {
 	for _, value := range []string{"0", "-0", "123", "0.5", "0x1F", `"0123"`, "'08'", "1_000"} {
 		t.Run(value, func(t *testing.T) {
@@ -61,6 +65,8 @@ func TestParse_UnambiguousNumbersAreAccepted(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; a number read other than written reaches the
+// target silently.
 func TestParse_EveryAmbiguousNumberIsReported(t *testing.T) {
 	raw := numbersHead + "0123\n        wallet_id: 007\n"
 

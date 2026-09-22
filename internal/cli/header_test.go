@@ -17,7 +17,6 @@ package cli
 import (
 	"strings"
 	"testing"
-
 )
 
 func firstLine(s string) string {
@@ -31,4 +30,3 @@ func TestRunningStatusSaysWhatIsHappening(t *testing.T) {
 		t.Errorf("Running() = %q", got)
 	}
 }
-

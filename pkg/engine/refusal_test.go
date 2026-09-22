@@ -32,6 +32,8 @@ func answered(start time.Time, category Category, latency time.Duration) Result 
 // 2ms, and a `p99 < 200ms` threshold passes while almost nothing is served.
 // Google's SRE book (Monitoring Distributed Systems, the four golden signals)
 // says to tell the latency of successes from that of errors.
+// Ground: contract — the refusal distribution is its own Report field; no stand scenario times
+// refusals yet.
 func TestStats_RefusalsHaveTheirOwnLatency(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -59,6 +61,8 @@ func TestStats_RefusalsHaveTheirOwnLatency(t *testing.T) {
 	}
 }
 
+// Ground: contract — the refusal distribution is its own Report field; no stand scenario times
+// refusals yet.
 func TestStats_EveryWayOfSayingNoIsARefusal(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -77,6 +81,8 @@ func TestStats_EveryWayOfSayingNoIsARefusal(t *testing.T) {
 // Timeouts are the slowest calls of all: "not served within T" is a lower
 // bound on the same service time. Dropped, the p99 of the survivors would hide
 // the third that did not make it.
+// Ground: contract — the refusal distribution is its own Report field; no stand scenario times
+// refusals yet.
 func TestStats_TimeoutsStayInTheServiceTime(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -100,6 +106,8 @@ func TestStats_TimeoutsStayInTheServiceTime(t *testing.T) {
 	}
 }
 
+// Ground: contract — the refusal distribution is its own Report field; no stand scenario times
+// refusals yet.
 func TestStats_LiveViewShowsServiceTime(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()

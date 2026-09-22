@@ -149,6 +149,7 @@ func withoutDeadline(t *testing.T) context.Context {
 	return ctx
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestConnect_RefusedAddressFailsWithoutADeadline(t *testing.T) {
 	addr := closedPort(t)
 	sender := New(Options{Target: addr})
@@ -163,6 +164,7 @@ func TestConnect_RefusedAddressFailsWithoutADeadline(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestConnect_RefusedAddressCarriesTheTransportCause(t *testing.T) {
 	addr := closedPort(t)
 	sender := New(Options{Target: addr})
@@ -183,6 +185,7 @@ func TestConnect_RefusedAddressCarriesTheTransportCause(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestConnect_UnresolvableNameFailsWithoutADeadline(t *testing.T) {
 	// .invalid is reserved by RFC 2606 and never resolves.
 	const addr = "no-such-host.invalid:443"
@@ -199,6 +202,7 @@ func TestConnect_UnresolvableNameFailsWithoutADeadline(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a probe racing a target that comes up.
 func TestTransportCause_ProbeThatReachesATargetHasNoEffect(t *testing.T) {
 	// The race the probe is built for: the connection came up between seeing
 	// TRANSIENT_FAILURE and probing. The target must see nothing it would act
@@ -214,6 +218,7 @@ func TestTransportCause_ProbeThatReachesATargetHasNoEffect(t *testing.T) {
 	}
 }
 
+// Ground: boundary — every status code, including ones the stand never returns.
 func TestTransportCause_AnyServedStatusMeansTheConnectionWorks(t *testing.T) {
 	// Many services check credentials before routing, so an unknown method
 	// comes back as whatever the interceptor says, not Unimplemented. A status
@@ -248,6 +253,7 @@ func TestTransportCause_AnyServedStatusMeansTheConnectionWorks(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the connect deadline against a target that never answers.
 func TestConnect_CallerDeadlineBoundsASilentTarget(t *testing.T) {
 	// Accepts TCP and never speaks: the handshake neither completes nor fails,
 	// so only the caller's deadline can end the wait.
@@ -289,6 +295,7 @@ func TestConnect_CallerDeadlineBoundsASilentTarget(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_BeforeConnectFails(t *testing.T) {
 	sender := New(Options{Target: "127.0.0.1:1"})
 
@@ -298,6 +305,7 @@ func TestSend_BeforeConnectFails(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_AfterCloseFails(t *testing.T) {
 	sender := dialTarget(t, &target{})
 
@@ -311,6 +319,7 @@ func TestSend_AfterCloseFails(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestClose_IsSafeTwice(t *testing.T) {
 	sender := dialTarget(t, &target{})
 
@@ -324,6 +333,7 @@ func TestClose_IsSafeTwice(t *testing.T) {
 
 // --- sending ------------------------------------------------------------
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_EmptyPayloadIsValid(t *testing.T) {
 	sender := dialTarget(t, &target{})
 
@@ -336,6 +346,7 @@ func TestSend_EmptyPayloadIsValid(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_KeepsResponseOnlyWhenAsked(t *testing.T) {
 	sender := dialTarget(t, &target{})
 
@@ -358,6 +369,7 @@ func TestSend_KeepsResponseOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_AppliesDeadlineAsGiven(t *testing.T) {
 	sender := dialTarget(t, &target{delay: time.Second})
 
@@ -379,6 +391,7 @@ func TestSend_AppliesDeadlineAsGiven(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a deadline already past.
 func TestSend_DeadlineInThePastTimesOutWithoutSending(t *testing.T) {
 	srv := &target{delay: time.Second}
 	sender := dialTarget(t, srv)
@@ -402,6 +415,7 @@ func TestSend_DeadlineInThePastTimesOutWithoutSending(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the zero deadline.
 func TestSend_ZeroDeadlineMeansNoDeadline(t *testing.T) {
 	sender := dialTarget(t, &target{delay: 50 * time.Millisecond})
 
@@ -414,6 +428,7 @@ func TestSend_ZeroDeadlineMeansNoDeadline(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a payload above the default window size.
 func TestSend_MegabytePayloadGoesThrough(t *testing.T) {
 	// A HealthCheckRequest whose only field, service (field 1, a string), is a
 	// megabyte long: valid on the wire, and big enough to span many frames.
@@ -447,6 +462,7 @@ func TestSend_MegabytePayloadGoesThrough(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_ContextCancelledBeforeTheCallWrapsItsError(t *testing.T) {
 	sender := dialTarget(t, &target{})
 
@@ -459,6 +475,7 @@ func TestSend_ContextCancelledBeforeTheCallWrapsItsError(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestConnect_TLSFlagTurnsOnTransportCredentials(t *testing.T) {
 	// The target speaks plaintext; a sender asked for TLS must fail the
 	// handshake instead of quietly falling back to an insecure connection.
@@ -490,6 +507,7 @@ func TestConnect_TLSFlagTurnsOnTransportCredentials(t *testing.T) {
 
 // --- timestamps ---------------------------------------------------------
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_TimestampsComeFromTheTransport(t *testing.T) {
 	const serverDelay = 80 * time.Millisecond
 
@@ -513,6 +531,7 @@ func TestSend_TimestampsComeFromTheTransport(t *testing.T) {
 
 // --- classification -----------------------------------------------------
 
+// Ground: boundary — every status code, including ones the stand never returns.
 func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 	tests := []struct {
 		code codes.Code
@@ -597,6 +616,7 @@ func bounded(t *testing.T) context.Context {
 	return ctx
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_SameCodeFromTwoSourcesGetsDifferentCategories(t *testing.T) {
 	// The whole point of watching InTrailer: UNAVAILABLE from a server that
 	// answered is a measurement, UNAVAILABLE from a target nobody reached is
@@ -623,6 +643,7 @@ func TestSend_SameCodeFromTwoSourcesGetsDifferentCategories(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_ReportsTheRawTransportCode(t *testing.T) {
 	// The category is a guess where UNAVAILABLE is concerned; the raw code is a
 	// fact, and the report shows both.
@@ -637,6 +658,7 @@ func TestSend_ReportsTheRawTransportCode(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_RefusedConnectionIsNotAMeasurement(t *testing.T) {
 	out, err := vanishedTarget(t).Send(bounded(t), request(time.Now()))
 	if err != nil {
@@ -647,6 +669,7 @@ func TestSend_RefusedConnectionIsNotAMeasurement(t *testing.T) {
 	}
 }
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_CancellationWrapsContextError(t *testing.T) {
 	sender := dialTarget(t, &target{delay: time.Second})
 
@@ -670,6 +693,7 @@ func TestSend_CancellationWrapsContextError(t *testing.T) {
 
 // --- concurrency --------------------------------------------------------
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_IsSafeUnderConcurrentUse(t *testing.T) {
 	const callers = 1000
 
@@ -708,6 +732,7 @@ func TestSend_IsSafeUnderConcurrentUse(t *testing.T) {
 
 // --- reflection over the same connection ---------------------------------
 
+// Ground: contract — grpcsender.Sender is exported.
 func TestConn_ServesReflection(t *testing.T) {
 	// The request body is built from the schema the target reports, over the
 	// connection the load goes through. A codec set on the connection would
@@ -745,6 +770,7 @@ func TestConn_ServesReflection(t *testing.T) {
 // Send reads what the call recorded, and the target's answer arrives a moment
 // later on the transport's own goroutine. Under -race a shared write shows up
 // here; without the detector it shows up as a timestamp nobody can explain.
+// Ground: contract — grpcsender.Sender is exported.
 func TestSend_TimedOutCallDoesNotRaceItsOwnTransport(t *testing.T) {
 	const (
 		callers = 100

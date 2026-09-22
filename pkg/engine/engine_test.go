@@ -22,6 +22,8 @@ import (
 	"time"
 )
 
+// Ground: contract — Report.Sent in total: end-to-end tests read only method rows, and a mutation
+// that stops counting it stays green there (2026-09-22).
 func TestEngineRunsEveryCall(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{
@@ -53,6 +55,8 @@ func TestEngineRunsEveryCall(t *testing.T) {
 	}
 }
 
+// Ground: contract — Options.Warmup; the stand switches delay by call number, not time, so no
+// end-to-end test reaches warmup yet.
 func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 100 * time.Millisecond}}}},
@@ -81,6 +85,7 @@ func TestEngineKeepsWarmupOutOfLatencies(t *testing.T) {
 	}
 }
 
+// Ground: contract — cancelling the context is how a library caller stops a run.
 func TestEngineStopsOnCancel(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: time.Hour}}}},
@@ -104,6 +109,7 @@ func TestEngineStopsOnCancel(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — a leak shows only after many runs in one process.
 func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	before := runtime.NumGoroutine()
 
@@ -136,6 +142,7 @@ func TestEngineRunDoesNotLeakSchedulerGoroutines(t *testing.T) {
 	}
 }
 
+// Ground: contract — engine.New validates what a library caller passes.
 func TestEngineRejectsBadOptions(t *testing.T) {
 	stage := []Stage{{StartRPS: 1, TargetRPS: 1, Duration: time.Second}}
 
@@ -172,6 +179,7 @@ func TestEngineRejectsBadOptions(t *testing.T) {
 	}
 }
 
+// Ground: contract — the live snapshot is the API a UI polls.
 func TestSnapshotTracksProgress(t *testing.T) {
 	eng, err := New(Options{
 		Calls:       []Call{{Method: "a.B/One", Timeout: 100 * time.Millisecond, Stages: []Stage{{StartRPS: 100, TargetRPS: 100, Duration: 200 * time.Millisecond}}}},
@@ -206,6 +214,7 @@ func TestSnapshotTracksProgress(t *testing.T) {
 // A call begun in the last planned second against a target that hangs runs on
 // to its deadline past the plan: the reserve must hold it, and in flight must
 // come back to zero.
+// Ground: contract — Report.Timeline covers the drain after the last scheduled call.
 func TestEngineTimelineHoldsTheDrain(t *testing.T) {
 	eng, err := New(Options{
 		Calls: []Call{{

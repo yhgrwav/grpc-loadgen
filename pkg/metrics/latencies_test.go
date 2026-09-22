@@ -52,6 +52,8 @@ var referenceFractions = []fraction{{50, 100}, {90, 100}, {99, 100}, {999, 1000}
 // figure accuracy. It catches three different failure modes with one test:
 // our misuse of the library, a bug in the library itself, and a regression
 // on a version bump.
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileAgainstReference(t *testing.T) {
 	const n = 10000
 	rng := rand.New(rand.NewPCG(1, 2))
@@ -96,6 +98,8 @@ func assertUpperBound(t *testing.T, f fraction, got, want time.Duration) {
 // TestPercentileAgainstReference over a mix of measured and censored
 // observations, so the exactness criterion is verified against a reference
 // and not just against hand-picked numbers.
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileAgainstReferenceWithCensoredMix(t *testing.T) {
 	const n = 5000
 	rng := rand.New(rand.NewPCG(7, 11))
@@ -147,6 +151,8 @@ func TestPercentileAgainstReferenceWithCensoredMix(t *testing.T) {
 // TestPercentileExactnessBoundary constructs a rank that lands exactly on the
 // number of measured observations below the smallest censored threshold, and
 // one rank above it, to pin down that the criterion is "<=", not "<".
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileExactnessBoundary(t *testing.T) {
 	l := NewLatencies()
 	for i := 1; i <= 100; i++ {
@@ -171,6 +177,8 @@ func TestPercentileExactnessBoundary(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileExactWithoutCensored(t *testing.T) {
 	l := NewLatencies()
 	for i := 1; i <= 1000; i++ {
@@ -187,6 +195,8 @@ func TestPercentileExactWithoutCensored(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileExactWhenCensoredAboveRank(t *testing.T) {
 	l := NewLatencies()
 	for i := 0; i < 10000; i++ {
@@ -206,6 +216,8 @@ func TestPercentileExactWhenCensoredAboveRank(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileLowerBoundWhenCensoredAtRank(t *testing.T) {
 	l := NewLatencies()
 	for i := 0; i < 10000; i++ {
@@ -229,6 +241,8 @@ func TestPercentileLowerBoundWhenCensoredAtRank(t *testing.T) {
 // the union-based lower bound is strictly above the smallest individual
 // censored threshold, proving countAtOrBelow/valueAtRank use the union and
 // not just censored.min().
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileLowerBoundStrongerThanMinThreshold(t *testing.T) {
 	l := NewLatencies()
 	for i := 0; i < 10; i++ {
@@ -251,6 +265,8 @@ func TestPercentileLowerBoundStrongerThanMinThreshold(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestRecordAboveRangeBecomesCensored(t *testing.T) {
 	l := NewLatencies()
 	l.Record(2 * time.Hour)
@@ -272,6 +288,8 @@ func TestRecordAboveRangeBecomesCensored(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestRecordNegativeDurationCountsAsInvalid(t *testing.T) {
 	l := NewLatencies()
 	l.Record(-time.Millisecond)
@@ -286,6 +304,8 @@ func TestRecordNegativeDurationCountsAsInvalid(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestRecordCensoredNegativeThresholdCountsAsInvalid(t *testing.T) {
 	l := NewLatencies()
 	l.RecordCensored(-time.Second)
@@ -299,6 +319,7 @@ func TestRecordCensoredNegativeThresholdCountsAsInvalid(t *testing.T) {
 	}
 }
 
+// Ground: concurrency — recording from many goroutines.
 func TestConcurrentRecordDoesNotLoseObservations(t *testing.T) {
 	l := NewLatencies()
 	const goroutines = 8
@@ -327,6 +348,8 @@ func TestConcurrentRecordDoesNotLoseObservations(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileEmptySnapshot(t *testing.T) {
 	snap := NewLatencies().Snapshot()
 	if snap.Count() != 0 {
@@ -338,6 +361,8 @@ func TestPercentileEmptySnapshot(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileBoundaryFractions(t *testing.T) {
 	l := NewLatencies()
 	for i := 1; i <= 100; i++ {
@@ -367,6 +392,8 @@ func TestPercentileBoundaryFractions(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestRankForMatchesIntegerArithmetic(t *testing.T) {
 	for _, n := range []int64{10, 50, 100, 1000, 10000, 12345} {
 		for num := int64(1); num < 1000; num++ {
@@ -385,6 +412,7 @@ func TestRankForMatchesIntegerArithmetic(t *testing.T) {
 	}
 }
 
+// Ground: contract — Merge is exported.
 func TestMergeMatchesSingleDistribution(t *testing.T) {
 	a := NewLatencies()
 	b := NewLatencies()
@@ -421,6 +449,7 @@ func TestMergeMatchesSingleDistribution(t *testing.T) {
 	}
 }
 
+// Ground: contract — Merge is exported.
 func TestMergeOfNoSnapshotsIsEmpty(t *testing.T) {
 	merged := Merge()
 	if merged.Count() != 0 {
@@ -431,6 +460,8 @@ func TestMergeOfNoSnapshotsIsEmpty(t *testing.T) {
 	}
 }
 
+// Ground: boundary — bucket bounds, ranks and definiteness, which no run against the stand hits
+// reliably.
 func TestPercentileZeroOnEmptySnapshotIsUndefined(t *testing.T) {
 	snap := NewLatencies().Snapshot()
 

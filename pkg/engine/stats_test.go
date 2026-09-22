@@ -21,6 +21,8 @@ import (
 	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
+// Ground: boundary — which rank is p50 and p99: end-to-end only the stop tests catch p99 read as
+// p95, and by chance (mutation 2026-09-22).
 func TestStatsReportsPercentiles(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -61,6 +63,7 @@ func TestStatsReportsPercentiles(t *testing.T) {
 	}
 }
 
+// Ground: boundary — zero observations.
 func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -84,6 +87,7 @@ func TestStatsLeavesPercentileUndefinedWithoutObservations(t *testing.T) {
 	}
 }
 
+// Ground: contract — one MethodReport per method.
 func TestStatsSplitsMethods(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -111,6 +115,7 @@ func TestStatsSplitsMethods(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a category outside the enum, which no real sender returns.
 func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -125,6 +130,8 @@ func TestStatsCountsUnfilledCategoryAsFailure(t *testing.T) {
 	}
 }
 
+// Ground: contract — a refused connection is not latency; end-to-end an unreachable target ends the
+// run before any report.
 func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -162,6 +169,7 @@ func TestStatsKeepsUnreachableCallsOutOfLatency(t *testing.T) {
 	}
 }
 
+// Ground: boundary — the threshold is the deadline to the nanosecond, not a later moment.
 func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -186,6 +194,7 @@ func TestStatsCensorsAtTheDeadlineNotAtTheReport(t *testing.T) {
 	}
 }
 
+// Ground: contract — Options.Warmup; no end-to-end test reaches warmup yet.
 func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()

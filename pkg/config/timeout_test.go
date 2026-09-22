@@ -34,6 +34,7 @@ load:
 ` + timeoutLine)
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse_TimeoutDefaultsToTwoSeconds(t *testing.T) {
 	cfg, err := Parse(withTimeout(""))
 	if err != nil {
@@ -44,6 +45,7 @@ func TestParse_TimeoutDefaultsToTwoSeconds(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse_ExplicitTimeoutIsKept(t *testing.T) {
 	cfg, err := Parse(withTimeout("      timeout: 150ms\n"))
 	if err != nil {
@@ -54,6 +56,7 @@ func TestParse_ExplicitTimeoutIsKept(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse_TimeoutCannotBeSwitchedOff(t *testing.T) {
 	// In an open model a call without a deadline piles up against a hung
 	// target until the in-flight cap ends the run; zero is not "no timeout".
@@ -66,6 +69,7 @@ func TestParse_TimeoutCannotBeSwitchedOff(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse_NameIsOptional(t *testing.T) {
 	cfg, err := Parse(withTimeout(""))
 	if err != nil {
@@ -76,6 +80,7 @@ func TestParse_NameIsOptional(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse_EmptyNameIsRejected(t *testing.T) {
 	raw := append([]byte("name: \"\"\n"), withTimeout("")...)
 	if _, err := Parse(raw); !errors.Is(err, ErrEmptyName) {

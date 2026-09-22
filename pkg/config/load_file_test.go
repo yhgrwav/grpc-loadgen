@@ -37,6 +37,7 @@ load:
       duration: 1m
 `
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParse(t *testing.T) {
 	cfg, err := config.Parse([]byte(validYAML))
 	if err != nil {
@@ -54,6 +55,7 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParseRejectsUnknownFields(t *testing.T) {
 	const typo = `
 app:
@@ -72,6 +74,7 @@ load:
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestParseRejectsInvalidConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -117,6 +120,7 @@ app:
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestLoadFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "leettest.yaml")
 	if err := os.WriteFile(path, []byte(validYAML), 0o600); err != nil {
@@ -133,6 +137,7 @@ func TestLoadFile(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
 func TestLoadFileMissing(t *testing.T) {
 	_, err := config.LoadFile(filepath.Join(t.TempDir(), "absent.yaml"))
 

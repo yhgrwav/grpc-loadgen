@@ -21,6 +21,7 @@ import (
 	"time"
 )
 
+// Ground: contract — FakeSender is exported; goes together with -fake moving to the built-in stand.
 func TestFakeSenderReportsTimeoutOnPastDeadline(t *testing.T) {
 	f := FakeSender{Delay: time.Hour}
 	req := Request{Deadline: time.Now().Add(-time.Millisecond)}
@@ -38,6 +39,7 @@ func TestFakeSenderReportsTimeoutOnPastDeadline(t *testing.T) {
 	}
 }
 
+// Ground: contract — FakeSender is exported; goes together with -fake moving to the built-in stand.
 func TestFakeSenderReportsErrorOnCanceledParent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -51,6 +53,7 @@ func TestFakeSenderReportsErrorOnCanceledParent(t *testing.T) {
 	}
 }
 
+// Ground: contract — FakeSender is exported; goes together with -fake moving to the built-in stand.
 func TestFakeSenderAlwaysFails(t *testing.T) {
 	f := FakeSender{FailRatio: 1}
 
@@ -67,6 +70,7 @@ func TestFakeSenderAlwaysFails(t *testing.T) {
 	}
 }
 
+// Ground: contract — FakeSender is exported; goes together with -fake moving to the built-in stand.
 func TestFakeSenderSucceeds(t *testing.T) {
 	f := FakeSender{}
 
