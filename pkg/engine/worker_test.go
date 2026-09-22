@@ -538,3 +538,81 @@ func TestPoolReturnsWhenNobodyReadsResults(t *testing.T) {
 		t.Fatal("run did not return while results were left unread")
 	}
 }
+
+// Ground: concurrency — the caller's abort landing after a cap hit, while the calls the cap cut
+// off have not yet read the moment.
+func TestPoolKeepsCapMomentWhenCallerAbortsAfter(t *testing.T) {
+	const limit = 2
+
+	started := make(chan struct{}, limit)
+	cut := make(chan struct{}, limit)
+	gate := make(chan struct{})
+	sender := senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		cut <- struct{}{}
+		<-gate
+
+		return Outcome{}, ctx.Err()
+	})
+	pool := NewWorkerPool(sender, limit)
+	out := make(chan Result, limit)
+
+	r := newPoolRun(t.Context(), limit)
+	defer r.close()
+
+	for range limit {
+		if err := r.launch(pool, Request{ScheduledAt: time.Now()}, out); err != nil {
+			t.Fatalf("launch within the cap: %v", err)
+		}
+	}
+	for range limit {
+		<-started
+	}
+
+	err := r.launch(pool, Request{ScheduledAt: time.Now()}, out)
+	var capErr *InFlightCapError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("launch past the cap: error = %v, want %T", err, capErr)
+	}
+
+	// The cap alone cuts the calls off, before any caller abort.
+	for range limit {
+		select {
+		case <-cut:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the cap hit did not cut the calls in flight off")
+		}
+	}
+
+	// The calls wait at the gate. The caller's abort must come strictly later
+	// on the clock, or overwriting the moment would go unseen.
+	for !time.Now().After(capErr.At) {
+		runtime.Gosched()
+	}
+	r.abortByCaller()
+	close(gate)
+
+	if got := r.finish(err); !errors.Is(got, ErrInFlightCapExceeded) {
+		t.Fatalf("finish: error = %v, want %v", got, ErrInFlightCapExceeded)
+	}
+	close(out)
+
+	if at, _ := r.aborted(); !at.Equal(capErr.At) {
+		t.Errorf("abort moment = %v, want the cap hit %v", at, capErr.At)
+	}
+	n := 0
+	for res := range out {
+		n++
+		if res.Category != CategoryAborted {
+			t.Errorf("category = %v, want %v", res.Category, CategoryAborted)
+		}
+		if !res.DoneAt.Equal(capErr.At) {
+			t.Errorf("DoneAt = %v, want the cap hit %v: later is time nobody watched",
+				res.DoneAt, capErr.At)
+		}
+	}
+	if n != limit {
+		t.Errorf("got %d results, want %d", n, limit)
+	}
+}

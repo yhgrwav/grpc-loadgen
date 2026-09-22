@@ -157,14 +157,16 @@ func newPoolRun(ctx context.Context, maxInFlight int) *poolRun {
 		slots:   make(chan struct{}, maxInFlight),
 		failed:  make(chan struct{}),
 	}
-	r.stopWatch = context.AfterFunc(ctx, func() {
-		now := time.Now()
-		// A cap hit may have cut the calls off first: the moment stays its.
-		r.abortedAt.CompareAndSwap(nil, &now)
-		abort()
-	})
+	r.stopWatch = context.AfterFunc(ctx, r.abortByCaller)
 
 	return r
+}
+
+func (r *poolRun) abortByCaller() {
+	now := time.Now()
+	// A cap hit may have cut the calls off first: the moment stays its.
+	r.abortedAt.CompareAndSwap(nil, &now)
+	r.abort()
 }
 
 func (r *poolRun) close() {
