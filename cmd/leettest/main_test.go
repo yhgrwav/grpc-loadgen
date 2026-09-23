@@ -1039,3 +1039,26 @@ func TestRun_AStoppedRunExitsWithTheIncompleteCodeNotASignalOne(t *testing.T) {
 		t.Errorf("no report on stdout:\n%s", res.stdout)
 	}
 }
+
+// Plenty of production services keep reflection off. A method without data
+// needs no schema, so the run goes ahead; the warning says only that nothing
+// could be checked in advance.
+func TestRun_WithoutReflectionAMethodWithoutDataStillRuns(t *testing.T) {
+	target := startTarget(t) // no reflection registered
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", writeConfig(t, target.addr, checkMethod, plaintext))
+	if res.err != nil {
+		t.Fatalf("run: %v\nstderr:\n%s", res.err, res.stderr)
+	}
+
+	sent, _ := reportRow(t, res.stdout, checkMethod)
+	if sent == 0 {
+		t.Fatal("nothing was sent against a target without reflection")
+	}
+	if !strings.Contains(res.stderr, "not checked before the run") {
+		t.Errorf("stderr does not say the method could not be checked:\n%s", res.stderr)
+	}
+	if !strings.Contains(res.stderr, checkMethod) {
+		t.Errorf("the warning does not name the method:\n%s", res.stderr)
+	}
+}
