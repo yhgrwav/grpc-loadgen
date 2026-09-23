@@ -15,6 +15,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,15 +30,17 @@ import (
 // A report whose every table row and column carries a value no other cell
 // repeats, so a cell found on the screen is that cell and not a neighbour.
 // It is also the ordinary numbers the 64-column boundary is set on: counts of
-// 1000, 150, 100 and 50, a rate of 97, latencies of 11ms to 34ms. None is
+// 1000, 400, 150, 100, 50 and 7, rates of 97 and 40, latencies of 8ms to
+// 41ms. None is
 // wider than its column's floor, so the seven columns take their floors:
 // 5 + 6 + 6 + 4x6 plus a space each is 48, and a 64-column terminal leaves
 // 56 inside the frame: 8 for the name.
 func tableReport() engine.Report {
 	return engine.Report{
-		// 1000 sent over 12s is 83/s; the rate over the sending window is 97.
-		// A screen dividing by the run's length shows the first.
-		Duration: 12 * time.Second, Sent: 1000, Failed: 150,
+		// The totals are the sum of the methods, as the engine makes them.
+		// 1400 sent over 12s is 117/s, a rate no row has: a screen dividing
+		// by the run's length shows it.
+		Duration: 12 * time.Second, Sent: 1400, Failed: 157,
 		Methods: []engine.MethodReport{{
 			Method: "pkg.Svc/One", Sent: 1000, Failed: 150, RPS: 97,
 			P50: exact(11), P90: exact(12),
@@ -47,6 +51,9 @@ func tableReport() engine.Report {
 			Rejected: engine.RefusalLatency{Count: 50,
 				P50: exact(31), P90: exact(32),
 				P95: exact(33), P99: exact(34)},
+		}, {
+			Method: "pkg.Svc/Two", Sent: 400, Failed: 7, RPS: 40,
+			P50: exact(8), P90: exact(19), P95: exact(26), P99: exact(41),
 		}},
 	}
 }
@@ -83,8 +90,8 @@ func TestFinalScreenTableCarriesEveryRowAndNumberOfTheTextReport(t *testing.T) {
 	var text strings.Builder
 	PrintReport(&text, "localhost:50051", RunReport{Report: report})
 	rows := tableRows(text.String())
-	if len(rows) != 3 {
-		t.Fatalf("the text report's table has %d rows, want 3: the test no longer compares:\n%s",
+	if len(rows) != 4 {
+		t.Fatalf("the text report's table has %d rows, want 4: the test no longer compares:\n%s",
 			len(rows), text.String())
 	}
 
@@ -94,16 +101,16 @@ func TestFinalScreenTableCarriesEveryRowAndNumberOfTheTextReport(t *testing.T) {
 	screen := strings.Split(m.finalReport(contentWidth(120)), "\n")
 
 	// The stdout report has no run-wide rate, so the screen shows none: a rate
-	// over the run's length (83 here) would be a second, wrong sent/s.
+	// over the run's length (117 here) would be a second, wrong sent/s.
 	for _, line := range screen {
-		if f := strings.Fields(line); len(f) > 0 && strings.Contains(line, "83") {
+		if f := strings.Fields(line); len(f) > 0 && strings.Contains(line, "117") {
 			t.Errorf("the screen shows a rate the text report does not have: %q", line)
 		}
 	}
 
 	for _, row := range rows {
 		label := row[0]
-		if label == "pkg.Svc/One" {
+		if strings.HasPrefix(label, "pkg.Svc/") {
 			label = shortMethod(label)
 		}
 
@@ -328,6 +335,169 @@ func TestFinalScreenNeverOutgrowsTheTerminal(t *testing.T) {
 				if lines := strings.Count(m.View(), "\n") + 1; lines > height {
 					t.Errorf("%s %dx%d: the view is %d lines", lang, width, height, lines)
 				}
+			}
+		}
+	}
+}
+
+// Ground: contract — one table, two renderings: the screen names its columns
+// and totals with the words the text report uses, and its totals are the sum
+// of its method rows. A total taken from one method would pass a check of the
+// rows alone.
+func TestFinalScreenUsesTheTextReportsWordsAndItsTotalsAddUp(t *testing.T) {
+	report := tableReport()
+
+	var text strings.Builder
+	PrintReport(&text, "localhost:50051", RunReport{Report: report})
+	var textHeader []string
+	for line := range strings.Lines(text.String()) {
+		if strings.HasPrefix(line, "method ") {
+			textHeader = strings.Fields(line)
+		}
+	}
+
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.done, m.report = true, report
+	screen := m.finalReport(contentWidth(120))
+
+	var header []string
+	sent, failed := 0, 0
+	for line := range strings.Lines(screen) {
+		f := strings.Fields(line)
+		switch {
+		case len(f) > 0 && f[0] == "method":
+			header = f
+		case len(f) == 8 && (f[0] == "One" || f[0] == "Two"):
+			sent += atoi(t, f[1])
+			failed += atoi(t, f[2])
+		}
+	}
+	if strings.Join(header, " ") != strings.Join(textHeader, " ") {
+		t.Errorf("screen heading %v, text heading %v", header, textHeader)
+	}
+	if sent != 1400 || failed != 157 {
+		t.Errorf("method rows add up to sent %d, failed %d; want 1400 and 157", sent, failed)
+	}
+	for _, want := range []string{fmt.Sprintf("sent %d ", sent), fmt.Sprintf("failed %d ", failed)} {
+		if !strings.Contains(screen+" ", want) {
+			t.Errorf("the screen's totals lack %q: they are not the sum of its rows:\n%s", want, screen)
+		}
+	}
+}
+
+func atoi(t *testing.T, s string) int {
+	t.Helper()
+
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatalf("%q is not a count: %v", s, err)
+	}
+
+	return n
+}
+
+// Ground: contract — the final screen switches nothing between tabs, so it
+// does not offer to; the way out stays.
+func TestFinalScreenOffersNoTabs(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.done, m.report = true, tableReport()
+
+	footer := m.footer()
+	if strings.Contains(footer, m.text.HintTabs()) {
+		t.Errorf("the final screen offers tabs: %q", footer)
+	}
+	if !strings.Contains(footer, m.text.PressToExit()) {
+		t.Errorf("the final screen does not say how to leave: %q", footer)
+	}
+}
+
+// verdictCases are the run's verdicts, each with its short form and a phrase
+// only its full form has.
+func verdictCases() []struct {
+	name, short, fullOnly string
+	setup                 func(*model)
+} {
+	rejectAll := func(m *model, n int) {
+		for i := range n {
+			m.report.Methods = append(m.report.Methods, engine.MethodReport{
+				Method: "pkg.Svc/Bad" + strconv.Itoa(i), Sent: 20, Failed: 20,
+				Rejected: engine.RefusalLatency{Count: 20, P50: exact(1), P90: exact(1), P95: exact(1), P99: exact(1)},
+			})
+		}
+		m.report.RequestRejected = true
+	}
+
+	return []struct {
+		name, short, fullOnly string
+		setup                 func(*model)
+	}{
+		{"cap", "invalid run: in-flight cap hit at 1.0s", "the allowance", func(m *model) {
+			m.report.CapHit = &engine.CapHit{At: time.Second, Unsent: 1, OverDeadline: 3}
+		}},
+		{"one method rejected", "invalid run: every call of pkg.Svc/Bad0 was rejected", "fix the request", func(m *model) {
+			rejectAll(m, 1)
+		}},
+		{"three methods rejected", "invalid run: every call of 3 methods was rejected", "fix the request", func(m *model) {
+			rejectAll(m, 3)
+		}},
+		{"incomplete", "incomplete: ran 12.0s of the planned 20.0s", "do not compare", func(m *model) {
+			m.report.Incomplete, m.report.Planned = true, 20*time.Second
+		}},
+		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
+			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
+		}},
+	}
+}
+
+// Ground: boundary — when the full verdict leaves no room for one table row,
+// the screen shows its short form and at least one row with numbers; the full
+// text is in the report printed after exit.
+func TestFinalScreenShortensTheVerdictToKeepARow(t *testing.T) {
+	for _, tc := range verdictCases() {
+		for _, width := range []int{60, 64} {
+			t.Run(tc.name+"/"+strconv.Itoa(width), func(t *testing.T) {
+				m := testModel(t)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: 16})
+				m.done, m.report = true, tableReport()
+				tc.setup(m)
+
+				view := m.View()
+				if lines := strings.Count(view, "\n") + 1; lines > 16 {
+					t.Errorf("the view is %d lines", lines)
+				}
+				flat := strings.Join(strings.Fields(view), " ")
+				if !strings.Contains(flat, tc.short) || strings.Contains(flat, tc.fullOnly) {
+					t.Errorf("want the short verdict %q and not the full one:\n%s", tc.short, view)
+				}
+				if !strings.Contains(flat, "11ms 12ms 13ms 14ms") {
+					t.Errorf("no table row with its numbers:\n%s", view)
+				}
+				if !strings.Contains(flat, "the full report is printed after exit") {
+					t.Errorf("the screen does not say where the rest is:\n%s", view)
+				}
+			})
+		}
+	}
+}
+
+// Ground: contract — a short verdict is ASCII and takes at most two lines at
+// the narrowest width, or it would not save the room it is for.
+func TestShortVerdictsAreASCIIAndTwoLinesAt60(t *testing.T) {
+	for _, tc := range verdictCases() {
+		m := testModel(t)
+		m.done, m.report = true, tableReport()
+		tc.setup(m)
+		for _, v := range m.shortVerdicts(contentWidth(minWidth)) {
+			for _, r := range v {
+				if r > 127 {
+					t.Errorf("%s: %q is not ASCII", tc.name, v)
+					break
+				}
+			}
+			if n := len(strings.Split(wrapNote(v, contentWidth(minWidth)), "\n")); n > 2 {
+				t.Errorf("%s: %q takes %d lines at 60 columns", tc.name, v, n)
 			}
 		}
 	}

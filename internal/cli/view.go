@@ -1009,3 +1009,5 @@ func fitKeyHints(s styles, width int, hints ...hint) string {
 		}
 	}
 }
+
+func (m *model) shortVerdicts(width int) []string { return nil }
