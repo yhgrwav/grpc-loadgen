@@ -88,7 +88,7 @@ func countCell(n int) string {
 // It returns the heading's lines and, per method, the lines of its rows.
 func (m *model) finalTable(width int) (head []string, groups [][]string) {
 	rows := screenRows(m.report)
-	header := [tableColumns]string{m.text.SentColumn(), m.text.Errors(), "sent/s", "p50", "p90", "p95", "p99"}
+	header := [tableColumns]string{m.text.SentColumn(), m.text.Failed(), "sent/s", "p50", "p90", "p95", "p99"}
 
 	var widths [tableColumns]int
 	for i := range widths {

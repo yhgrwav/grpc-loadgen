@@ -488,7 +488,7 @@ func (m *model) footerHints() string {
 	width := contentWidth(m.viewWidth())
 
 	if m.done {
-		return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.PressToExit(), 0})
+		return fitKeyHints(m.styles, width, hint{m.text.PressToExit(), 0})
 	}
 
 	if m.notice != "" {
@@ -660,7 +660,7 @@ func (m *model) finalParts(width int) finalParts {
 			m.styles.title.Render(title),
 			fitStatLine(m.styles, width,
 				countField(m.text.Sent(), report.Sent, 1),
-				statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
+				countField(m.text.Failed(), report.Failed, 0),
 				statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
 			),
 		},
@@ -687,7 +687,10 @@ func (m *model) finalParts(width int) finalParts {
 		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)), "\n"))
 	}
 	if m.err != nil && !m.stopper.Stopping() {
-		p.notes = append(p.notes, strings.Split(m.styles.bad.Render(wrapNote(m.err.Error(), width)), "\n"))
+		p.verdicts = append(p.verdicts, strings.Split(m.styles.bad.Render(wrapNote(m.err.Error(), width)), "\n"))
+	}
+	for _, v := range m.shortVerdicts(width) {
+		p.short = append(p.short, strings.Split(m.styles.note.Render(wrapNote(v, width)), "\n"))
 	}
 
 	p.head, p.groups = m.finalTable(width)
@@ -700,9 +703,12 @@ func (m *model) finalParts(width int) finalParts {
 type finalParts struct {
 	top      []string
 	verdicts [][]string
-	head     []string
-	groups   [][]string
-	notes    [][]string
+	// short is the verdicts in one phrase each, for a terminal too short for
+	// them in full.
+	short  [][]string
+	head   []string
+	groups [][]string
+	notes  [][]string
 }
 
 func isVerdict(note string) bool {
@@ -740,14 +746,6 @@ func (m *model) finalReport(width int) string {
 func (m *model) finalBody(width, height int) string {
 	p := m.finalParts(width)
 
-	// The header's first line: the progress bar under it is over.
-	lines := strings.Split(m.header(width), "\n")[:1]
-	lines = append(lines, p.top...)
-	for _, v := range p.verdicts {
-		lines = append(lines, v...)
-	}
-	lines = append(lines, p.head...)
-
 	total := 0
 	for _, g := range p.groups {
 		total += len(g)
@@ -762,10 +760,30 @@ func (m *model) finalBody(width, height int) string {
 	moreLines := func(n int) []string {
 		return strings.Split(m.styles.muted.Render(wrapNote(m.text.MoreLines(n), width)), "\n")
 	}
-	room := height - len(lines) - 1 - len(moreLines(total))
 	minimum := rowLines
 	if len(p.groups) > 1 {
 		minimum++ // the "N more methods" line
+	}
+
+	var lines []string
+	room := 0
+	layout := func(verdicts [][]string) {
+		// The header's first line: the progress bar under it is over.
+		lines = strings.Split(m.header(width), "\n")[:1]
+		lines = append(lines, p.top...)
+		for _, v := range verdicts {
+			lines = append(lines, v...)
+		}
+		lines = append(lines, p.head...)
+		room = height - len(lines) - 1 - len(moreLines(total+notesLen(p.verdicts)))
+	}
+
+	// A verdict in full that leaves no room for a row gives way to its short
+	// form; the full one is in the report printed after exit.
+	layout(p.verdicts)
+	if room < minimum {
+		layout(p.short)
+		total += notesLen(p.verdicts)
 	}
 	if len(p.groups) == 0 || room < minimum {
 		return wrapNote(m.text.TooShort(), width)
@@ -1009,5 +1027,3 @@ func fitKeyHints(s styles, width int, hints ...hint) string {
 		}
 	}
 }
-
-func (m *model) shortVerdicts(width int) []string { return nil }

@@ -453,3 +453,8 @@ func (t Text) TooShort() string {
 		LangZH: "终端太小，完整报告将在退出后打印",
 	})
 }
+
+// Failed is the count of failed calls, the text report's "failed".
+func (t Text) Failed() string {
+	return t.get(phrase{LangRU: "ошибки", LangEN: "failed", LangDE: "Fehler", LangZH: "失败"})
+}

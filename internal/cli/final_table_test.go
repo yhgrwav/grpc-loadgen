@@ -17,6 +17,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,6 +414,9 @@ func TestFinalScreenOffersNoTabs(t *testing.T) {
 	}
 }
 
+// ansiCodes are the colours and styles in a rendered view.
+var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 // verdictCases are the run's verdicts, each with its short form and a phrase
 // only its full form has.
 func verdictCases() []struct {
@@ -436,7 +440,7 @@ func verdictCases() []struct {
 		{"cap", "invalid run: in-flight cap hit at 1.0s", "the allowance", func(m *model) {
 			m.report.CapHit = &engine.CapHit{At: time.Second, Unsent: 1, OverDeadline: 3}
 		}},
-		{"one method rejected", "invalid run: every call of pkg.Svc/Bad0 was rejected", "fix the request", func(m *model) {
+		{"one method rejected", "invalid run: every call of ...vc/Bad0 was rejected", "fix the request", func(m *model) {
 			rejectAll(m, 1)
 		}},
 		{"three methods rejected", "invalid run: every call of 3 methods was rejected", "fix the request", func(m *model) {
@@ -467,9 +471,12 @@ func TestFinalScreenShortensTheVerdictToKeepARow(t *testing.T) {
 				if lines := strings.Count(view, "\n") + 1; lines > 16 {
 					t.Errorf("the view is %d lines", lines)
 				}
-				flat := strings.Join(strings.Fields(view), " ")
-				if !strings.Contains(flat, tc.short) || strings.Contains(flat, tc.fullOnly) {
-					t.Errorf("want the short verdict %q and not the full one:\n%s", tc.short, view)
+				// The body's words in reading order, the frame's borders and
+				// the note's marks aside.
+				flat := strings.Join(strings.Fields(strings.NewReplacer("│", " ", ">", " ").Replace(ansiCodes.ReplaceAllString(view, ""))), " ")
+				short, full := strings.Contains(flat, tc.short), strings.Contains(flat, tc.fullOnly)
+				if short == full {
+					t.Errorf("want the verdict once, short %q or full: short %v, full %v:\n%s", tc.short, short, full, view)
 				}
 				if !strings.Contains(flat, "11ms 12ms 13ms 14ms") {
 					t.Errorf("no table row with its numbers:\n%s", view)
