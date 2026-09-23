@@ -28,7 +28,8 @@ type callKey struct{}
 // read.
 type callTimes struct {
 	// begunAt is when grpc-go began the call; pickedAt, when it got a
-	// connection after waiting for one, zero if it did not wait.
+	// connection after waiting for one or began a transparent retry, zero
+	// otherwise.
 	begunAt  time.Time
 	pickedAt time.Time
 	// streamFull says every stream the target allows was open at some moment
@@ -95,7 +96,17 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 
 	switch v := rpc.(type) {
 	case *stats.Begin:
-		call.times.begunAt = v.BeginTime
+		if !v.IsTransparentRetryAttempt {
+			call.times.begunAt = v.BeginTime
+
+			break
+		}
+		// grpc-go retries a stream the target never read, so nothing of the
+		// earlier attempt went out. The call keeps waiting since its start;
+		// the wait for a stream starts again with this attempt.
+		call.times.pickedAt = v.BeginTime
+		call.times.headerAt = time.Time{}
+		call.times.sentAt = time.Time{}
 	case *stats.DelayedPickComplete:
 		// The wait for a stream starts once there is a connection.
 		call.times.pickedAt = time.Now()
@@ -118,6 +129,7 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	case *stats.InTrailer:
 		call.times.answered = true
 	case *stats.End:
+		// headerAt is this attempt's: a retry clears the one before.
 		if h.streams != nil && !call.times.headerAt.IsZero() {
 			h.streams.closed(time.Now())
 		}
