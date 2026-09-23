@@ -65,3 +65,6 @@ docs/strategy.md
 
 # Night shift notes live in the internal repo
 /night/
+
+# ghz comparison: binaries and raw outputs
+/test/compare-ghz/out/
