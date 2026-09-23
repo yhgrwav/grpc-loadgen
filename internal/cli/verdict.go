@@ -17,6 +17,9 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // shortVerdicts are the final screen's verdicts in one phrase each, in the
@@ -35,10 +38,12 @@ func (m *model) shortVerdicts(width int) []string {
 				outright = append(outright, displayMethod(r.Method))
 			}
 		}
-		if len(outright) == 1 {
+		if len(outright) == 1 && isASCII(outright[0]) {
 			const head, tail = "invalid run: every call of ", " was rejected"
 			// One line: at 60x16 a second one would take the table's only row.
-			out = append(out, head+truncateLeft(ascii(outright[0]), room-len(head)-len(tail))+tail)
+			out = append(out, head+truncateLeft(outright[0], room-len(head)-len(tail))+tail)
+		} else if len(outright) == 1 {
+			out = append(out, "invalid run: every call of 1 method was rejected")
 		} else {
 			out = append(out, fmt.Sprintf("invalid run: every call of %d methods was rejected", len(outright)))
 		}
@@ -51,21 +56,49 @@ func (m *model) shortVerdicts(width int) []string {
 			formatDuration(report.Duration), formatDuration(report.Planned)))
 	}
 	if m.err != nil && !m.stopper.Stopping() {
-		// The reason in one phrase: an error reads outermost first.
-		reason, _, _ := strings.Cut(m.err.Error(), ": ")
-		out = append(out, truncate("run failed: "+ascii(reason), room))
+		out = append(out, truncate("run failed: "+failureReason(m.err, room-len("run failed: ")), room))
 	}
 
 	return out
 }
 
-// ascii replaces what a terminal may draw at another width with "?".
-func ascii(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r > 127 {
-			return '?'
+// failureReason is why a run failed, in at most room columns of ASCII: a gRPC
+// status by its code and, room allowing, its description; otherwise the
+// context LeetTest wrapped the error in. Text in another script is not cut to
+// "?" but left to the full report.
+func failureReason(err error, room int) string {
+	const elsewhere = "details in the full report after exit"
+
+	text := err.Error()
+	if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
+		reason := st.Code().String()
+		// What LeetTest put around the status: "connect to host:port".
+		if context, _, found := strings.Cut(text, "rpc error:"); found {
+			if context = strings.TrimSuffix(strings.TrimSpace(context), ":"); context != "" && isASCII(context) {
+				reason = context + ": " + reason
+			}
+		}
+		if desc := st.Message(); desc != "" && isASCII(desc) && len(reason)+2+len(desc) <= room {
+			reason += ": " + desc
 		}
 
-		return r
-	}, s)
+		return reason
+	}
+
+	reason, _, _ := strings.Cut(text, ": ")
+	if !isASCII(reason) {
+		return elsewhere
+	}
+
+	return reason
+}
+
+func isASCII(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return false
+		}
+	}
+
+	return true
 }
