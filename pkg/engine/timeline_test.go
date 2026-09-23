@@ -538,3 +538,96 @@ func TestTimeline_ConcurrentRecordingLosesNothing(t *testing.T) {
 		t.Errorf("begun %d, succeeded %d; want %d each", begun, succeeded, writers*each)
 	}
 }
+
+// Ground: boundary — the moment is finer than the timeline's second, and the
+// statement about the target rests on it: a bucket number moves the start of
+// the silence by up to a second and is read as a clock time anyway.
+func TestStats_LastAnswerIsTheScheduledMomentOfTheLastAnsweredCall(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	answeredAt := func(d time.Duration, category Category) Result {
+		at := start.Add(d)
+		return Result{
+			Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+			Outcome: Outcome{Category: category, SentAt: at, DoneAt: at.Add(time.Millisecond)},
+		}
+	}
+
+	stats.Record(answeredAt(7500*time.Millisecond, CategorySuccess))
+	stats.Record(answeredAt(8*time.Second, CategoryOverload)) // a refusal is an answer
+	stats.Record(answeredAt(8200*time.Millisecond, CategoryTimeout))
+	stats.Record(answeredAt(9*time.Second, CategoryTimeout))
+	stats.Finish(start.Add(10 * time.Second))
+
+	got := stats.Report().Methods[0].LastAnswerAt
+	if got == nil {
+		t.Fatal("no last answer recorded")
+	}
+	if *got != 8*time.Second {
+		t.Errorf("last answer at %v, want 8s: the last call the target answered", *got)
+	}
+}
+
+// Ground: contract — any status the target sent back, a refusal or a rejected
+// request included, shows it alive; a call it never answered does not.
+func TestStats_LastAnswerMovesOnlyOnAStatusFromTheTarget(t *testing.T) {
+	for _, tc := range []struct {
+		category Category
+		moves    bool
+	}{
+		{CategorySuccess, true},
+		{CategoryServerFault, true},
+		{CategoryOverload, true},
+		{CategoryClientFault, true},
+		{CategoryUnreachable, false},
+		{CategoryTimeout, false},
+		{CategoryAborted, false},
+	} {
+		t.Run(tc.category.String(), func(t *testing.T) {
+			stats := NewStats()
+			start := time.Now()
+			stats.Start(start, 0)
+
+			record := func(d time.Duration, category Category) {
+				at := start.Add(d)
+				stats.Record(Result{
+					Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+					Outcome: Outcome{Category: category, SentAt: at, DoneAt: at.Add(time.Millisecond)},
+				})
+			}
+			record(time.Second, CategorySuccess)
+			record(5*time.Second, tc.category)
+			stats.Finish(start.Add(10 * time.Second))
+
+			want := time.Second
+			if tc.moves {
+				want = 5 * time.Second
+			}
+			got := stats.Report().Methods[0].LastAnswerAt
+			if got == nil || *got != want {
+				t.Errorf("last answer at %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// Ground: boundary — a target that never answered has no such moment, and the
+// zero of a duration would read as "answered at the start".
+func TestStats_ATargetThatNeverAnsweredHasNoLastAnswer(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	at := start.Add(time.Second)
+	stats.Record(Result{
+		Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+		Outcome: Outcome{Category: CategoryTimeout, SentAt: at, DoneAt: at.Add(time.Second)},
+	})
+	stats.Finish(start.Add(3 * time.Second))
+
+	if got := stats.Report().Methods[0].LastAnswerAt; got != nil {
+		t.Errorf("last answer at %v, want none", *got)
+	}
+}

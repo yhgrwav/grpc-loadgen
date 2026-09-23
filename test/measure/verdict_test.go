@@ -590,3 +590,63 @@ func TestReport_OneRejectedMethodAmongServedOnesIsStillAVerdict(t *testing.T) {
 		t.Errorf("methods rejected outright = %v, want the typo and the streaming one", rejected)
 	}
 }
+
+// The moment the answers stopped, measured end to end. The freeze falls in the
+// middle of a second on purpose: a report naming the second instead of the
+// moment would be off by half a second, which this tolerance excludes.
+func TestReport_TheLastAnswerIsWhereTheSilenceBegins(t *testing.T) {
+	const freezeAt = 1500 * time.Millisecond
+
+	// Frozen for a minute from 1.5s after its first call: every later call
+	// waits out its own timeout, so the target is silent from then on.
+	target := stand.Start(stand.Frozen(freezeAt, time.Minute, time.Millisecond))
+	t.Cleanup(target.Stop)
+
+	sender := grpcsender.New(grpcsender.Options{
+		Target:      target.Target(),
+		DialOptions: []grpc.DialOption{target.DialOption()},
+	})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect to the stand: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	eng, err := engine.New(engine.Options{
+		Calls:       []engine.Call{load(target.Method(), silentRPS, silentRun, silentTimeout)},
+		Sender:      sender,
+		MaxInFlight: 1000,
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+
+	startedAt := time.Now()
+	if err := eng.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	report := eng.Report()
+	arrivals := target.Arrivals()
+	if len(arrivals) == 0 {
+		t.Fatal("the stand saw no calls")
+	}
+
+	m := report.Methods[0]
+	if m.LastAnswerAt == nil {
+		t.Fatal("no last answer, yet the target answered before the freeze")
+	}
+
+	// The stand counts from its own first arrival, which lands after the run
+	// starts; that offset is measured here instead of being covered by a wider
+	// tolerance. The last answered call is the last one scheduled before the
+	// freeze, so it sits within one scheduling interval (20ms at 50 rps) of it.
+	offset := arrivals[0].Sub(startedAt)
+	want := offset + freezeAt
+	if diff := (*m.LastAnswerAt - want).Abs(); diff > 40*time.Millisecond {
+		t.Errorf("last answer at %v, want %v (freeze %v plus the stand's offset %v), off by %v",
+			*m.LastAnswerAt, want, freezeAt, offset, diff)
+	}
+}

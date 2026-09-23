@@ -97,6 +97,10 @@ type MethodReport struct {
 	// from which to the end of the schedule no call got an answer: neither a
 	// success nor a status from the target. Nil if there is none.
 	SilentFrom *int
+	// LastAnswerAt is when the last call the target answered was scheduled,
+	// measured from the start of the run: where the silence begins. Nil when
+	// the target answered nothing at all.
+	LastAnswerAt *time.Duration
 	// RPSLow and RPSHigh are the planned rates over the stages the statement
 	// covers: from SilentFrom on if it is set, the whole plan otherwise.
 	RPSLow, RPSHigh int
@@ -192,6 +196,9 @@ type methodStats struct {
 	refusal    *metrics.Latencies
 	rejected   *metrics.Latencies
 	timeline   timeline
+	// lastAnswer is the latest scheduled moment among the calls the target
+	// answered, as an offset from the start of the run; -1 until one is.
+	lastAnswer time.Duration
 }
 
 func NewStats() *Stats {
@@ -216,10 +223,11 @@ func (s *Stats) Reserve(span time.Duration, methods ...string) {
 
 func (s *Stats) newMethod() *methodStats {
 	return &methodStats{
-		latency:  metrics.NewLatencies(),
-		refusal:  metrics.NewUncensoredLatencies(),
-		rejected: metrics.NewUncensoredLatencies(),
-		timeline: newTimeline(s.reserve),
+		latency:    metrics.NewLatencies(),
+		refusal:    metrics.NewUncensoredLatencies(),
+		rejected:   metrics.NewUncensoredLatencies(),
+		lastAnswer: -1,
+		timeline:   newTimeline(s.reserve),
 	}
 }
 
@@ -267,6 +275,11 @@ func (s *Stats) Record(r Result) {
 	// The timeline keeps warmup: a target failing on the way up is exactly
 	// what it should show, and the report says which seconds were warmup.
 	method.timeline.record(s.startedAt, r)
+
+	switch r.Category {
+	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault:
+		method.lastAnswer = max(method.lastAnswer, r.ScheduledAt.Sub(s.startedAt))
+	}
 
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
 		s.mu.Unlock()
@@ -347,6 +360,7 @@ type methodView struct {
 	failed     int
 	unanswered int
 	unknown    int
+	lastAnswer time.Duration
 	dist       *metrics.Snapshot
 	refusal    *metrics.Snapshot
 	rejected   *metrics.Snapshot
@@ -369,7 +383,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
 			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
-			unknown: method.unknown,
+			unknown: method.unknown, lastAnswer: method.lastAnswer,
 		})
 		sources = append(sources, method)
 	}
@@ -508,6 +522,10 @@ func (s *Stats) Report() Report {
 		if from, ok := method.timeline.silentFrom(); ok {
 			entry.SilentFrom = &from
 		}
+		if method.lastAnswer >= 0 {
+			at := method.lastAnswer
+			entry.LastAnswerAt = &at
+		}
 		timelines[name] = entry
 	}
 	startLag := s.startLag.Snapshot()
@@ -554,6 +572,7 @@ func (s *Stats) Report() Report {
 			TimedOut:        timelines[v.name].TimedOut,
 			UnsentTimedOut:  timelines[v.name].UnsentTimedOut,
 			SilentFrom:      timelines[v.name].SilentFrom,
+			LastAnswerAt:    timelines[v.name].LastAnswerAt,
 		}
 		if measured > 0 {
 			entry.RPS = float64(v.sent) / measured.Seconds()

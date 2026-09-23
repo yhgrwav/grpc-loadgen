@@ -189,8 +189,12 @@ func printNoAnswer(w io.Writer, methods []engine.MethodReport) {
 		if m.TimedOut > 0 {
 			fmt.Fprintf(w, "\n%s: at %s rps, %d of %d calls (%.1f%%) got no answer within %s",
 				displayMethod(m.Method), rate, m.TimedOut, m.Sent, share(m.TimedOut, m.Sent), formatDuration(m.Timeout))
-			if m.SilentFrom != nil {
-				fmt.Fprintf(w, ",\nand from second %d on none did (seconds by schedule, warmup counted)", *m.SilentFrom)
+			switch {
+			case m.SilentFrom != nil && m.LastAnswerAt != nil:
+				fmt.Fprintf(w, ",\nand nothing after the call scheduled at %s of the run got one",
+					formatDuration(*m.LastAnswerAt))
+			case m.SilentFrom != nil:
+				fmt.Fprint(w, ",\nand the target answered nothing at all")
 			}
 			fmt.Fprint(w, ".\n")
 		}
