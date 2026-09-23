@@ -24,6 +24,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
@@ -452,7 +454,7 @@ func verdictCases() []struct {
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
 			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
-		{"failed, not ASCII", "run failed: ?????????? ????????", "rpc error", func(m *model) {
+		{"failed, not ASCII", "run failed: details in the full report after exit", "rpc error", func(m *model) {
 			m.err = errors.New("соединение потеряно: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
 	}
@@ -551,5 +553,56 @@ func checkCutCount(t *testing.T, m *model, width int, view string) {
 	}
 	if cut != full-shown {
 		t.Errorf("the screen says %d more lines; the full screen has %d and %d are shown:\n%s", cut, full, shown, view)
+	}
+}
+
+// Ground: contract — the short form of a failed run names its reason: a gRPC
+// status by its code, and the description when it is ASCII; otherwise the
+// context LeetTest wrapped around the error. A reason in another script is
+// not mangled into "?": the screen points to the full report instead.
+func TestShortVerdictNamesTheReasonOfAFailedRun(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		want, not []string
+	}{
+		{"bare gRPC status", status.Error(codes.Unavailable, "connection refused"),
+			[]string{"run failed: Unavailable", "connection refused"}, []string{"rpc error"}},
+		{"gRPC status in another script", status.Error(codes.Unavailable, "соединение отклонено"),
+			[]string{"run failed: Unavailable"}, []string{"?", "rpc error"}},
+		{"wrapped connection error", fmt.Errorf("connect to localhost:50051: %w", errors.New("dial tcp: connection refused")),
+			[]string{"localhost:50051"}, nil},
+		{"plain", errors.New("connection lost: rpc error: code = Unavailable desc = x"),
+			[]string{"run failed: connection lost"}, nil},
+		{"another script", errors.New("соединение потеряно: сброс"),
+			[]string{"run failed: details in the full report after exit"}, []string{"?"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testModel(t)
+			m.done, m.report, m.err = true, tableReport(), tc.err
+			short := strings.Join(m.shortVerdicts(contentWidth(minWidth)), "\n")
+			for _, w := range tc.want {
+				if !strings.Contains(short, w) {
+					t.Errorf("%q lacks %q", short, w)
+				}
+			}
+			for _, n := range tc.not {
+				if strings.Contains(short, n) {
+					t.Errorf("%q has %q", short, n)
+				}
+			}
+		})
+	}
+}
+
+// Ground: contract — the full verdict on the screen keeps the error's text as
+// it came: no character of it is replaced.
+func TestFullVerdictKeepsTheErrorsText(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.done, m.report, m.err = true, tableReport(), errors.New("соединение потеряно: сброс")
+
+	if screen := m.finalReport(contentWidth(120)); !strings.Contains(screen, "соединение потеряно: сброс") {
+		t.Errorf("the full verdict does not carry the error as it came:\n%s", screen)
 	}
 }
