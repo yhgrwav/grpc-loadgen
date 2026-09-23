@@ -538,7 +538,7 @@ func checkCutCount(t *testing.T, m *model, width int, view string) {
 		switch {
 		case strings.HasPrefix(line, "Run finished"):
 			counting = true
-		case strings.Contains(line, "more methods"):
+		case strings.Contains(line, "more method"):
 			counting = false
 		case strings.HasPrefix(line, "> ") && strings.Contains(line, "more lines"):
 			counting = false

@@ -101,8 +101,11 @@ func (m *model) fullBody(inner int) string {
 
 	b.WriteString(m.header(inner))
 	b.WriteString("\n\n")
-	b.WriteString(m.tabBar(inner))
-	b.WriteString("\n\n")
+	// The final screen switches nothing, so it shows no tabs.
+	if !m.done {
+		b.WriteString(m.tabBar(inner))
+		b.WriteString("\n\n")
+	}
 
 	switch {
 	case m.done:

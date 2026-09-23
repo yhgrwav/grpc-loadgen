@@ -426,6 +426,10 @@ func (t Text) SentColumn() string {
 
 // MoreMethods counts the methods a short terminal left out of the table.
 func (t Text) MoreMethods(n int) string {
+	if n == 1 && t.lang == LangEN {
+		return "1 more method"
+	}
+
 	return t.get(phrase{
 		LangRU: fmt.Sprintf("ещё методов: %d", n),
 		LangEN: fmt.Sprintf("%d more methods", n),
