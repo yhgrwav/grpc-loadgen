@@ -416,3 +416,9 @@ func (t Text) TooNarrow(minimum int) string {
 func (t Text) NotSent() string {
 	return t.get(phrase{LangRU: "не отправлено", LangEN: "not sent", LangDE: "nicht gesendet", LangZH: "未发送"})
 }
+
+// SentColumn heads the final table's sent column: "отправлено" is too wide
+// for a column of counts.
+func (t Text) SentColumn() string {
+	return t.get(phrase{LangRU: "отпр.", LangEN: "sent", LangDE: "gesendet", LangZH: "已发送"})
+}

@@ -373,7 +373,7 @@ func TestFinalTableColumnsLineUp(t *testing.T) {
 				m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
 				m.done, m.report = true, widestReport()
 
-				var widths []int
+				var lines []string
 				inTable := false
 				for line := range strings.Lines(m.finalReport(contentWidth(width))) {
 					line = strings.TrimRight(line, "\n")
@@ -384,16 +384,30 @@ func TestFinalTableColumnsLineUp(t *testing.T) {
 						break
 					}
 					if inTable {
-						widths = append(widths, lipgloss.Width(line))
+						lines = append(lines, line)
 					}
 				}
-
-				if len(widths) < 2 {
+				if len(lines) < 2 {
 					t.Fatalf("table not found")
 				}
-				for i, w := range widths {
-					if w != widths[0] {
-						t.Errorf("row %d is %d wide, the header %d: columns do not line up", i, w, widths[0])
+
+				// One line per row, or a name line followed by the lines of
+				// numbers; each line of numbers lines up with its heading.
+				period := 1
+				if strings.TrimSpace(lines[0]) == m.text.ColumnMethod() {
+					for period < len(lines) && strings.Contains(lines[period], "p99") ||
+						period < len(lines) && strings.Contains(lines[period], "sent/s") {
+						period++
+					}
+				}
+				for i, line := range lines {
+					kind := i % period
+					if period > 1 && kind == 0 {
+						continue
+					}
+					if w, want := lipgloss.Width(line), lipgloss.Width(lines[kind]); w != want {
+						t.Errorf("line %d is %d wide, its heading %d: columns do not line up\n%s",
+							i, w, want, strings.Join(lines, "\n"))
 					}
 				}
 			})

@@ -641,67 +641,11 @@ func (m *model) finalReport(width int) string {
 	b.WriteString(fitStatLine(m.styles, width,
 		countField(m.text.Sent(), report.Sent, 1),
 		statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
-		statField{label: "rps", value: fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1)), drop: 2},
 		statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
 	))
 	b.WriteString("\n" + m.notSentLine(width, report.NotSent) + "\n")
 
-	// Sent, errors and p99 always fit; p50 and p90 go first when the terminal
-	// is narrow, and the method name takes whatever is left. Columns are sized
-	// by width on screen and never narrower than their heading: "отправлено"
-	// is ten columns, and a Chinese heading takes two per character.
-	const (
-		pColumn = 9
-		minName = 12
-	)
-
-	sentColumn := max(9, lipgloss.Width(m.text.Sent()))
-	errColumn := max(8, lipgloss.Width(m.text.Errors()))
-	coreColumns := 1 + sentColumn + 1 + errColumn + 1 + pColumn
-	midColumns := 1 + pColumn + 1 + pColumn
-
-	wide := width-coreColumns-midColumns >= minName
-
-	nameWidth := width - coreColumns
-	if wide {
-		nameWidth -= midColumns
-	}
-	nameWidth = min(max(nameWidth, minName), 40)
-
-	header := padRight(m.text.ColumnMethod(), nameWidth) + " " +
-		padLeft(m.text.Sent(), sentColumn) + " " + padLeft(m.text.Errors(), errColumn)
-	if wide {
-		header += " " + padLeft("p50", pColumn) + " " + padLeft("p90", pColumn)
-	}
-	header += " " + padLeft("p99", pColumn)
-
-	b.WriteString(m.styles.label.Render(header))
-	b.WriteString("\n")
-
-	for i := range report.Methods {
-		method := &report.Methods[i]
-		name := truncate(shortMethod(method.Method), nameWidth)
-
-		sent := formatCount(method.Sent)
-		if lipgloss.Width(sent) > sentColumn && method.Sent >= 0 {
-			sent = compactCount(uint64(method.Sent))
-		}
-
-		errors := m.styles.value
-		if method.Failed > 0 {
-			errors = m.styles.bad
-		}
-
-		b.WriteString(m.styles.value.Render(padRight(name, nameWidth)))
-		b.WriteString(m.styles.value.Render(" " + padLeft(sent, sentColumn)))
-		b.WriteString(errors.Render(" " + padLeft(m.errorShare(method.Sent, method.Failed), errColumn)))
-		if wide {
-			b.WriteString(m.styles.muted.Render(" " + padLeft(formatQuantile(method.P50), pColumn) +
-				" " + padLeft(formatQuantile(method.P90), pColumn)))
-		}
-		b.WriteString(m.styles.value.Render(" " + padLeft(formatQuantile(method.P99), pColumn)))
-		b.WriteString("\n")
-	}
+	b.WriteString(m.finalTable(width))
 
 	// The same words the text report prints: what the target did, what the
 	// generator did, and the verdicts. Two renderings of one report must not
