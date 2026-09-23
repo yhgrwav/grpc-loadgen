@@ -38,13 +38,14 @@ func (m *model) shortVerdicts(width int) []string {
 				outright = append(outright, displayMethod(r.Method))
 			}
 		}
-		if len(outright) == 1 && isASCII(outright[0]) {
+		switch {
+		case len(outright) == 1 && isASCII(outright[0]):
 			const head, tail = "invalid run: every call of ", " was rejected"
 			// One line: at 60x16 a second one would take the table's only row.
 			out = append(out, head+truncateLeft(outright[0], room-len(head)-len(tail))+tail)
-		} else if len(outright) == 1 {
+		case len(outright) == 1:
 			out = append(out, "invalid run: every call of 1 method was rejected")
-		} else {
+		default:
 			out = append(out, fmt.Sprintf("invalid run: every call of %d methods was rejected", len(outright)))
 		}
 	}
