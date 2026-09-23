@@ -85,15 +85,16 @@ func countCell(n int) string {
 // the name and the seven numbers on one line; the name on a line of its own
 // and the numbers under it; or the name, the counts and the latencies on a
 // line each. Columns are as wide as their widest cell over the whole table.
-func (m *model) finalTable(width int) string {
+// It returns the heading's lines and, per method, the lines of its rows.
+func (m *model) finalTable(width int) (head []string, groups [][]string) {
 	rows := screenRows(m.report)
 	header := [tableColumns]string{m.text.SentColumn(), m.text.Errors(), "sent/s", "p50", "p90", "p95", "p99"}
 
 	var widths [tableColumns]int
 	for i := range widths {
 		widths[i] = max(columnFloors[i], lipgloss.Width(header[i]))
-		for _, row := range rows {
-			widths[i] = max(widths[i], lipgloss.Width(row.cells[i]))
+		for j := range rows {
+			widths[i] = max(widths[i], lipgloss.Width(rows[j].cells[i]))
 		}
 	}
 
@@ -102,11 +103,6 @@ func (m *model) finalTable(width int) string {
 		numbers += 1 + w
 	}
 
-	var b strings.Builder
-	line := func(style lipgloss.Style, text string) {
-		b.WriteString(style.Render(text))
-		b.WriteString("\n")
-	}
 	cells := func(c [tableColumns]string, from, to int) string {
 		parts := make([]string, 0, to-from)
 		for i := from; i < to; i++ {
@@ -115,47 +111,57 @@ func (m *model) finalTable(width int) string {
 
 		return strings.Join(parts, " ")
 	}
+	add := func(row *tableRow, lines ...string) {
+		if !row.sub || len(groups) == 0 {
+			groups = append(groups, nil)
+		}
+		groups[len(groups)-1] = append(groups[len(groups)-1], lines...)
+	}
 
 	if nameWidth := width - numbers; nameWidth >= minNameWidth {
 		longest := lipgloss.Width(m.text.ColumnMethod())
-		for _, row := range rows {
+		for i := range rows {
+			row := &rows[i]
 			longest = max(longest, lipgloss.Width(rowLabel(row, width)))
 		}
 		nameWidth = min(nameWidth, longest)
 
-		line(m.styles.label, padRight(m.text.ColumnMethod(), nameWidth)+" "+cells(header, 0, tableColumns))
-		for _, row := range rows {
-			b.WriteString(m.styles.value.Render(padRight(rowLabel(row, nameWidth), nameWidth) + " "))
-			line(m.rowStyle(row), cells(row.cells, 0, tableColumns))
+		head = append(head, m.styles.label.Render(padRight(m.text.ColumnMethod(), nameWidth)+" "+cells(header, 0, tableColumns)))
+		for i := range rows {
+			row := &rows[i]
+			add(row, m.styles.value.Render(padRight(rowLabel(row, nameWidth), nameWidth)+" ")+
+				m.rowStyle(row).Render(cells(row.cells, 0, tableColumns)))
 		}
 
-		return b.String()
+		return head, groups
 	}
 
 	split := numbers-1 > width
-	line(m.styles.label, m.text.ColumnMethod())
+	head = append(head, m.styles.label.Render(m.text.ColumnMethod()))
 	if split {
-		line(m.styles.label, cells(header, 0, countColumns))
-		line(m.styles.label, cells(header, countColumns, tableColumns))
+		head = append(head, m.styles.label.Render(cells(header, 0, countColumns)),
+			m.styles.label.Render(cells(header, countColumns, tableColumns)))
 	} else {
-		line(m.styles.label, cells(header, 0, tableColumns))
+		head = append(head, m.styles.label.Render(cells(header, 0, tableColumns)))
 	}
-	for _, row := range rows {
-		line(m.styles.value, rowLabel(row, width))
+	for i := range rows {
+		row := &rows[i]
 		if split {
-			line(m.rowStyle(row), cells(row.cells, 0, countColumns))
-			line(m.rowStyle(row), cells(row.cells, countColumns, tableColumns))
+			add(row, m.styles.value.Render(rowLabel(row, width)),
+				m.rowStyle(row).Render(cells(row.cells, 0, countColumns)),
+				m.rowStyle(row).Render(cells(row.cells, countColumns, tableColumns)))
 		} else {
-			line(m.rowStyle(row), cells(row.cells, 0, tableColumns))
+			add(row, m.styles.value.Render(rowLabel(row, width)),
+				m.rowStyle(row).Render(cells(row.cells, 0, tableColumns)))
 		}
 	}
 
-	return b.String()
+	return head, groups
 }
 
 // rowLabel fits a row's name into width, cutting a method from its head:
 // methods of one service differ in their tail.
-func rowLabel(row tableRow, width int) string {
+func rowLabel(row *tableRow, width int) string {
 	if row.sub && lipgloss.Width(row.label)+2 <= width {
 		return "  " + row.label
 	}
@@ -163,7 +169,7 @@ func rowLabel(row tableRow, width int) string {
 	return truncateLeft(row.label, width)
 }
 
-func (m *model) rowStyle(row tableRow) lipgloss.Style {
+func (m *model) rowStyle(row *tableRow) lipgloss.Style {
 	if row.bad {
 		return m.styles.bad
 	}

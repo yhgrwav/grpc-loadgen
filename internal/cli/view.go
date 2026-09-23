@@ -76,6 +76,23 @@ func contentWidth(width int) int {
 func (m *model) body(width int) string {
 	inner := contentWidth(width)
 
+	if m.done && m.height > 0 {
+		full := m.fullBody(inner)
+		if strings.Count(full, "\n")+1+frameHeight <= m.height {
+			return full
+		}
+
+		return m.finalBody(inner, m.height-frameHeight)
+	}
+
+	return m.fullBody(inner)
+}
+
+// frameHeight is the lines the frame takes: a border and a padding line at
+// the top and at the bottom.
+const frameHeight = 4
+
+func (m *model) fullBody(inner int) string {
 	var b strings.Builder
 
 	b.WriteString(m.header(inner))
@@ -626,7 +643,7 @@ func (m *model) paletteOptions() []string {
 	return options
 }
 
-func (m *model) finalReport(width int) string {
+func (m *model) finalParts(width int) finalParts {
 	report := m.report
 
 	title := m.text.ReportTitle()
@@ -634,39 +651,167 @@ func (m *model) finalReport(width int) string {
 		title = m.text.ReportStopped()
 	}
 
-	var b strings.Builder
-
-	b.WriteString(m.styles.title.Render(title))
-	b.WriteString("\n")
-	b.WriteString(fitStatLine(m.styles, width,
-		countField(m.text.Sent(), report.Sent, 1),
-		statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
-		statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
-	))
-	b.WriteString("\n" + m.notSentLine(width, report.NotSent) + "\n")
-
-	b.WriteString(m.finalTable(width))
+	p := finalParts{
+		top: []string{
+			m.styles.title.Render(title),
+			fitStatLine(m.styles, width,
+				countField(m.text.Sent(), report.Sent, 1),
+				statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
+				statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
+			),
+		},
+	}
+	if report.NotSent > 0 {
+		p.top = append(p.top, strings.TrimSuffix(m.notSentLine(width, report.NotSent), "\n"))
+	}
 
 	// The same words the text report prints: what the target did, what the
 	// generator did, and the verdicts. Two renderings of one report must not
-	// tell the reader different things.
+	// tell the reader different things. The verdicts stand above the table.
 	for _, note := range reportNotes(report) {
-		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render(wrapNote(note, width)))
-		b.WriteString("\n")
+		block := strings.Split(m.styles.note.Render(wrapNote(note, width)), "\n")
+		if isVerdict(note) {
+			p.verdicts = append(p.verdicts, block)
+		} else {
+			p.notes = append(p.notes, block)
+		}
 	}
-
 	if m.stopper.Stopping() {
-		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)))
+		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)), "\n"))
 	}
-
 	if m.err != nil && !m.stopper.Stopping() {
-		b.WriteString("\n")
-		b.WriteString(m.styles.bad.Render(wrapNote(m.err.Error(), width)))
+		p.notes = append(p.notes, strings.Split(m.styles.bad.Render(wrapNote(m.err.Error(), width)), "\n"))
 	}
 
-	return b.String()
+	p.head, p.groups = m.finalTable(width)
+
+	return p
+}
+
+// finalParts is the final screen in the order it gives way on a short
+// terminal: the top and the verdicts never, the notes first, then the rows.
+type finalParts struct {
+	top      []string
+	verdicts [][]string
+	head     []string
+	groups   [][]string
+	notes    [][]string
+}
+
+func isVerdict(note string) bool {
+	return strings.HasPrefix(note, "invalid run:") || strings.HasPrefix(note, "incomplete:")
+}
+
+func (m *model) finalReport(width int) string {
+	p := m.finalParts(width)
+
+	blocks := make([][]string, 0, len(p.verdicts)+len(p.notes)+2)
+	blocks = append(blocks, p.top)
+	blocks = append(blocks, p.verdicts...)
+	table := append([]string{}, p.head...)
+	for _, g := range p.groups {
+		table = append(table, g...)
+	}
+	blocks = append(blocks, table)
+	blocks = append(blocks, p.notes...)
+
+	out := make([]string, 0, 64)
+	for i, block := range blocks {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, block...)
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// finalBody is the final screen when the full body is taller than height:
+// no blank lines, tabs or progress bar, then the notes go, then rows, each cut counted.
+// Below the top, the verdicts, the heading and one method there is nothing
+// honest to show but where the report will be.
+func (m *model) finalBody(width, height int) string {
+	p := m.finalParts(width)
+
+	// The header's first line: the progress bar under it is over.
+	lines := strings.Split(m.header(width), "\n")[:1]
+	lines = append(lines, p.top...)
+	for _, v := range p.verdicts {
+		lines = append(lines, v...)
+	}
+	lines = append(lines, p.head...)
+
+	total := 0
+	for _, g := range p.groups {
+		total += len(g)
+	}
+	for _, n := range p.notes {
+		total += len(n)
+	}
+
+	// A table row takes as many lines as the heading: one, two or three.
+	rowLines := len(p.head)
+	// The footer and what was cut, sized for the most that can be cut.
+	moreLines := func(n int) []string {
+		return strings.Split(m.styles.muted.Render(wrapNote(m.text.MoreLines(n), width)), "\n")
+	}
+	room := height - len(lines) - 1 - len(moreLines(total))
+	minimum := rowLines
+	if len(p.groups) > 1 {
+		minimum++ // the "N more methods" line
+	}
+	if len(p.groups) == 0 || room < minimum {
+		return wrapNote(m.text.TooShort(), width)
+	}
+
+	shown := 0
+rows:
+	for i, g := range p.groups {
+		for j := 0; j < len(g); j += rowLines {
+			need := rowLines
+			if i < len(p.groups)-1 {
+				need++ // the "N more methods" line
+			}
+			if (i > 0 || j > 0) && need > room {
+				if left := len(p.groups) - i - 1; left > 0 || j == 0 {
+					if j == 0 {
+						left++
+					}
+					lines = append(lines, m.styles.muted.Render(truncate(m.text.MoreMethods(left), width)))
+					room--
+				}
+
+				break rows
+			}
+			lines = append(lines, g[j:j+rowLines]...)
+			room -= rowLines
+			shown += rowLines
+		}
+	}
+	for _, n := range p.notes {
+		if len(n) > room || shown < total-notesLen(p.notes) {
+			break
+		}
+		lines = append(lines, n...)
+		room -= len(n)
+		shown += len(n)
+	}
+
+	if total > shown {
+		lines = append(lines, moreLines(total-shown)...)
+	}
+	lines = append(lines, m.footer())
+
+	return strings.Join(lines, "\n")
+}
+
+func notesLen(notes [][]string) int {
+	n := 0
+	for _, note := range notes {
+		n += len(note)
+	}
+
+	return n
 }
 
 // note returns the live view's note in full and in the short form a narrow

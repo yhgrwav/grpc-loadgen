@@ -311,3 +311,24 @@ func TestFinalScreenInRussianKeepsEveryNumberAt60Columns(t *testing.T) {
 		t.Errorf("the sent column is not headed отпр.:\n%s", screen)
 	}
 }
+
+// Ground: boundary — at no height and width is the final screen taller than
+// the terminal, in any language, with the widest values and a verdict.
+func TestFinalScreenNeverOutgrowsTheTerminal(t *testing.T) {
+	report := widestReport()
+	report.CapHit = &engine.CapHit{At: time.Second, Unsent: 1, OverDeadline: 3}
+	report.Incomplete = true
+	for _, lang := range allLangs {
+		for _, width := range []int{minWidth, 64, 80, 120} {
+			for height := 7; height <= 40; height++ {
+				m := testModel(t)
+				m.text = NewText(lang)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+				m.done, m.report = true, report
+				if lines := strings.Count(m.View(), "\n") + 1; lines > height {
+					t.Errorf("%s %dx%d: the view is %d lines", lang, width, height, lines)
+				}
+			}
+		}
+	}
+}
