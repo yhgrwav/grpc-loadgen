@@ -134,3 +134,5 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 }
+
+func formatLatency(d time.Duration) string { return formatDuration(d) }
