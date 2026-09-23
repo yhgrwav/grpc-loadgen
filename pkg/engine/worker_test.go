@@ -616,3 +616,76 @@ func TestPoolKeepsCapMomentWhenCallerAbortsAfter(t *testing.T) {
 		t.Errorf("got %d results, want %d", n, limit)
 	}
 }
+
+// Ground: boundary — the number the cap verdict rests on. A call whose own
+// deadline resolved it as a timeout held its slot just the same, and counting
+// only the ones the cap cut off leaves the verdict standing on zero.
+func TestPoolCountsEverySlotHeldPastItsDeadlineAtTheCap(t *testing.T) {
+	const limit = 2
+
+	started := make(chan struct{}, limit)
+	release := make(chan struct{})
+	sender := senderFunc(func(ctx context.Context, _ Request) (Outcome, error) {
+		started <- struct{}{}
+		<-release
+
+		return Outcome{Category: CategoryTimeout}, nil
+	})
+	pool := NewWorkerPool(sender, limit)
+	out := make(chan Result, limit)
+
+	r := newPoolRun(t.Context(), limit)
+	defer r.close()
+
+	now := time.Now()
+	// One call is already past its deadline when the cap is hit, the other is
+	// not: both hold a slot, and only the first belongs in the count.
+	deadlines := []time.Time{now.Add(-time.Second), now.Add(time.Minute)}
+	for _, deadline := range deadlines {
+		if err := r.launch(pool, Request{ScheduledAt: now, Deadline: deadline}, out); err != nil {
+			t.Fatalf("launch within the cap: %v", err)
+		}
+	}
+	for range limit {
+		<-started
+	}
+
+	var capErr *InFlightCapError
+	if err := r.launch(pool, Request{ScheduledAt: time.Now()}, out); !errors.As(err, &capErr) {
+		t.Fatalf("launch past the cap: error = %v, want %T", err, capErr)
+	}
+	close(release)
+
+	if err := r.finish(capErr); !errors.Is(err, ErrInFlightCapExceeded) {
+		t.Fatalf("finish: error = %v, want %v", err, ErrInFlightCapExceeded)
+	}
+	if capErr.OverDeadline != 1 {
+		t.Errorf("over deadline = %d, want 1: one slot was held past its deadline, one was not",
+			capErr.OverDeadline)
+	}
+}
+
+// Ground: concurrency — a slot given back in the moment before the cap was
+// hit: its goroutine reads the cap moment afterwards and would count a slot
+// that was already free. The window is nanoseconds wide, so the counting is
+// driven directly with the two moments set.
+func TestPoolDoesNotCountSlotsAlreadyReleasedBeforeTheCap(t *testing.T) {
+	r := newPoolRun(t.Context(), 1)
+	defer r.close()
+
+	r.abortByCaller()
+	capAt, _ := r.aborted()
+
+	stale := Request{ScheduledAt: capAt.Add(-time.Minute), Deadline: capAt.Add(-time.Second)}
+	r.countIfHeldPastDeadline(stale, capAt.Add(-time.Millisecond))
+
+	if got := r.overDeadline.Load(); got != 0 {
+		t.Errorf("counted %d, want 0: the slot was back before the cap was hit", got)
+	}
+
+	r.countIfHeldPastDeadline(stale, capAt.Add(time.Millisecond))
+
+	if got := r.overDeadline.Load(); got != 1 {
+		t.Errorf("counted %d, want 1: that slot was still held when the cap was hit", got)
+	}
+}

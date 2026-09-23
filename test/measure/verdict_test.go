@@ -126,21 +126,16 @@ func TestReport_SlotsHeldPastTheAllowanceHitTheCap(t *testing.T) {
 	if report.Planned != 2*time.Second || report.Duration >= report.Planned {
 		t.Errorf("planned %v, ran %v; want 2s and less", report.Planned, report.Duration)
 	}
-	// CapHit.OverDeadline counts only calls the cap cut off past their own
-	// deadline, and in this run there are none: by the time the cap filled at
-	// 301ms, the calls whose deadline had passed (200ms) were already back as
-	// late timeouts, and the 199 still in flight were within theirs. So the
-	// number the report leans on to blame the generator can be zero exactly
-	// in the case the verdict is about. Whether OverDeadline should instead
-	// count every call that came back later than its deadline by more than
-	// the allowance is a decision about the report, not a test fix, so the
-	// claim is parked rather than quietly rewritten.
-	t.Skip("OverDeadline is zero in the very run it is meant to describe: needs a decision on what it counts")
-
-	if report.CapHit.OverDeadline == 0 {
-		t.Errorf("no call in flight was past its deadline, yet only such calls fill the cap\n"+
-			"start lag max %v, run %v of the planned %v, cap hit at %v, unsent %d, aborted %d, timed out %d",
-			report.StartLagMax, report.Duration, report.Planned, report.CapHit.At, report.CapHit.Unsent,
+	// Arithmetic of this run: the cap is ⌈1000×200ms⌉ + 1 + ⌈1000×100ms⌉ = 301
+	// slots, and the wrapper frees a slot only 120ms past each deadline, so
+	// nothing is released before 320ms. The cap therefore fills at 301ms, and
+	// the calls scheduled in the first 101ms are past their 200ms deadline by
+	// then. Anything far from 101 means the slots were not held the way the
+	// verdict says they were.
+	if got := report.CapHit.OverDeadline; got < 80 || got > 130 {
+		t.Errorf("over deadline = %d, want about 101: the calls that held a slot past their deadline\n"+
+			"start lag max %v, run %v of the planned %v, cap hit at %v, aborted %d, timed out %d",
+			got, report.StartLagMax, report.Duration, report.Planned, report.CapHit.At,
 			report.Aborted, report.Methods[0].TimedOut)
 	}
 }

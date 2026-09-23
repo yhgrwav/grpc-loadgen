@@ -34,6 +34,12 @@ var (
 type InFlightCapError struct {
 	Cap int
 	At  time.Time
+	// OverDeadline is the calls that were holding a slot when the cap was hit
+	// and whose deadline had already passed. It is what puts the hit on the
+	// generator, so it counts every such call, whatever it came back as: a
+	// call resolved by its own deadline held its slot exactly as long as one
+	// the cap cut off. Filled in once every call has returned.
+	OverDeadline int
 }
 
 func (e *InFlightCapError) Error() string {
@@ -134,6 +140,9 @@ type poolRun struct {
 	stopWatch func() bool
 	slots     chan struct{}
 
+	// overDeadline counts the slots held past their deadline at the cap.
+	overDeadline atomic.Int64
+
 	// abortedAt is the one moment the caller aborted the run, stored before
 	// sendCtx is cancelled, so every call that sees the cancellation finds it.
 	// Taking time.Now() in each goroutine instead would add however long the
@@ -198,9 +207,11 @@ func (r *poolRun) fail(err error) {
 }
 
 func (r *poolRun) finish(err error) error {
-	if errors.Is(err, ErrInFlightCapExceeded) {
+	if capErr := (*InFlightCapError)(nil); errors.As(err, &capErr) {
 		// Not a failure: the results of the calls cut off still reach out.
+		// Once they have, every slot that was held is accounted for.
 		r.wg.Wait()
+		capErr.OverDeadline = int(r.overDeadline.Load())
 
 		return err
 	}
@@ -269,12 +280,27 @@ func (r *poolRun) launch(p *WorkerPool, req Request, out chan<- Result) error {
 		release := func() {
 			p.inFlight.Add(-1)
 			<-r.slots
+			r.countIfHeldPastDeadline(req, time.Now())
 		}
 
 		p.send(r, req, out, release)
 	}()
 
 	return nil
+}
+
+// countIfHeldPastDeadline records a slot that was still held when the cap was
+// hit, past this call's deadline. releasedAt is when the slot went back.
+func (r *poolRun) countIfHeldPastDeadline(req Request, releasedAt time.Time) {
+	at := r.abortedAt.Load()
+	if at == nil || req.Deadline.IsZero() {
+		return
+	}
+	if releasedAt.Before(*at) || !req.Deadline.Before(*at) {
+		return
+	}
+
+	r.overDeadline.Add(1)
 }
 
 // send delivers one request and releases its in-flight slot as soon as Send
