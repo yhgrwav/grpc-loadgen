@@ -632,7 +632,7 @@ func (m *model) finalReport(width int) string {
 		countField(m.text.Sent(), report.Sent, 1),
 		statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
 		statField{label: "rps", value: fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1)), drop: 2},
-		statField{label: m.text.Latency(), value: formatDuration(report.Duration)},
+		statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
 	))
 	b.WriteString("\n" + "\n")
 
@@ -690,6 +690,15 @@ func (m *model) finalReport(width int) string {
 				" " + padLeft(formatQuantile(method.P90), pColumn)))
 		}
 		b.WriteString(m.styles.value.Render(" " + padLeft(formatQuantile(method.P99), pColumn)))
+		b.WriteString("\n")
+	}
+
+	// The same words the text report prints: what the target did, what the
+	// generator did, and the verdicts. Two renderings of one report must not
+	// tell the reader different things.
+	for _, note := range reportNotes(report) {
+		b.WriteString("\n")
+		b.WriteString(m.styles.note.Render(wrapNote(note, width)))
 		b.WriteString("\n")
 	}
 
