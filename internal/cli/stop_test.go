@@ -311,3 +311,51 @@ func TestStopper_AbortAfterFinishDoesNothing(t *testing.T) {
 		t.Fatalf("stage = %v, want StageNone", stage)
 	}
 }
+
+// Ground: contract — once the run has returned, the view shows the final
+// screen and the report is only waiting for it to close. A SIGTERM then must
+// close it, so the report is printed and the code follows the result; before,
+// it armed the grace timer and left without a report, code 143.
+func TestStopper_SignalOnTheFinalScreenClosesItAndKeepsTheReport(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		signal func(*Stopper) StopStage
+	}{
+		{"SIGTERM", (*Stopper).Abort},
+		{"Ctrl+C as a signal, twice", func(s *Stopper) StopStage { s.Press(); return s.Press() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newStopCalls()
+			s := c.stopper(50 * time.Millisecond)
+			var left atomic.Int32
+			s.Returned(func() { left.Add(1) })
+
+			tc.signal(s)
+
+			select {
+			case <-c.exited:
+				t.Fatal("exit without a report fired on the final screen")
+			case <-time.After(200 * time.Millisecond): // 4x the grace: the timer had its chance
+			}
+			if left.Load() == 0 || c.abort.Load() != 0 || c.stop.Load() != 0 {
+				t.Errorf("leave/stop/abort = %d/%d/%d, want the screen closed and nothing stopped",
+					left.Load(), c.stop.Load(), c.abort.Load())
+			}
+		})
+	}
+}
+
+// Ground: contract — Ctrl+C as a key on the final screen does what q does.
+func TestFinalScreenCtrlCIsQ(t *testing.T) {
+	for _, key := range []string{"q", "ctrl+c"} {
+		m := testModel(t)
+		m.done = true
+		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		if key == "ctrl+c" {
+			msg = tea.KeyMsg{Type: tea.KeyCtrlC}
+		}
+		if _, cmd := m.Update(msg); cmd == nil || fmt.Sprint(cmd()) != fmt.Sprint(tea.Quit()) {
+			t.Errorf("%s on the final screen does not quit", key)
+		}
+	}
+}

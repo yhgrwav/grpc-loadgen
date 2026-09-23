@@ -88,6 +88,11 @@ func (s *Stopper) Finish() {
 	}
 }
 
+// Returned says the run has returned and the view shows its final screen:
+// from then on a stop request calls leave, which closes the view, so the
+// report is printed instead of lost.
+func (s *Stopper) Returned(leave func()) {}
+
 // Abort is SIGTERM: it raises the stage to the abort and never past it, so an
 // abort already under way still gets to print its report.
 func (s *Stopper) Abort() StopStage {
