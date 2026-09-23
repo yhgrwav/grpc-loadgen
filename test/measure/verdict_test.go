@@ -132,8 +132,11 @@ func TestReport_SlotsHeldPastTheAllowanceHitTheCap(t *testing.T) {
 	// the calls scheduled in the first 101ms are past their 200ms deadline by
 	// then. Anything far from 101 means the slots were not held the way the
 	// verdict says they were.
-	if got := report.CapHit.OverDeadline; got < 80 || got > 130 {
-		t.Errorf("over deadline = %d, want about 101: the calls that held a slot past their deadline\n"+
+	// 0..101ms inclusive is 102 calls; the band allows only the jitter of a
+	// real run, and an off-by-one in the counting is pinned exactly by
+	// TestPoolCountsHeldSlotsExactlyAndDecidesItsEdges.
+	if got := report.CapHit.OverDeadline; got < 95 || got > 110 {
+		t.Errorf("over deadline = %d, want about 102: the slots held past their deadline at the hit\n"+
 			"start lag max %v, run %v of the planned %v, cap hit at %v, aborted %d, timed out %d",
 			got, report.StartLagMax, report.Duration, report.Planned, report.CapHit.At,
 			report.Aborted, report.Methods[0].TimedOut)

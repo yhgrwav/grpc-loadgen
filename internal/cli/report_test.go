@@ -235,6 +235,13 @@ func TestPrintReportSaysACapHitIsTheGenerators(t *testing.T) {
 			t.Errorf("report does not mention %q:\n%s", want, text)
 		}
 	}
+
+	// The count and its caption must say the same thing: 21 slots were held
+	// past their deadline, only some of them past the allowance. A caption
+	// reading "21 calls broke the allowance" would be false.
+	if !strings.Contains(text, "21 slots") || !strings.Contains(text, "past their own deadline") {
+		t.Errorf("the count is not captioned for what it counts:\n%s", text)
+	}
 }
 
 func TestPrintReportStatesWhatTheTargetDidNotAnswer(t *testing.T) {

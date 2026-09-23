@@ -665,27 +665,38 @@ func TestPoolCountsEverySlotHeldPastItsDeadlineAtTheCap(t *testing.T) {
 	}
 }
 
-// Ground: concurrency — a slot given back in the moment before the cap was
-// hit: its goroutine reads the cap moment afterwards and would count a slot
-// that was already free. The window is nanoseconds wide, so the counting is
-// driven directly with the two moments set.
-func TestPoolDoesNotCountSlotsAlreadyReleasedBeforeTheCap(t *testing.T) {
+// Ground: boundary — the count is exact and its edges are decided: a slot
+// given back before the cap was not held, and a call whose deadline falls on
+// the cap moment has not passed it. Both windows are nanoseconds wide, so the
+// counting is driven with the moments set rather than raced for.
+func TestPoolCountsHeldSlotsExactlyAndDecidesItsEdges(t *testing.T) {
 	r := newPoolRun(t.Context(), 1)
 	defer r.close()
 
 	r.abortByCaller()
 	capAt, _ := r.aborted()
 
-	stale := Request{ScheduledAt: capAt.Add(-time.Minute), Deadline: capAt.Add(-time.Second)}
-	r.countIfHeldPastDeadline(stale, capAt.Add(-time.Millisecond))
-
-	if got := r.overDeadline.Load(); got != 0 {
-		t.Errorf("counted %d, want 0: the slot was back before the cap was hit", got)
+	held := func(deadline, releasedAt time.Duration) {
+		r.countIfHeldPastDeadline(
+			Request{ScheduledAt: capAt.Add(-time.Minute), Deadline: capAt.Add(deadline)},
+			capAt.Add(releasedAt),
+		)
 	}
 
-	r.countIfHeldPastDeadline(stale, capAt.Add(time.Millisecond))
+	held(-time.Second, time.Millisecond)      // past its deadline, still held: counts
+	held(-time.Millisecond, time.Millisecond) // a millisecond past it: counts too
+	held(0, time.Millisecond)                 // deadline exactly at the hit: not past it
+	held(time.Second, time.Millisecond)       // deadline still ahead
+	held(-time.Second, -time.Millisecond)     // slot was already back
 
-	if got := r.overDeadline.Load(); got != 1 {
-		t.Errorf("counted %d, want 1: that slot was still held when the cap was hit", got)
+	if got := r.overDeadline.Load(); got != 2 {
+		t.Errorf("counted %d, want exactly 2 of the five", got)
+	}
+
+	// A call with no deadline cannot be past one.
+	r.countIfHeldPastDeadline(Request{ScheduledAt: capAt.Add(-time.Minute)}, capAt.Add(time.Millisecond))
+
+	if got := r.overDeadline.Load(); got != 2 {
+		t.Errorf("counted %d after a call without a deadline, want 2", got)
 	}
 }
