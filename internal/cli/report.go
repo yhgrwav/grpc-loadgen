@@ -17,6 +17,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
@@ -36,6 +37,8 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		"method", "sent", "failed", "sent/s", "p50", "p90", "p95", "p99")
 
 	censored, invalid, unanswered, unclassified, outside, refused := 0, 0, 0, 0, 0, 0
+	rejected := make([]string, 0, len(report.Methods))
+	outright := make([]string, 0, len(report.Methods))
 
 	for i := range report.Methods {
 		m := &report.Methods[i]
@@ -50,6 +53,15 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 			displayMethod(m.Method), m.Sent, m.Failed, m.RPS,
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 
+		if r := m.Rejected; r.Count > 0 {
+			rejected = append(rejected, displayMethod(m.Method))
+			if r.Count == m.Sent {
+				outright = append(outright, displayMethod(m.Method))
+			}
+			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  rejected", "", r.Count, "",
+				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
+		}
+
 		if r := m.Refusal; r.Count > 0 {
 			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  refused", "", r.Count, "",
 				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
@@ -59,6 +71,19 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	printNoAnswer(w, report.Methods)
 	printStartLag(w, report)
 
+	if len(rejected) > 0 {
+		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
+			"request is wrong — no such method, a bad argument, a body that does not match\n"+
+			"the schema — or a message did not fit: a reply rejected by the client's 4MB limit,\n"+
+			"or a request the target refused as larger than it accepts. Check the config for\n"+
+			"%s.\n", strings.Join(rejected, ", "))
+	}
+
+	if report.RequestRejected {
+		fmt.Fprintf(w, "\ninvalid run: every measured call of %s came back as a request the target\n"+
+			"will not serve. Nothing about the load was tested there; fix the request and run\n"+
+			"again.\n", strings.Join(outright, ", "))
+	}
 	if refused > 0 {
 		fmt.Fprint(w, "\nA method's percentiles are the time to serve a call: successes, and timeouts\n"+
 			"as lower bounds. The \"refused\" rows are how long the target took to say no.\n")

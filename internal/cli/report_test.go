@@ -335,3 +335,79 @@ func TestPrintReportNamesTheRateColumnForWhatItCounts(t *testing.T) {
 		t.Errorf("rate column is not named sent/s:\n%s", text)
 	}
 }
+
+// A target that answers "no such method" says nothing about load: counted with
+// overload refusals it would read as a service shedding requests.
+func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration:        time.Second,
+		Sent:            100,
+		Failed:          100,
+		RequestRejected: true,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 100, Failed: 100, RPS: 100,
+			Rejected: engine.RefusalLatency{
+				Count: 100,
+				P50:   metrics.Quantile{Value: 300 * time.Microsecond, Exact: true, Defined: true},
+			},
+		}},
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "rejected") {
+		t.Errorf("no rejected row:\n%s", text)
+	}
+	for _, want := range []string{"invalid run", "a.B/One", "client's 4MB limit", "larger than it accepts"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("verdict does not say %q:\n%s", want, text)
+		}
+
+		// The two causes are told apart: a reply the client cut off, and a request
+		// the target refused. The target's own limit is unknown to us, so no number
+		// is put on it.
+		if strings.Contains(text, "cut off") || strings.Contains(text, "truncat") {
+			t.Errorf("the report suggests a partial reply arrived; grpc-go rejects it whole:\n%s", text)
+		}
+		if strings.Contains(text, "target's 4MB") || strings.Contains(text, "4MB limit or a request") {
+			t.Errorf("the report puts our client limit on the target:\n%s", text)
+		}
+	}
+}
+
+// With three methods and one rejected outright, the verdict is about that
+// method: a share taken over the run would be 33% and no verdict at all.
+func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration:        time.Second,
+		Sent:            300,
+		Failed:          100,
+		RequestRejected: true,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/Good", Sent: 100, RPS: 100},
+			// Some of its calls were rejected, not all: the target does serve this
+			// method, so the verdict is not about it.
+			{Method: "a.B/Partly", Sent: 100, Failed: 10, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 10}},
+			{Method: "a.B/Typo", Sent: 100, Failed: 100, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 100}},
+		},
+	})
+
+	text := out.String()
+	at := strings.Index(text, "invalid run")
+	if at < 0 {
+		t.Fatalf("no verdict at all:\n%s", text)
+	}
+	verdict := text[at:]
+
+	if !strings.Contains(verdict, "a.B/Typo") {
+		t.Errorf("the verdict does not name the method it is about:\n%s", verdict)
+	}
+	for _, served := range []string{"a.B/Good", "a.B/Partly"} {
+		if strings.Contains(verdict, served) {
+			t.Errorf("the verdict names %s, which the target does serve:\n%s", served, verdict)
+		}
+	}
+}

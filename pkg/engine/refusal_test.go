@@ -61,20 +61,43 @@ func TestStats_RefusalsHaveTheirOwnLatency(t *testing.T) {
 	}
 }
 
-// Ground: contract — server faults and client faults are refusals too, until a stand test refuses
-// with every category; FailEvery uses one code.
-func TestStats_EveryWayOfSayingNoIsARefusal(t *testing.T) {
+// Ground: contract — a target out of capacity and a target that will never
+// serve this request are two answers, and only the first one is about load;
+// a stand test cannot refuse with every category at once, FailEvery uses one code.
+func TestStats_ARefusalUnderLoadIsNotARejectedRequest(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
 	stats.Start(start, 0)
 
-	for _, c := range []Category{CategoryServerFault, CategoryOverload, CategoryClientFault} {
+	for _, c := range []Category{CategoryServerFault, CategoryOverload} {
 		stats.Record(answered(start, c, time.Millisecond))
 	}
+	stats.Record(answered(start, CategoryClientFault, time.Millisecond))
 	stats.Record(answered(start, CategorySuccess, 100*time.Millisecond))
 
-	if m := stats.Report().Methods[0]; m.Refusal.Count != 3 || m.Latencies != 1 {
-		t.Errorf("refusals %d, service latencies %d; want 3 and 1", m.Refusal.Count, m.Latencies)
+	m := stats.Report().Methods[0]
+	if m.Refusal.Count != 2 || m.Rejected.Count != 1 || m.Latencies != 1 {
+		t.Errorf("refusals %d, rejected %d, service latencies %d; want 2, 1 and 1",
+			m.Refusal.Count, m.Rejected.Count, m.Latencies)
+	}
+	if m.Failed != 3 {
+		t.Errorf("failed = %d, want 3: a rejected request is still a call that failed", m.Failed)
+	}
+}
+
+// Ground: contract — the verdict rests on "every measured call", not on most.
+func TestStats_OneServedCallKeepsTheRunValid(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	for range 99 {
+		stats.Record(answered(start, CategoryClientFault, time.Millisecond))
+	}
+	stats.Record(answered(start, CategorySuccess, time.Millisecond))
+
+	if stats.Report().RequestRejected {
+		t.Error("run invalidated although the target served a call")
 	}
 }
 

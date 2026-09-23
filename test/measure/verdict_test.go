@@ -497,3 +497,96 @@ func TestReport_AStoppedRunRatesOverTheTimeItSent(t *testing.T) {
 			got, rateRPS, report.Methods[0].Sent)
 	}
 }
+
+// A target that answers "no such method" refuses every call in microseconds.
+// Counted as refusals they would read as a target shedding load; nothing about
+// the load was tested at all.
+func TestReport_ATargetThatRejectsEveryRequestInvalidatesTheRun(t *testing.T) {
+	target := stand.Start(stand.FailEvery(1, codes.Unimplemented, 0))
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), silentRPS, time.Second, silentTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	m := report.Methods[0]
+	if m.Rejected.Count != m.Sent || m.Sent == 0 {
+		t.Errorf("rejected %d of %d, want all", m.Rejected.Count, m.Sent)
+	}
+	if m.Refusal.Count != 0 {
+		t.Errorf("refused %d, want none: a bad request is not the target shedding load", m.Refusal.Count)
+	}
+	if !report.RequestRejected {
+		t.Error("run not marked as one whose requests the target rejected")
+	}
+}
+
+// One method rejected, another served: the run still measured something.
+func TestReport_ARejectedMethodAloneDoesNotInvalidateTheRun(t *testing.T) {
+	target := stand.Start(stand.FailEvery(3, codes.ResourceExhausted, 0))
+	t.Cleanup(target.Stop)
+
+	report, err := runOn(t, target, load(target.Method(), silentRPS, time.Second, silentTimeout), 1000, asIs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if report.RequestRejected {
+		t.Error("an overloaded target was read as a bad request")
+	}
+	if got := report.Methods[0].Refusal.Count; got == 0 {
+		t.Error("refusals not counted")
+	}
+}
+
+// A run of three methods where one is misspelled: two thirds of the calls are
+// served, so a share taken over the run says 33% and no verdict. The verdict
+// belongs to the method.
+func TestReport_OneRejectedMethodAmongServedOnesIsStillAVerdict(t *testing.T) {
+	served := stand.Start(stand.Constant(time.Millisecond))
+	t.Cleanup(served.Stop)
+
+	sender := grpcsender.New(grpcsender.Options{
+		Target:      served.Target(),
+		DialOptions: []grpc.DialOption{served.DialOption()},
+	})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{
+			load(served.Method(), silentRPS, time.Second, silentTimeout),
+			load("/grpc.health.v1.Health/Watch", silentRPS, time.Second, silentTimeout),
+			load("/grpc.health.v1.Health/Typo", silentRPS, time.Second, silentTimeout),
+		},
+		Sender:      sender,
+		MaxInFlight: 1000,
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+	if err := eng.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	report := eng.Report()
+	if !report.RequestRejected {
+		t.Error("one method rejected every call, yet the run passed as valid")
+	}
+
+	var rejected []string
+	for _, m := range report.Methods {
+		if m.Rejected.Count > 0 && m.Rejected.Count == m.Sent {
+			rejected = append(rejected, m.Method)
+		}
+	}
+	if len(rejected) != 2 {
+		t.Errorf("methods rejected outright = %v, want the typo and the streaming one", rejected)
+	}
+}

@@ -77,6 +77,10 @@ type MethodReport struct {
 	// They are absent from the distribution too.
 	Unclassified int
 	Refusal      RefusalLatency
+	// Rejected is the target answering that the request itself is wrong —
+	// no such method, bad argument, a message over a size limit. Such a call
+	// says nothing about the load: it would fail the same way at any rate.
+	Rejected RefusalLatency
 	// Seconds covers the whole run, warmup included, up to the last second
 	// anything happened in. Unlike the totals it keeps every call.
 	Seconds []Second
@@ -113,8 +117,8 @@ type CapHit struct {
 	OverDeadline int
 }
 
-// RefusalLatency is how long the target took to refuse: server faults,
-// overload and client faults. A slow refusal is worse than a fast one.
+// RefusalLatency is how long the target took to refuse: server faults and
+// overload, or, in Rejected, a request it would never serve. A slow refusal is worse than a fast one.
 type RefusalLatency struct {
 	Count int
 	P50   metrics.Quantile
@@ -148,6 +152,9 @@ type Report struct {
 	// on its own: how late cancellation ran.
 	LateCancelMax time.Duration
 
+	// RequestRejected says every measured call of some method came back as a
+	// request the target will never serve: the run tested nothing about load.
+	RequestRejected bool
 	// Incomplete says the run ended before its plan, by Stop or by an abort.
 	// Every number is honest, but it covers less than was asked for.
 	Incomplete bool
@@ -183,6 +190,7 @@ type methodStats struct {
 	unsentOut  int
 	latency    *metrics.Latencies
 	refusal    *metrics.Latencies
+	rejected   *metrics.Latencies
 	timeline   timeline
 }
 
@@ -210,6 +218,7 @@ func (s *Stats) newMethod() *methodStats {
 	return &methodStats{
 		latency:  metrics.NewLatencies(),
 		refusal:  metrics.NewUncensoredLatencies(),
+		rejected: metrics.NewUncensoredLatencies(),
 		timeline: newTimeline(s.reserve),
 	}
 }
@@ -322,8 +331,10 @@ func (s *Stats) Record(r Result) {
 	switch r.Category {
 	case CategorySuccess:
 		method.latency.Record(r.Latency())
-	case CategoryServerFault, CategoryOverload, CategoryClientFault:
+	case CategoryServerFault, CategoryOverload:
 		method.refusal.Record(r.Latency())
+	case CategoryClientFault:
+		method.rejected.Record(r.Latency())
 	}
 }
 
@@ -338,6 +349,7 @@ type methodView struct {
 	unknown    int
 	dist       *metrics.Snapshot
 	refusal    *metrics.Snapshot
+	rejected   *metrics.Snapshot
 }
 
 // views copies the counters under the lock and takes each distribution's
@@ -366,6 +378,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for i, src := range sources {
 		out[i].dist = src.latency.Snapshot()
 		out[i].refusal = src.refusal.Snapshot()
+		out[i].rejected = src.rejected.Snapshot()
 	}
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
@@ -514,6 +527,9 @@ func (s *Stats) Report() Report {
 	}
 
 	for _, v := range views {
+		if v.rejected.Count() > 0 && int(v.rejected.Count()) == v.sent {
+			report.RequestRejected = true
+		}
 		entry := MethodReport{
 			Method:       v.name,
 			Sent:         v.sent,
@@ -529,14 +545,8 @@ func (s *Stats) Report() Report {
 			P95:          v.dist.Percentile(0.95),
 			P99:          v.dist.Percentile(0.99),
 			Max:          v.dist.Percentile(1),
-			Refusal: RefusalLatency{
-				Count: int(v.refusal.Count()),
-				P50:   v.refusal.Percentile(0.50),
-				P90:   v.refusal.Percentile(0.90),
-				P95:   v.refusal.Percentile(0.95),
-				P99:   v.refusal.Percentile(0.99),
-				Max:   v.refusal.Percentile(1),
-			},
+			Refusal:      refusalOf(v.refusal),
+			Rejected:     refusalOf(v.rejected),
 
 			Seconds:         timelines[v.name].Seconds,
 			OutsideTimeline: timelines[v.name].OutsideTimeline,
@@ -566,6 +576,17 @@ func (s *Stats) sendingWindow(elapsed time.Duration) time.Duration {
 	}
 
 	return max(0, window-s.warmup)
+}
+
+func refusalOf(dist *metrics.Snapshot) RefusalLatency {
+	return RefusalLatency{
+		Count: int(dist.Count()),
+		P50:   dist.Percentile(0.50),
+		P90:   dist.Percentile(0.90),
+		P95:   dist.Percentile(0.95),
+		P99:   dist.Percentile(0.99),
+		Max:   dist.Percentile(1),
+	}
 }
 
 func (s *Stats) elapsed() time.Duration {
