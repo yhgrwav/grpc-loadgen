@@ -17,6 +17,7 @@ package grpcsender
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"sync"
@@ -51,7 +52,9 @@ type Options struct {
 	// insecure, which is the usual case for a service behind a mesh.
 	TLS bool
 	// DialOptions are passed through for cases the fields above do not cover,
-	// such as custom credentials or an in-process dialer in tests.
+	// such as custom credentials or an in-process dialer in tests. Custom
+	// transport credentials replace the sender's own, which read the stream
+	// limit the target announces; Connections then reports nothing.
 	DialOptions []grpc.DialOption
 }
 
@@ -62,13 +65,26 @@ type Sender struct {
 	mu     sync.RWMutex
 	conn   *grpc.ClientConn
 	closed bool
+
+	tracker *connTracker
+	ready   readyWindow
+	// streams tells a wait for a stream from a delay on our side.
+	streams *streamGauge
+	// rootCAs verifies the target under TLS; nil means the system pool. Set
+	// only by this package's tests until the config gets a CA of its own.
+	rootCAs *x509.CertPool
+	// stopWatch ends the connection watcher; watched closes when it has.
+	stopWatch context.CancelFunc
+	watched   chan struct{}
 }
 
 // New prepares a sender. It does not dial: the connection is established by
 // Connect, before the run starts, so a wrong address fails immediately rather
 // than a minute into the load.
 func New(opts Options) *Sender {
-	return &Sender{opts: opts}
+	tracker := &connTracker{}
+
+	return &Sender{opts: opts, tracker: tracker, streams: &streamGauge{limit: tracker.limit}}
 }
 
 // Connect establishes the connection and waits for it to become usable, so an
@@ -91,12 +107,12 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	creds := insecure.NewCredentials()
 	if s.opts.TLS {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: s.rootCAs})
 	}
 
 	dialOpts := append([]grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-		grpc.WithStatsHandler(handler{}),
+		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker}),
+		grpc.WithStatsHandler(handler{streams: s.streams}),
 	}, s.opts.DialOptions...)
 
 	conn, err := grpc.NewClient(s.opts.Target, dialOpts...)
@@ -112,7 +128,35 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	s.conn = conn
 
+	// Recorded here, not by the watcher: the run starts the moment Connect
+	// returns, before the watcher's goroutine may have run.
+	s.ready.entered(time.Now())
+
+	watchCtx, stop := context.WithCancel(context.Background())
+	s.stopWatch, s.watched = stop, make(chan struct{})
+
+	go s.watch(watchCtx, conn, s.watched)
+
 	return nil
+}
+
+// watch records the connection's changes of state from READY, which Connect
+// has already recorded, until ctx ends or the connection shuts down.
+func (s *Sender) watch(ctx context.Context, conn *grpc.ClientConn, done chan<- struct{}) {
+	defer close(done)
+
+	for state := connectivity.Ready; conn.WaitForStateChange(ctx, state); {
+		state = conn.GetState()
+
+		switch state {
+		case connectivity.Shutdown:
+			return
+		case connectivity.Ready:
+			s.ready.entered(time.Now())
+		default:
+			s.ready.left(time.Now())
+		}
+	}
 }
 
 // waitReady blocks until the connection is usable, the first attempt fails, or
@@ -182,7 +226,12 @@ func (s *Sender) Close() error {
 	conn := s.conn
 	s.conn = nil
 
-	return conn.Close()
+	err := conn.Close()
+
+	s.stopWatch()
+	<-s.watched
+
+	return err
 }
 
 // Send performs one call. See engine.Sender for what the two failure channels
@@ -245,12 +294,16 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	sentAt, doneAt, notSent := timestamps(times, category)
 
 	outcome := engine.Outcome{
-		SentAt:   sentAt,
-		NotSent:  notSent,
-		DoneAt:   doneAt,
-		Category: category,
-		Code:     status.Code(err).String(),
-		Err:      err,
+		SentAt:     sentAt,
+		NotSent:    notSent,
+		StreamWait: times.streamWait(),
+		DoneAt:     doneAt,
+		Category:   category,
+		Code:       status.Code(err).String(),
+		Err:        err,
+	}
+	if notSent {
+		outcome.NotSentOn = s.blocker(conn, times)
 	}
 	if body != nil {
 		outcome.Response = *body
@@ -301,4 +354,19 @@ func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.T
 	}
 
 	return doneAt, doneAt, true
+}
+
+// blocker says what an unsent call waited for. A connection not ready for all
+// of the call, or not ready now in case the watcher is behind, is the
+// connection. On a ready one it is a stream only if the connection was full at
+// some moment of the wait; otherwise the delay was ours.
+func (s *Sender) blocker(conn *grpc.ClientConn, t callTimes) engine.Blocker {
+	switch {
+	case t.begunAt.IsZero() || !s.ready.throughout(t.begunAt) || conn.GetState() != connectivity.Ready:
+		return engine.BlockedOnConnection
+	case s.streams.fullSince(t.waitFrom()):
+		return engine.BlockedOnStream
+	default:
+		return engine.BlockedOnGenerator
+	}
 }

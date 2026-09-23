@@ -100,6 +100,10 @@ func run(t *testing.T, s *stand.Stand, call engine.Call, maxInFlight int) (engin
 		t.Fatalf("run: %v", err)
 	}
 
+	if n := sender.OpenStreams(); n != 0 {
+		t.Errorf("%d streams still counted open after the run: a stream counted in and never out reads every later delay as a wait for one", n)
+	}
+
 	report := eng.Report()
 	if report.Incomplete {
 		t.Fatalf("the run did not finish its plan; it had %v", ceiling)

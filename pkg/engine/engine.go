@@ -190,6 +190,12 @@ func (e *Engine) Report() Report {
 	report.Incomplete = e.incomplete.Load()
 	report.Planned = e.plannedDuration()
 
+	if r, ok := e.opts.Sender.(ConnectionReporter); ok {
+		if conns, known := r.Connections(); known {
+			report.Connections = &conns
+		}
+	}
+
 	if hit := e.capHit.Load(); hit != nil {
 		report.CapHit = &CapHit{At: hit.At.Sub(e.startedAt), Unsent: 1, OverDeadline: hit.OverDeadline}
 	}

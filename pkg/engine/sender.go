@@ -75,9 +75,15 @@ type Outcome struct {
 	// NotSent marks a timeout whose request never went out. The engine tells
 	// whose fault it was by who ate more of the budget: the generator's lag
 	// or the wait on the connection. False when the sender does not track this.
-	NotSent  bool
-	DoneAt   time.Time
-	Category Category
+	NotSent bool
+	// NotSentOn is what an unsent call was waiting for when its deadline came,
+	// if the generator's lag was not the larger part of it.
+	NotSentOn Blocker
+	// StreamWait is how long a call that went out waited for a free stream on
+	// a ready connection: part of its latency the target never saw.
+	StreamWait time.Duration
+	DoneAt     time.Time
+	Category   Category
 	// Err is the error as reported by the transport, including any text from
 	// the target. Nil for CategorySuccess, non-nil otherwise. pkg/engine
 	// does not inspect or print it; that is left to the caller.
@@ -109,4 +115,44 @@ type Outcome struct {
 // req.Deadline as given rather than recompute it from the current time.
 type Sender interface {
 	Send(ctx context.Context, req Request) (Outcome, error)
+}
+
+// Blocker is what a call that never went out was waiting for.
+type Blocker int
+
+const (
+	// BlockedOnConnection is the zero value: when the sender cannot prove the
+	// connection was ready the whole time, the call is not blamed on streams.
+	BlockedOnConnection Blocker = iota
+	// BlockedOnStream is a ready connection with every stream the target
+	// allows already in use.
+	BlockedOnStream
+	// BlockedOnGenerator is a ready connection with streams to spare: what held
+	// the call back was on the generator's side.
+	BlockedOnGenerator
+)
+
+// Connections is what a sender knows about the connections it ran over.
+type Connections struct {
+	// Open is how many connections carried calls at once.
+	Open int
+	// Reconnects counts successful handshakes after the first.
+	Reconnects int
+	// LimitAnnounced says the target named a stream limit in the first
+	// SETTINGS of the last handshake; without it the client has no limit of
+	// its own.
+	LimitAnnounced bool
+	// FirstLimit and LastLimit are the limits announced at the first and the
+	// last handshake; LimitChanges counts handshakes that announced a limit
+	// different from the one before.
+	FirstLimit   uint32
+	LastLimit    uint32
+	LimitChanges int
+}
+
+// ConnectionReporter is a Sender that can say what connections it used. The
+// engine asks once, when the run is over; false means the sender saw nothing
+// it can vouch for, and the report then says nothing about connections.
+type ConnectionReporter interface {
+	Connections() (Connections, bool)
 }

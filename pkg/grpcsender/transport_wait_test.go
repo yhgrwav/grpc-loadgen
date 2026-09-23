@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/test/bufconn"
@@ -69,7 +68,6 @@ func oneStreamTarget(t *testing.T) *Sender {
 	sender := New(Options{
 		Target: "passthrough:///bufnet",
 		DialOptions: []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 				return lis.DialContext(ctx)
 			}),
@@ -84,6 +82,7 @@ func oneStreamTarget(t *testing.T) *Sender {
 	t.Cleanup(func() {
 		close(hold.release)
 		<-held
+		checkNoOpenStreams(t, sender)
 		_ = sender.Close()
 		srv.Stop()
 	})

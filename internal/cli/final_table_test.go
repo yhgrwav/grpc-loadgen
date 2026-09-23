@@ -451,6 +451,14 @@ func verdictCases() []struct {
 		{"incomplete", "incomplete: ran 12.0s of the planned 20.0s", "do not compare", func(m *model) {
 			m.report.Incomplete, m.report.Planned = true, 20*time.Second
 		}},
+		{"stream limit", "limited by 1 connection: target allows 1 stream", "not tested above", func(m *model) {
+			for i := range m.report.Methods {
+				m.report.Methods[i].P99WithoutStreamWait = m.report.Methods[i].P99
+			}
+			m.report.Methods[0].P99WithoutStreamWait = exact(5)
+			m.report.StreamWaited, m.report.StreamWaitP99 = 900, exact(9)
+			m.report.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1}
+		}},
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
 			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
@@ -524,19 +532,21 @@ func TestShortVerdictsAreASCIIAndTwoLinesAt60(t *testing.T) {
 func checkCutCount(t *testing.T, m *model, width int, view string) {
 	t.Helper()
 
-	full := 0
-	for line := range strings.Lines(m.finalReport(contentWidth(width))) {
-		if strings.TrimSpace(line) != "" {
+	// Independent of how the screen decides what to show: a line counts as
+	// shown only if it is, word for word, a line of the full body. A short
+	// verdict stands in for a full one and is not in the body, so it counts as
+	// nothing shown without the helper knowing any verdict by name.
+	full, inBody := 0, map[string]int{}
+	for line := range strings.Lines(ansiCodes.ReplaceAllString(m.finalReport(contentWidth(width)), "")) {
+		if line = strings.TrimSpace(line); line != "" {
 			full++
+			inBody[line]++
 		}
 	}
 
-	var body []string
-	for line := range strings.Lines(view) {
-		body = append(body, strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│")))
-	}
 	shown, counting, cut := 0, false, -1
-	for _, line := range body {
+	for line := range strings.Lines(view) {
+		line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
 		switch {
 		case strings.HasPrefix(line, "Run finished"):
 			counting = true
@@ -546,13 +556,13 @@ func checkCutCount(t *testing.T, m *model, width int, view string) {
 			counting = false
 			cut = atoi(t, strings.Fields(line)[1])
 		}
-		if counting && line != "" && !strings.HasPrefix(line, "> invalid run:") &&
-			!strings.HasPrefix(line, "> incomplete:") && !strings.HasPrefix(line, "> run failed:") {
+		if counting && inBody[line] > 0 {
+			inBody[line]--
 			shown++
 		}
 	}
 	if cut != full-shown {
-		t.Errorf("the screen says %d more lines; the full screen has %d and %d are shown:\n%s", cut, full, shown, view)
+		t.Errorf("the screen says %d more lines; the full screen has %d and %d of them are shown:\n%s", cut, full, shown, view)
 	}
 }
 

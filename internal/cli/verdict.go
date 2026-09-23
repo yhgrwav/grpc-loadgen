@@ -56,6 +56,9 @@ func (m *model) shortVerdicts(width int) []string {
 		out = append(out, fmt.Sprintf("incomplete: ran %s of the planned %s",
 			formatDuration(report.Duration), formatDuration(report.Planned)))
 	}
+	if v := shortStreamVerdict(report); v != "" {
+		out = append(out, v)
+	}
 	if m.err != nil && !m.stopper.Stopping() {
 		out = append(out, truncate("run failed: "+failureReason(m.err, room-len("run failed: ")), room))
 	}

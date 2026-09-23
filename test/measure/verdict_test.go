@@ -92,6 +92,10 @@ func runOn(t *testing.T, s *stand.Stand, call engine.Call, maxInFlight int,
 
 	err = eng.Run(ctx)
 
+	if n := sender.OpenStreams(); n != 0 {
+		t.Errorf("%d streams still counted open after the run", n)
+	}
+
 	return eng.Report(), err
 }
 

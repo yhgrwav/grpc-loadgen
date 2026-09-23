@@ -141,10 +141,16 @@ type Stand struct {
 	stopped  chan struct{}
 	stopOnce sync.Once
 
-	mu       sync.Mutex
-	first    time.Time
-	arrivals []time.Time
-	holds    []time.Duration
+	mu    sync.Mutex
+	first time.Time
+	// dropAt is the arrival that cuts the connection, 0 for never; the dial
+	// after it waits until redialAt.
+	dropAt    int
+	dropDelay time.Duration
+	redialAt  time.Time
+	client    net.Conn
+	arrivals  []time.Time
+	holds     []time.Duration
 }
 
 // Start serves a stand on an in-process listener until Stop. A nil answer
@@ -203,9 +209,7 @@ func (s *Stand) DialOption() grpc.DialOption {
 		return grpc.EmptyDialOption{}
 	}
 
-	return grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return s.buf.DialContext(ctx)
-	})
+	return grpc.WithContextDialer(s.dial)
 }
 
 // Stop releases every held call and shuts the server down. Safe to call more
@@ -285,5 +289,49 @@ func (s *Stand) arrived(at time.Time) Call {
 	}
 	s.arrivals = append(s.arrivals, at)
 
+	if len(s.arrivals) == s.dropAt && s.client != nil {
+		s.redialAt = at.Add(s.dropDelay)
+		_ = s.client.Close()
+	}
+
 	return Call{N: len(s.arrivals), Since: at.Sub(s.first)}
+}
+
+// DropOnArrival makes the stand cut the in-process connection when the n-th
+// call arrives, and hold the dial that follows for delay: a target that
+// restarts in the middle of a run. The cut call fails; calls made while the
+// dial is held meet a connection that is not ready.
+func (s *Stand) DropOnArrival(n int, delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.dropAt, s.dropDelay = n, delay
+}
+
+func (s *Stand) dial(ctx context.Context, _ string) (net.Conn, error) {
+	s.mu.Lock()
+	wait := time.Until(s.redialAt)
+	s.mu.Unlock()
+
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	conn, err := s.buf.DialContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	s.client = conn
+	s.mu.Unlock()
+
+	return conn, nil
 }
