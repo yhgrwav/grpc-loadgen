@@ -570,6 +570,49 @@ func TestStats_LastAnswerIsTheScheduledMomentOfTheLastAnsweredCall(t *testing.T)
 	}
 }
 
+// Ground: contract — any status the target sent back, a refusal or a rejected
+// request included, shows it alive; a call it never answered does not.
+func TestStats_LastAnswerMovesOnlyOnAStatusFromTheTarget(t *testing.T) {
+	for _, tc := range []struct {
+		category Category
+		moves    bool
+	}{
+		{CategorySuccess, true},
+		{CategoryServerFault, true},
+		{CategoryOverload, true},
+		{CategoryClientFault, true},
+		{CategoryUnreachable, false},
+		{CategoryTimeout, false},
+		{CategoryAborted, false},
+	} {
+		t.Run(tc.category.String(), func(t *testing.T) {
+			stats := NewStats()
+			start := time.Now()
+			stats.Start(start, 0)
+
+			record := func(d time.Duration, category Category) {
+				at := start.Add(d)
+				stats.Record(Result{
+					Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+					Outcome: Outcome{Category: category, SentAt: at, DoneAt: at.Add(time.Millisecond)},
+				})
+			}
+			record(time.Second, CategorySuccess)
+			record(5*time.Second, tc.category)
+			stats.Finish(start.Add(10 * time.Second))
+
+			want := time.Second
+			if tc.moves {
+				want = 5 * time.Second
+			}
+			got := stats.Report().Methods[0].LastAnswerAt
+			if got == nil || *got != want {
+				t.Errorf("last answer at %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 // Ground: boundary — a target that never answered has no such moment, and the
 // zero of a duration would read as "answered at the start".
 func TestStats_ATargetThatNeverAnsweredHasNoLastAnswer(t *testing.T) {
