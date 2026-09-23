@@ -868,17 +868,20 @@ const FakeTarget = "fake target"
 type LiveView interface {
 	Run() (tea.Model, error)
 	Send(msg tea.Msg)
+	Quit()
 }
 
 // RunLive runs the view and the load side by side and returns the run's error.
 // It returns only after the run has: the view can close first, on q, and a
 // report built while requests are still being recorded would be a snapshot of
-// a moving engine.
-func RunLive(view LiveView, run func() error, cancel func()) error {
+// a moving engine. Once the run returns, a stop request on stopper closes the
+// final screen instead of exiting without the report.
+func RunLive(view LiveView, stopper *Stopper, run func() error, cancel func()) error {
 	finished := make(chan error, 1)
 
 	go func() {
 		err := run()
+		stopper.Returned(view.Quit)
 		finished <- err
 		view.Send(doneMsg{err: err})
 	}()

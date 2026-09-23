@@ -36,6 +36,7 @@ type fakeView struct{}
 
 func (fakeView) Run() (tea.Model, error) { return nil, nil }
 func (fakeView) Send(tea.Msg)            {}
+func (fakeView) Quit()                   {}
 
 func TestRunLiveWaitsForTheRunBeforeReturning(t *testing.T) {
 	errStopped := errors.New("stopped")
@@ -51,7 +52,9 @@ func TestRunLiveWaitsForTheRunBeforeReturning(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- RunLive(fakeView{}, run, func() { close(stop) }) }()
+	go func() {
+		done <- RunLive(fakeView{}, NewStopper(func() {}, func() {}, func() {}, time.Hour), run, func() { close(stop) })
+	}()
 
 	select {
 	case err := <-done:
@@ -416,5 +419,51 @@ func TestRussianLayoutLeavesTheSetupWizard(t *testing.T) {
 
 	if _, cmd := m.Update(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune("й")})); cmd == nil {
 		t.Error("й did not leave the setup wizard, as q does")
+	}
+}
+
+// heldView stays on its final screen until it is told to quit.
+type heldView struct{ quit chan struct{} }
+
+func (v heldView) Run() (tea.Model, error) { <-v.quit; return nil, nil }
+func (heldView) Send(tea.Msg)              {}
+func (v heldView) Quit()                   { close(v.quit) }
+
+// Ground: contract — once the run has returned, a SIGTERM closes the final
+// screen and RunLive returns, so the report prints; the exit without a report
+// never fires.
+func TestRunLiveLetsASignalCloseTheFinalScreen(t *testing.T) {
+	c := newStopCalls()
+	s := c.stopper(50 * time.Millisecond)
+	view := heldView{quit: make(chan struct{})}
+	ran := make(chan struct{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLive(view, s, func() error { defer close(ran); return nil }, func() {})
+	}()
+	<-ran
+	// Returned is called right after the run returns; give it that moment.
+	deadline := time.Now().Add(time.Second)
+	for {
+		s.mu.Lock()
+		set := s.leave != nil
+		s.mu.Unlock()
+		if set || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond) // polling a state no channel reports
+	}
+	s.Abort()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the final screen stayed open after SIGTERM")
+	}
+	select {
+	case <-c.exited:
+		t.Fatal("exit without a report fired")
+	case <-time.After(200 * time.Millisecond):
 	}
 }
