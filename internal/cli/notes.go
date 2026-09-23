@@ -145,7 +145,8 @@ func reportNotes(report engine.Report) []string {
 	if len(rejected) > 0 {
 		add("The \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
 			"request is wrong — no such method, a bad argument, a body that does not match\n"+
-			"the schema — or a message did not fit: a reply rejected by the client's 4MB limit,\n"+
+			"the schema — or a message did not fit: a reply over the client's limit, 4MiB\n"+
+			"unless app.max_response_size sets another,\n"+
 			"or a request refused as larger than accepted, by the target or a proxy in front of it.\n"+
 			"Check the config for %s.", strings.Join(rejected, ", "))
 	}

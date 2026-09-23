@@ -185,6 +185,33 @@ func TestMetadata_ValuesOutsidePrintableASCIIAreRefused(t *testing.T) {
 	}
 }
 
+// Ground: contract — pkg/config is a library API; the size is written the way people write it,
+// and each unit means what its standard says: MB is 10^6, MiB is 2^20.
+func TestMaxResponseSize_Units(t *testing.T) {
+	cases := map[string]int{
+		"1048576B": 1048576,
+		"512KiB":   512 << 10,
+		"16MiB":    16 << 20,
+		"1GiB":     1 << 30,
+		"16MB":     16_000_000,
+		"16 MiB":   16 << 20,
+		"16mib":    16 << 20,
+		"100KB":    100_000,
+		"2GB":      2_000_000_000,
+	}
+
+	for raw, want := range cases {
+		cfg, err := config.Parse(withApp("  max_response_size: " + raw + "\n"))
+		if err != nil {
+			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		if cfg.App.MaxResponseBytes != want {
+			t.Errorf("%s = %d bytes, want %d", raw, cfg.App.MaxResponseBytes, want)
+		}
+	}
+}
+
 // Ground: contract — a value read from the environment obeys the same rule, and the error names
 // the variable, not what it holds.
 func TestMetadata_EnvironmentValueOutsidePrintableASCIIIsRefused(t *testing.T) {
@@ -262,5 +289,26 @@ func TestMetadata_BinaryKeySaysItIsNotSupported(t *testing.T) {
 	_, err := config.Parse(withApp("  metadata:\n    x-trace-bin: AAAA\n"))
 	if err == nil || !strings.Contains(err.Error(), "binary metadata is not supported") {
 		t.Errorf("err = %v, want \"binary metadata is not supported\"", err)
+	}
+}
+
+// Ground: contract — left out, the limit is the transport's own.
+func TestMaxResponseSize_AbsentIsZero(t *testing.T) {
+	cfg, err := config.Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.MaxResponseBytes != 0 {
+		t.Errorf("max response = %d, want 0", cfg.App.MaxResponseBytes)
+	}
+}
+
+// Ground: contract — a size that means nothing is refused, not read as the default.
+func TestMaxResponseSize_Refused(t *testing.T) {
+	for _, raw := range []string{"0", "-1MiB", "16", "abc", "16XB", "1.5MiB", "\"\"", "3GiB"} {
+		_, err := config.Parse(withApp("  max_response_size: " + raw + "\n"))
+		if !errors.Is(err, config.ErrInvalidMaxResponseSize) {
+			t.Errorf("%s: err = %v, want ErrInvalidMaxResponseSize", raw, err)
+		}
 	}
 }

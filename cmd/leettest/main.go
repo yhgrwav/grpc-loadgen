@@ -412,10 +412,11 @@ func withBudgetAdvice(err error) error {
 // connection: a wrong path is a config error, not a failed handshake.
 func senderOptions(app *config.App) (grpcsender.Options, error) {
 	opts := grpcsender.Options{
-		Target:     string(app.Address),
-		TLS:        app.UseTLS,
-		Metadata:   app.Metadata,
-		ServerName: app.ServerName,
+		Target:           string(app.Address),
+		TLS:              app.UseTLS,
+		Metadata:         app.Metadata,
+		ServerName:       app.ServerName,
+		MaxResponseBytes: app.MaxResponseBytes,
 	}
 
 	if app.CA != "" {

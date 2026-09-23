@@ -17,9 +17,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -111,6 +113,38 @@ func printableASCII(s string) bool {
 	}
 
 	return true
+}
+
+var sizeUnits = map[string]int64{
+	"b": 1, "kb": 1e3, "mb": 1e6, "gb": 1e9, "kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30,
+}
+
+var sizePattern = regexp.MustCompile(`^(\d+)\s*([A-Za-z]+)$`)
+
+// resolveMaxResponseSize reads a size such as 16MiB. A bare number is refused:
+// 16 would be read as bytes by one person and megabytes by another.
+func (a *App) resolveMaxResponseSize() error {
+	if a.RawMaxResponseSize == nil {
+		return nil
+	}
+
+	m := sizePattern.FindStringSubmatch(strings.TrimSpace(*a.RawMaxResponseSize))
+	if m == nil {
+		return fmt.Errorf("%w: %q", ErrInvalidMaxResponseSize, *a.RawMaxResponseSize)
+	}
+
+	unit, ok := sizeUnits[strings.ToLower(m[2])]
+	n, err := strconv.ParseInt(m[1], 10, 64)
+
+	// grpc-go takes the limit as an int and frames a message with a 32-bit
+	// length; a limit it cannot hold is refused rather than wrapped.
+	if !ok || err != nil || n <= 0 || n > math.MaxInt32/unit {
+		return fmt.Errorf("%w: %q", ErrInvalidMaxResponseSize, *a.RawMaxResponseSize)
+	}
+
+	a.MaxResponseBytes = int(n * unit)
+
+	return nil
 }
 
 func (a *App) validateTLSFiles() error {
