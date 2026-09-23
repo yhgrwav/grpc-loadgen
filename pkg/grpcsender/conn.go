@@ -218,3 +218,12 @@ func (w *readyWindow) throughout(begun time.Time) bool {
 func (s *Sender) Connections() (engine.Connections, bool) {
 	return s.tracker.report()
 }
+
+// limited reports whether the last handshake heard announced a stream limit.
+// Without one a call cannot wait for a stream.
+func (c *connTracker) limited() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.heard > 0 && c.last.announced
+}

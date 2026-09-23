@@ -292,7 +292,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	outcome := engine.Outcome{
 		SentAt:     sentAt,
 		NotSent:    notSent,
-		StreamWait: times.streamWait(),
+		StreamWait: times.streamWait(s.tracker.limited()),
 		DoneAt:     doneAt,
 		Category:   category,
 		Code:       status.Code(err).String(),
@@ -353,8 +353,9 @@ func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.T
 }
 
 // onStream reports whether an unsent call begun at begun was held back by
-// streams alone: the connection was ready for all of the call and still is.
+// streams alone: the target announced a limit, and the connection was ready
+// for all of the call and still is.
 // The second check covers a watcher that has not yet seen the connection go.
 func (s *Sender) onStream(conn *grpc.ClientConn, begun time.Time) bool {
-	return !begun.IsZero() && s.ready.throughout(begun) && conn.GetState() == connectivity.Ready
+	return !begun.IsZero() && s.tracker.limited() && s.ready.throughout(begun) && conn.GetState() == connectivity.Ready
 }

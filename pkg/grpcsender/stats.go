@@ -109,9 +109,11 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 
 // streamWait is how long a call that got its headers out waited for a stream
 // after it had a connection: from the pick, or from the start if the pick did
-// not wait.
-func (t callTimes) streamWait() time.Duration {
-	if t.headerAt.IsZero() || t.begunAt.IsZero() {
+// not wait. Without a limit announced the client's quota is MaxUint32 and no
+// call can wait for a stream: the time to the headers is then the scheduler's
+// and the transport's, 1–3 calls over 1ms at 300 rps on a CI runner.
+func (t callTimes) streamWait(limited bool) time.Duration {
+	if !limited || t.headerAt.IsZero() || t.begunAt.IsZero() {
 		return 0
 	}
 

@@ -675,3 +675,33 @@ func TestConnections_CallersOwnCredentialsLeaveTheReportSilent(t *testing.T) {
 		t.Errorf("connections %+v, want none: no handshake went through the sender's credentials", *got)
 	}
 }
+
+// Ground: boundary — with no limit announced the time from the pick to the headers is the
+// scheduler's, not a stream wait: CI saw 1–3 calls over 1ms at 300 rps (run 35901535339). An
+// end-to-end test sees it only on a loaded runner, at random.
+func TestStreamWait_NoLimitAnnouncedNoStreamWait(t *testing.T) {
+	begun := time.Now()
+	times := callTimes{begunAt: begun, headerAt: begun.Add(5 * time.Millisecond)}
+
+	if got := times.streamWait(false); got != 0 {
+		t.Errorf("stream wait %v with no limit announced, want 0", got)
+	}
+	if got := times.streamWait(true); got != 5*time.Millisecond {
+		t.Errorf("stream wait %v under a limit, want 5ms", got)
+	}
+}
+
+// Ground: boundary — an unsent call on a ready connection with no limit announced cannot have
+// waited for a stream; putting it there would print a stream verdict about a limit that does
+// not exist.
+func TestOnStream_NoLimitAnnouncedIsNeverAStreamWait(t *testing.T) {
+	sender := serve(t, slowTarget{})
+
+	if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if sender.onStream(sender.conn, time.Now()) {
+		t.Errorf("a call on a ready connection with no limit announced was put down to streams")
+	}
+}
