@@ -7,7 +7,7 @@ In short:
 
 - **When the server behaves**, both tools report the same latencies (mode A).
 - **When the server freezes for 2 seconds** (mode B1), ghz in synchronous mode (the default)
-  reports p99 of 10.8ms with `-c 10` and 12ms with the default `-c 50`. LeetTest reports 1.71s.
+  reports p99 of 10.8ms with `-c 10` and 12.0ms with the default `-c 50`. LeetTest reports 1.71s.
   ghz with `--async` also reports 1.71s.
 - **When the server is slower than the load needs** (mode B2), ghz in synchronous mode (the
   default) with `-c 10` sends 2980 of the 6000 requested calls. Its latencies are correct for the
@@ -93,7 +93,7 @@ are right; the load is not. Reading only the latency columns, this run looks lik
 that handles 200 RPS at 101ms. The server handled 100 RPS.
 
 With the default `-c 50` the ceiling is 500 calls per second, and the full load goes out. The
-same ceiling applies to any c once the server slows down enough: at `-c 50` it is reached at
+same ceiling applies to any c once the server slows down enough: at `-c 50` it is reached above
 250ms.
 
 ### A: control
