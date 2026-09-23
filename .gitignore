@@ -62,6 +62,10 @@ config.local.*
 CLAUDE.md
 docs/decisions.md
 docs/strategy.md
+docs/compare-ghz.md
 
 # Night shift notes live in the internal repo
 /night/
+
+# ghz comparison: binaries and raw outputs
+/test/compare-ghz/out/
