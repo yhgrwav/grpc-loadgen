@@ -234,6 +234,10 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		return withBudgetAdvice(err)
 	}
 
+	// Methods nothing could be checked against: named again with the report,
+	// where a full-screen run does not scroll them away.
+	var unchecked []cli.Unchecked
+
 	if grpcSender != nil {
 		defer func() { _ = grpcSender.Close() }()
 
@@ -243,11 +247,16 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 		// Bodies need the schema, and the schema needs the connection.
 		dataCtx, cancelData := context.WithTimeout(ctx, *connectTimeout)
-		dataErr := cli.AttachData(dataCtx, descriptor.NewReflectionResolver(grpcSender.Conn()), cfg, opts.Calls)
+		var dataErr error
+		unchecked, dataErr = cli.AttachData(dataCtx, descriptor.NewReflectionResolver(grpcSender.Conn()), cfg, opts.Calls)
 		cancelData()
 
 		if dataErr != nil {
 			return dataErr
+		}
+		for _, m := range unchecked {
+			fmt.Fprintf(stderr, "%s: %v; the method was not checked before the run and sends an "+
+				"empty message\n", m.Method, m.Err)
 		}
 	}
 
@@ -323,6 +332,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 	report := eng.Report()
 	cli.PrintReport(stdout, target, report)
+	cli.PrintUnchecked(stdout, unchecked)
 	s.Finish()
 
 	return runResult(report, runErr)
