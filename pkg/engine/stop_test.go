@@ -371,3 +371,33 @@ func TestRun_FinishedAsPlannedIsComplete(t *testing.T) {
 		t.Error("Incomplete = true for a run that finished as planned")
 	}
 }
+
+// Ground: boundary — SIGTERM aborts mid-plan, and the rate must then divide by
+// the time the run actually sent for, not by the plan it never reached. With a
+// one-hour plan the difference is three orders of magnitude, and no end-to-end
+// test can hold a run to an exact moment.
+func TestAbort_RatesOverTheTimeItSentNotThePlan(t *testing.T) {
+	h := newHoldingSender()
+	eng := stopEngine(t, h, time.Minute)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := runAsync(ctx, eng)
+
+	waitEntered(t, h, 40)
+	cancel()
+
+	if err := waitRun(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run after abort = %v, want context.Canceled", err)
+	}
+
+	report := eng.Report()
+	if report.Sent == 0 {
+		t.Fatal("nothing was sent")
+	}
+	// 200 RPS is the plan; the abort comes a fraction of a second in, so the
+	// rate is around 200 however short the run was. Dividing by the hour of
+	// the plan would give about 0.01.
+	if got := report.Methods[0].RPS; got < 100 || got > 400 {
+		t.Errorf("rps = %.2f after %d calls in %v, want about 200",
+			got, report.Sent, report.Duration)
+	}
+}
