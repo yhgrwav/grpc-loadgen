@@ -17,6 +17,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
@@ -56,6 +57,21 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	for _, note := range reportNotes(report) {
 		fmt.Fprintf(w, "\n%s\n", note)
 	}
+}
+
+// PrintUnchecked names the methods nothing could be checked against before
+// the run. It goes with the report rather than only into the progress output:
+// a warning printed before a full-screen run is gone by the time the numbers
+// are read, and a typo in one of these methods shows up above only as
+// failures.
+func PrintUnchecked(w io.Writer, methods []string) {
+	if len(methods) == 0 {
+		return
+	}
+
+	fmt.Fprintf(w, "\nnot checked before the run: %s. Server reflection is off on the target, so\n"+
+		"a method that does not exist there is seen only as the failures above.\n",
+		strings.Join(methods, ", "))
 }
 
 // formatQuantile prints a percentile the way it is known: an exact value, a

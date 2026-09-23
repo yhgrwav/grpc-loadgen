@@ -65,8 +65,7 @@ func TestAttachData_AMethodTheTargetDoesNotHaveIsRefusedBeforeTheRun(t *testing.
 	cfg, calls := loadOf(config.Call{Method: "wallet.v1.Wallet/Typo"})
 	resolver := &fakeResolver{known: map[string]protoreflect.MessageDescriptor{}}
 
-	var warn strings.Builder
-	err := AttachData(t.Context(), resolver, cfg, calls, &warn)
+	_, err := AttachData(t.Context(), resolver, cfg, calls)
 
 	if !errors.Is(err, descriptor.ErrMethodNotFound) {
 		t.Fatalf("error = %v, want %v", err, descriptor.ErrMethodNotFound)
@@ -88,8 +87,7 @@ func TestAttachData_ChecksEveryMethodEvenWithoutData(t *testing.T) {
 		"wallet.v1.Wallet/Two": empty,
 	}}
 
-	var warn strings.Builder
-	if err := AttachData(t.Context(), resolver, cfg, calls, &warn); err != nil {
+	if _, err := AttachData(t.Context(), resolver, cfg, calls); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if len(resolver.asked) != 2 {
@@ -103,12 +101,12 @@ func TestAttachData_WithoutReflectionAMethodWithoutDataOnlyWarns(t *testing.T) {
 	cfg, calls := loadOf(config.Call{Method: "wallet.v1.Wallet/One"})
 	resolver := &fakeResolver{err: descriptor.ErrReflectionUnsupported}
 
-	var warn strings.Builder
-	if err := AttachData(t.Context(), resolver, cfg, calls, &warn); err != nil {
+	unchecked, err := AttachData(t.Context(), resolver, cfg, calls)
+	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if !strings.Contains(warn.String(), "wallet.v1.Wallet/One") {
-		t.Errorf("warning %q does not name the method left unchecked", warn.String())
+	if len(unchecked) != 1 || unchecked[0] != "wallet.v1.Wallet/One" {
+		t.Errorf("unchecked = %v, want the one method nothing could be checked against", unchecked)
 	}
 }
 
@@ -116,8 +114,7 @@ func TestAttachData_WithoutReflectionAMethodWithDataStillFails(t *testing.T) {
 	cfg, calls := loadOf(config.Call{Method: "wallet.v1.Wallet/One", Data: map[string]any{"a": 1}})
 	resolver := &fakeResolver{err: descriptor.ErrReflectionUnsupported}
 
-	var warn strings.Builder
-	if err := AttachData(t.Context(), resolver, cfg, calls, &warn); !errors.Is(err, descriptor.ErrReflectionUnsupported) {
+	if _, err := AttachData(t.Context(), resolver, cfg, calls); !errors.Is(err, descriptor.ErrReflectionUnsupported) {
 		t.Fatalf("error = %v, want %v", err, descriptor.ErrReflectionUnsupported)
 	}
 }

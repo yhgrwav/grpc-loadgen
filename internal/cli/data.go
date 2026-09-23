@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -71,30 +70,30 @@ func RequestBody(desc protoreflect.MessageDescriptor, data any) ([]byte, error) 
 // calls are the engine calls built from cfg, in the same order.
 func AttachData(
 	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
-	calls []engine.Call, warn io.Writer,
-) error {
+	calls []engine.Call,
+) (unchecked []string, err error) {
 	var errs []error
 
 	for i := range cfg.Load.Calls {
 		call := &cfg.Load.Calls[i]
 
-		method, err := resolver.Resolve(ctx, call.Method)
+		method, resolveErr := resolver.Resolve(ctx, call.Method)
 
 		switch {
-		case errors.Is(err, descriptor.ErrReflectionUnsupported) && call.Data == nil:
-			fmt.Fprintf(warn, "%s: %v, so the method was not checked before the run; "+
-				"it sends an empty message\n", call.Method, err)
+
+		case errors.Is(resolveErr, descriptor.ErrReflectionUnsupported) && call.Data == nil:
+			unchecked = append(unchecked, call.Method)
 
 			continue
-		case errors.Is(err, descriptor.ErrReflectionUnsupported):
+		case errors.Is(resolveErr, descriptor.ErrReflectionUnsupported):
 			errs = append(errs, fmt.Errorf("%s: %w: the schema for its data comes from reflection; "+
-				"without data the method runs with an empty message", call.Method, err))
+				"without data the method runs with an empty message", call.Method, resolveErr))
 
 			continue
-		case err != nil:
+		case resolveErr != nil:
 			// Named here rather than left to the resolver: which method the
 			// run cannot make is ours to say, whoever resolves it.
-			errs = append(errs, fmt.Errorf("%s: %w", call.Method, err))
+			errs = append(errs, fmt.Errorf("%s: %w", call.Method, resolveErr))
 
 			continue
 		}
@@ -113,7 +112,7 @@ func AttachData(
 		calls[i].Payload = body
 	}
 
-	return errors.Join(errs...)
+	return unchecked, errors.Join(errs...)
 }
 
 // withProtoNames adds the .proto name of a field protojson names by its JSON
