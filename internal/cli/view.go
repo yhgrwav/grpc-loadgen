@@ -28,9 +28,13 @@ import (
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
 // with the run.
-func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper) *tea.Program {
+// reportOf is called once the run returns, for the report the final screen shows.
+func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper,
+	reportOf func() RunReport,
+) *tea.Program {
 	m := newModel(target, eng, warmup, settings, stopper)
 	m.service = service
+	m.reportOf = reportOf
 
 	return tea.NewProgram(m,
 		tea.WithAltScreen(),
@@ -76,12 +80,32 @@ func contentWidth(width int) int {
 func (m *model) body(width int) string {
 	inner := contentWidth(width)
 
+	if m.done && m.height > 0 {
+		full := m.fullBody(inner)
+		if strings.Count(full, "\n")+1+frameHeight <= m.height {
+			return full
+		}
+
+		return m.finalBody(inner, m.height-frameHeight)
+	}
+
+	return m.fullBody(inner)
+}
+
+// frameHeight is the lines the frame takes: a border and a padding line at
+// the top and at the bottom.
+const frameHeight = 4
+
+func (m *model) fullBody(inner int) string {
 	var b strings.Builder
 
 	b.WriteString(m.header(inner))
 	b.WriteString("\n\n")
-	b.WriteString(m.tabBar(inner))
-	b.WriteString("\n\n")
+	// The final screen switches nothing, so it shows no tabs.
+	if !m.done {
+		b.WriteString(m.tabBar(inner))
+		b.WriteString("\n\n")
+	}
 
 	switch {
 	case m.done:
@@ -467,7 +491,7 @@ func (m *model) footerHints() string {
 	width := contentWidth(m.viewWidth())
 
 	if m.done {
-		return fitKeyHints(m.styles, width, hint{m.text.HintTabs(), 1}, hint{m.text.PressToExit(), 0})
+		return fitKeyHints(m.styles, width, hint{m.text.PressToExit(), 0})
 	}
 
 	if m.notice != "" {
@@ -626,7 +650,7 @@ func (m *model) paletteOptions() []string {
 	return options
 }
 
-func (m *model) finalReport(width int) string {
+func (m *model) finalParts(width int) finalParts {
 	report := m.report
 
 	title := m.text.ReportTitle()
@@ -634,95 +658,188 @@ func (m *model) finalReport(width int) string {
 		title = m.text.ReportStopped()
 	}
 
-	var b strings.Builder
-
-	b.WriteString(m.styles.title.Render(title))
-	b.WriteString("\n")
-	b.WriteString(fitStatLine(m.styles, width,
-		countField(m.text.Sent(), report.Sent, 1),
-		statField{label: m.text.Errors(), value: m.errorShare(report.Sent, report.Failed)},
-		statField{label: "rps", value: fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1)), drop: 2},
-		statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
-	))
-	b.WriteString("\n" + m.notSentLine(width, report.NotSent) + "\n")
-
-	// Sent, errors and p99 always fit; p50 and p90 go first when the terminal
-	// is narrow, and the method name takes whatever is left. Columns are sized
-	// by width on screen and never narrower than their heading: "отправлено"
-	// is ten columns, and a Chinese heading takes two per character.
-	const (
-		pColumn = 9
-		minName = 12
-	)
-
-	sentColumn := max(9, lipgloss.Width(m.text.Sent()))
-	errColumn := max(8, lipgloss.Width(m.text.Errors()))
-	coreColumns := 1 + sentColumn + 1 + errColumn + 1 + pColumn
-	midColumns := 1 + pColumn + 1 + pColumn
-
-	wide := width-coreColumns-midColumns >= minName
-
-	nameWidth := width - coreColumns
-	if wide {
-		nameWidth -= midColumns
+	p := finalParts{
+		top: []string{
+			m.styles.title.Render(title),
+			fitStatLine(m.styles, width,
+				countField(m.text.Sent(), report.Sent, 1),
+				countField(m.text.Failed(), report.Failed, 0),
+				statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
+			),
+		},
 	}
-	nameWidth = min(max(nameWidth, minName), 40)
-
-	header := padRight(m.text.ColumnMethod(), nameWidth) + " " +
-		padLeft(m.text.Sent(), sentColumn) + " " + padLeft(m.text.Errors(), errColumn)
-	if wide {
-		header += " " + padLeft("p50", pColumn) + " " + padLeft("p90", pColumn)
-	}
-	header += " " + padLeft("p99", pColumn)
-
-	b.WriteString(m.styles.label.Render(header))
-	b.WriteString("\n")
-
-	for i := range report.Methods {
-		method := &report.Methods[i]
-		name := truncate(shortMethod(method.Method), nameWidth)
-
-		sent := formatCount(method.Sent)
-		if lipgloss.Width(sent) > sentColumn && method.Sent >= 0 {
-			sent = compactCount(uint64(method.Sent))
-		}
-
-		errors := m.styles.value
-		if method.Failed > 0 {
-			errors = m.styles.bad
-		}
-
-		b.WriteString(m.styles.value.Render(padRight(name, nameWidth)))
-		b.WriteString(m.styles.value.Render(" " + padLeft(sent, sentColumn)))
-		b.WriteString(errors.Render(" " + padLeft(m.errorShare(method.Sent, method.Failed), errColumn)))
-		if wide {
-			b.WriteString(m.styles.muted.Render(" " + padLeft(formatQuantile(method.P50), pColumn) +
-				" " + padLeft(formatQuantile(method.P90), pColumn)))
-		}
-		b.WriteString(m.styles.value.Render(" " + padLeft(formatQuantile(method.P99), pColumn)))
-		b.WriteString("\n")
+	if report.NotSent > 0 {
+		p.top = append(p.top, strings.TrimSuffix(m.notSentLine(width, report.NotSent), "\n"))
 	}
 
 	// The same words the text report prints: what the target did, what the
 	// generator did, and the verdicts. Two renderings of one report must not
-	// tell the reader different things.
+	// tell the reader different things. The verdicts stand above the table.
 	for _, note := range reportNotes(report) {
-		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render(wrapNote(note, width)))
-		b.WriteString("\n")
+		block := strings.Split(m.styles.note.Render(wrapNote(note, width)), "\n")
+		if isVerdict(note) {
+			p.verdicts = append(p.verdicts, block)
+		} else {
+			p.notes = append(p.notes, block)
+		}
 	}
-
+	if note := uncheckedNote(m.unchecked); note != "" {
+		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(note, width)), "\n"))
+	}
 	if m.stopper.Stopping() {
-		b.WriteString("\n")
-		b.WriteString(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)))
+		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)), "\n"))
 	}
-
 	if m.err != nil && !m.stopper.Stopping() {
-		b.WriteString("\n")
-		b.WriteString(m.styles.bad.Render(wrapNote(m.err.Error(), width)))
+		p.verdicts = append(p.verdicts, strings.Split(m.styles.bad.Render(wrapNote(m.err.Error(), width)), "\n"))
+	}
+	for _, v := range m.shortVerdicts(width) {
+		p.short = append(p.short, strings.Split(m.styles.note.Render(wrapNote(v, width)), "\n"))
 	}
 
-	return b.String()
+	p.head, p.groups = m.finalTable(width)
+
+	return p
+}
+
+// finalParts is the final screen in the order it gives way on a short
+// terminal: the top and the verdicts never, the notes first, then the rows.
+type finalParts struct {
+	top      []string
+	verdicts [][]string
+	// short is the verdicts in one phrase each, for a terminal too short for
+	// them in full.
+	short  [][]string
+	head   []string
+	groups [][]string
+	notes  [][]string
+}
+
+func isVerdict(note string) bool {
+	return strings.HasPrefix(note, "invalid run:") || strings.HasPrefix(note, "incomplete:")
+}
+
+func (m *model) finalReport(width int) string {
+	p := m.finalParts(width)
+
+	blocks := make([][]string, 0, len(p.verdicts)+len(p.notes)+2)
+	blocks = append(blocks, p.top)
+	blocks = append(blocks, p.verdicts...)
+	table := append([]string{}, p.head...)
+	for _, g := range p.groups {
+		table = append(table, g...)
+	}
+	blocks = append(blocks, table)
+	blocks = append(blocks, p.notes...)
+
+	out := make([]string, 0, 64)
+	for i, block := range blocks {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, block...)
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// finalBody is the final screen when the full body is taller than height:
+// no blank lines, tabs or progress bar, then the notes go, then rows, each cut counted.
+// Below the top, the verdicts, the heading and one method there is nothing
+// honest to show but where the report will be.
+func (m *model) finalBody(width, height int) string {
+	p := m.finalParts(width)
+
+	total := 0
+	for _, g := range p.groups {
+		total += len(g)
+	}
+	for _, n := range p.notes {
+		total += len(n)
+	}
+
+	// A table row takes as many lines as the heading: one, two or three.
+	rowLines := len(p.head)
+	// The footer and what was cut, sized for the most that can be cut.
+	moreLines := func(n int) []string {
+		return strings.Split(m.styles.muted.Render(wrapNote(m.text.MoreLines(n), width)), "\n")
+	}
+	minimum := rowLines
+	if len(p.groups) > 1 {
+		minimum++ // the "N more methods" line
+	}
+
+	var lines []string
+	room := 0
+	layout := func(verdicts [][]string) {
+		// The header's first line: the progress bar under it is over.
+		lines = strings.Split(m.header(width), "\n")[:1]
+		lines = append(lines, p.top...)
+		for _, v := range verdicts {
+			lines = append(lines, v...)
+		}
+		lines = append(lines, p.head...)
+		room = height - len(lines) - 1 - len(moreLines(total+notesLen(p.verdicts)))
+	}
+
+	// A verdict in full that leaves no room for a row gives way to its short
+	// form; the full one is in the report printed after exit.
+	layout(p.verdicts)
+	if room < minimum {
+		layout(p.short)
+		total += notesLen(p.verdicts)
+	}
+	if len(p.groups) == 0 || room < minimum {
+		return wrapNote(m.text.TooShort(), width)
+	}
+
+	shown := 0
+rows:
+	for i, g := range p.groups {
+		for j := 0; j < len(g); j += rowLines {
+			need := rowLines
+			if i < len(p.groups)-1 {
+				need++ // the "N more methods" line
+			}
+			if (i > 0 || j > 0) && need > room {
+				if left := len(p.groups) - i - 1; left > 0 || j == 0 {
+					if j == 0 {
+						left++
+					}
+					lines = append(lines, m.styles.muted.Render(truncate(m.text.MoreMethods(left), width)))
+					room--
+				}
+
+				break rows
+			}
+			lines = append(lines, g[j:j+rowLines]...)
+			room -= rowLines
+			shown += rowLines
+		}
+	}
+	for _, n := range p.notes {
+		if len(n) > room || shown < total-notesLen(p.notes) {
+			break
+		}
+		lines = append(lines, n...)
+		room -= len(n)
+		shown += len(n)
+	}
+
+	if total > shown {
+		lines = append(lines, moreLines(total-shown)...)
+	}
+	lines = append(lines, m.footer())
+
+	return strings.Join(lines, "\n")
+}
+
+func notesLen(notes [][]string) int {
+	n := 0
+	for _, note := range notes {
+		n += len(note)
+	}
+
+	return n
 }
 
 // note returns the live view's note in full and in the short form a narrow
@@ -772,17 +889,20 @@ const FakeTarget = "fake target"
 type LiveView interface {
 	Run() (tea.Model, error)
 	Send(msg tea.Msg)
+	Quit()
 }
 
 // RunLive runs the view and the load side by side and returns the run's error.
 // It returns only after the run has: the view can close first, on q, and a
 // report built while requests are still being recorded would be a snapshot of
-// a moving engine.
-func RunLive(view LiveView, run func() error, cancel func()) error {
+// a moving engine. Once the run returns, a stop request on stopper closes the
+// final screen instead of exiting without the report.
+func RunLive(view LiveView, stopper *Stopper, run func() error, cancel func()) error {
 	finished := make(chan error, 1)
 
 	go func() {
 		err := run()
+		stopper.Returned(view.Quit)
 		finished <- err
 		view.Send(doneMsg{err: err})
 	}()

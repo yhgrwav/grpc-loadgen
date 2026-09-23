@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -415,4 +416,49 @@ func (t Text) TooNarrow(minimum int) string {
 
 func (t Text) NotSent() string {
 	return t.get(phrase{LangRU: "не отправлено", LangEN: "not sent", LangDE: "nicht gesendet", LangZH: "未发送"})
+}
+
+// SentColumn heads the final table's sent column: "отправлено" is too wide
+// for a column of counts.
+func (t Text) SentColumn() string {
+	return t.get(phrase{LangRU: "отпр.", LangEN: "sent", LangDE: "gesendet", LangZH: "已发送"})
+}
+
+// MoreMethods counts the methods a short terminal left out of the table.
+func (t Text) MoreMethods(n int) string {
+	if n == 1 && t.lang == LangEN {
+		return "1 more method"
+	}
+
+	return t.get(phrase{
+		LangRU: fmt.Sprintf("ещё методов: %d", n),
+		LangEN: fmt.Sprintf("%d more methods", n),
+		LangDE: fmt.Sprintf("%d weitere Methoden", n),
+		LangZH: fmt.Sprintf("还有 %d 个方法", n),
+	})
+}
+
+// MoreLines counts what a short terminal left out of the final screen.
+func (t Text) MoreLines(n int) string {
+	return t.get(phrase{
+		LangRU: fmt.Sprintf("ещё строк: %d, полный отчёт будет напечатан после выхода", n),
+		LangEN: fmt.Sprintf("%d more lines, the full report is printed after exit", n),
+		LangDE: fmt.Sprintf("%d weitere Zeilen, der vollständige Bericht wird nach dem Beenden ausgegeben", n),
+		LangZH: fmt.Sprintf("还有 %d 行，完整报告将在退出后打印", n),
+	})
+}
+
+// TooShort replaces the final screen on a terminal too short for any of it.
+func (t Text) TooShort() string {
+	return t.get(phrase{
+		LangRU: "терминал слишком мал, полный отчёт будет напечатан после выхода",
+		LangEN: "terminal too small, the full report is printed after exit",
+		LangDE: "Terminal zu klein, der vollständige Bericht wird nach dem Beenden ausgegeben",
+		LangZH: "终端太小，完整报告将在退出后打印",
+	})
+}
+
+// Failed is the count of failed calls, the text report's "failed".
+func (t Text) Failed() string {
+	return t.get(phrase{LangRU: "ошибки", LangEN: "failed", LangDE: "Fehler", LangZH: "失败"})
 }

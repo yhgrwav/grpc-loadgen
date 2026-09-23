@@ -360,9 +360,10 @@ func TestRun_EverySentRequestReachesTheTarget(t *testing.T) {
 func TestRun_MissingMethodIsReportedNotFatal(t *testing.T) {
 	target := startTarget(t)
 
+	// Every call rejected: the run finishes and reports, and is invalid.
 	res := runCLI(t.Context(), t, 10*time.Second, "-c", writeConfig(t, target.addr, missingMethod, plaintext))
-	if res.err != nil {
-		t.Fatalf("run: %v, want the run to finish and report the failures", res.err)
+	if !errors.Is(res.err, ErrInvalidRun) {
+		t.Fatalf("run: %v, want the run to finish, report the failures and be invalid", res.err)
 	}
 
 	sent, failed := reportRow(t, res.stdout, missingMethod)
@@ -1064,5 +1065,35 @@ func TestRun_WithoutReflectionAMethodWithoutDataStillRuns(t *testing.T) {
 	if !strings.Contains(res.stdout, "not checked before the run") || !strings.Contains(res.stdout, checkMethod) ||
 		!strings.Contains(res.stdout, "reflection is off") {
 		t.Errorf("the report does not say the method was never checked:\n%s", res.stdout)
+	}
+}
+
+// Ground: contract — a method whose every call was rejected measured how fast
+// the target says no, not the target: for a pipeline that is a config error,
+// the same class as a cap hit, and it outranks an early stop.
+func TestRunResult_ARejectedMethodIsAnInvalidRun(t *testing.T) {
+	rejected := engine.RefusalLatency{Count: 100}
+	for _, tc := range []struct {
+		name   string
+		report engine.Report
+		runErr error
+		want   error
+	}{
+		{"one of three methods rejected outright", engine.Report{RequestRejected: true, Methods: []engine.MethodReport{
+			{Method: "a.B/Good", Sent: 100}, {Method: "a.B/Also", Sent: 100},
+			{Method: "a.B/Typo", Sent: 100, Failed: 100, Rejected: rejected},
+		}}, nil, ErrInvalidRun},
+		{"rejected and a cap hit", engine.Report{RequestRejected: true, CapHit: &engine.CapHit{Unsent: 1}},
+			fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded), ErrInvalidRun},
+		{"rejected and a soft stop", engine.Report{RequestRejected: true, Incomplete: true}, context.Canceled, ErrInvalidRun},
+		{"one served call among 99 rejected", engine.Report{Methods: []engine.MethodReport{
+			{Method: "a.B/One", Sent: 100, Failed: 99, Rejected: engine.RefusalLatency{Count: 99}},
+		}}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := runResult(tc.report, tc.runErr); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+				t.Errorf("err = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }

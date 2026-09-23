@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/yhgrwav/leettest/pkg/descriptor"
@@ -25,8 +26,17 @@ import (
 	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
+// RunReport is the engine's report with what only the CLI knows about the
+// run: the methods nothing could be checked against before it.
+type RunReport struct {
+	engine.Report
+	Unchecked []Unchecked
+}
+
 // PrintReport writes the finished run to w as plain text.
-func PrintReport(w io.Writer, target string, report engine.Report) {
+func PrintReport(w io.Writer, target string, run RunReport) {
+	report := run.Report
+
 	fmt.Fprintf(w, "run finished: %s in %s\n", target, formatDuration(report.Duration))
 	fmt.Fprintf(w, "sent %d, failed %d", report.Sent, report.Failed)
 	if report.NotSent > 0 {
@@ -61,19 +71,23 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	for _, note := range reportNotes(report) {
 		fmt.Fprintf(w, "\n%s\n", note)
 	}
+	if note := uncheckedNote(run.Unchecked); note != "" {
+		fmt.Fprintf(w, "\n%s\n", note)
+	}
 }
 
-// PrintUnchecked names the methods nothing could be checked against before
+// uncheckedNote names the methods nothing could be checked against before
 // the run. It goes with the report rather than only into the progress output:
 // a warning printed before a full-screen run is gone by the time the numbers
 // are read, and a typo in one of these methods shows up above only as
 // failures.
-func PrintUnchecked(w io.Writer, methods []Unchecked) {
+func uncheckedNote(methods []Unchecked) string {
 	if len(methods) == 0 {
-		return
+		return ""
 	}
 
-	fmt.Fprintf(w, "\nnot checked before the run:\n")
+	var b strings.Builder
+	b.WriteString("not checked before the run:")
 	for _, m := range methods {
 		// "off" only when the target said it does not implement reflection.
 		// Refused, timed out or answered with something else is a different
@@ -83,10 +97,11 @@ func PrintUnchecked(w io.Writer, methods []Unchecked) {
 			why = "server reflection is off on the target"
 		}
 
-		fmt.Fprintf(w, "  %s: %s\n", displayMethod(m.Method), why)
+		fmt.Fprintf(&b, "\n  %s: %s", displayMethod(m.Method), why)
 	}
-	fmt.Fprint(w, "A method that does not exist on the target is then seen only as the failures\n"+
-		"above.\n")
+	b.WriteString("\nA method that does not exist on the target is then seen only as the failures\nabove.")
+
+	return b.String()
 }
 
 // formatQuantile prints a percentile the way it is known: an exact value, a

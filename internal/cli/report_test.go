@@ -58,7 +58,7 @@ func TestPrintReport(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	text := out.String()
 
@@ -83,7 +83,7 @@ func TestPrintReportMarksPercentilesThatRanPastTheTimeout(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	text := out.String()
 
@@ -102,7 +102,7 @@ func TestPrintReportShowsUnmeasuredPercentileAsDash(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if !strings.Contains(out.String(), "-") {
 		t.Errorf("a method with no measurements must not print a zero percentile:\n%s", out.String())
@@ -113,7 +113,7 @@ func TestPrintReportShowsTheMethodAsTheConfigWritesIt(t *testing.T) {
 	report := engine.Report{Methods: []engine.MethodReport{{Method: "/a.B/One", Sent: 1}}}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if strings.Contains(out.String(), "/a.B/One") || !strings.Contains(out.String(), "a.B/One") {
 		t.Errorf("report shows the gRPC path instead of the name from the config:\n%s", out.String())
@@ -131,7 +131,7 @@ func TestPrintReportWarnsAboutCallsOffTheTimeline(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if !strings.Contains(out.String(), "warning: 3 requests fell outside the per-second timeline") {
 		t.Errorf("the report must say how many calls are missing from the timeline:\n%s", out.String())
@@ -139,7 +139,7 @@ func TestPrintReportWarnsAboutCallsOffTheTimeline(t *testing.T) {
 
 	out.Reset()
 	report.Methods[0].OutsideTimeline, report.Methods[1].OutsideTimeline = 0, 0
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if strings.Contains(out.String(), "timeline") {
 		t.Errorf("no warning is due when nothing fell off the timeline:\n%s", out.String())
@@ -159,7 +159,7 @@ func TestPrintReportWarnsAboutUnclassifiedCalls(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if !strings.Contains(out.String(), "warning: 3 requests came back without a category") {
 		t.Errorf("the report must say how many calls the sender left unclassified:\n%s", out.String())
@@ -170,7 +170,7 @@ func TestPrintReportWarnsAboutUnclassifiedCalls(t *testing.T) {
 
 	out.Reset()
 	report.Methods = report.Methods[:0]
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 
 	if strings.Contains(out.String(), "without a category") {
 		t.Errorf("no unclassified calls, no warning:\n%s", out.String())
@@ -193,7 +193,7 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	var row string
@@ -211,7 +211,7 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 
 	out.Reset()
 	report.Methods[0].Refusal = engine.RefusalLatency{}
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	if strings.Contains(out.String(), "refused") {
 		t.Errorf("no refusals, no refused row:\n%s", out.String())
 	}
@@ -225,7 +225,7 @@ func TestPrintReportSaysACapHitIsTheGenerators(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	// The verdict names the allowance and both causes, and gives no delay:
@@ -265,7 +265,7 @@ func TestPrintReportStatesWhatTheTargetDidNotAnswer(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	for _, want := range []string{"at 50 rps", "150 of 150", "100.0%", "no answer within 300ms",
@@ -290,7 +290,7 @@ func TestPrintReportStatesARateRangeAndNoSilenceClauseWithoutOne(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	if !strings.Contains(text, "at 20-40 rps") || !strings.Contains(text, "50 of 150") {
@@ -306,13 +306,13 @@ func TestPrintReportStatesARateRangeAndNoSilenceClauseWithoutOne(t *testing.T) {
 // split them too.
 func TestPrintReportKeepsAMethodsUnsentTimeoutsWithItsSilence(t *testing.T) {
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{
 		Duration: 3 * time.Second,
 		Methods: []engine.MethodReport{{
 			Method: "a.B/One", Sent: 150, TimedOut: 146, UnsentTimedOut: 4,
 			RPSLow: 50, RPSHigh: 50, Timeout: 300 * time.Millisecond,
 		}},
-	})
+	}})
 
 	text := out.String()
 	if !strings.Contains(text, "within 300ms.\na.B/One: 4 calls timed out before going out") {
@@ -328,7 +328,7 @@ func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	for _, want := range []string{"start lag", "3ms", "12ms", "7ms"} {
@@ -346,10 +346,10 @@ func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
 // "rps" leaves the reader to guess which.
 func TestPrintReportNamesTheRateColumnForWhatItCounts(t *testing.T) {
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{
 		Duration: time.Second,
 		Methods:  []engine.MethodReport{{Method: "a.B/One", Sent: 100, RPS: 100}},
-	})
+	}})
 
 	if text := out.String(); !strings.Contains(text, "sent/s") {
 		t.Errorf("rate column is not named sent/s:\n%s", text)
@@ -360,7 +360,7 @@ func TestPrintReportNamesTheRateColumnForWhatItCounts(t *testing.T) {
 // overload refusals it would read as a service shedding requests.
 func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{
 		Duration:        time.Second,
 		Sent:            100,
 		Failed:          100,
@@ -372,7 +372,7 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 				P50:   metrics.Quantile{Value: 300 * time.Microsecond, Exact: true, Defined: true},
 			},
 		}},
-	})
+	}})
 
 	text := out.String()
 	if !strings.Contains(text, "rejected") {
@@ -399,7 +399,7 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 // method: a share taken over the run would be 33% and no verdict at all.
 func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{
 		Duration:        time.Second,
 		Sent:            300,
 		Failed:          100,
@@ -413,7 +413,7 @@ func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
 			{Method: "a.B/Typo", Sent: 100, Failed: 100, RPS: 100,
 				Rejected: engine.RefusalLatency{Count: 100}},
 		},
-	})
+	}})
 
 	text := out.String()
 	at := strings.Index(text, "invalid run")
@@ -440,14 +440,14 @@ func TestPrintReportNamesTheMomentTheAnswersStopped(t *testing.T) {
 	from := 8
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{
 		Duration: 15 * time.Second,
 		Methods: []engine.MethodReport{{
 			Method: "a.B/One", Sent: 7500, Failed: 3499, TimedOut: 3499,
 			SilentFrom: &from, LastAnswerAt: &last, RPSLow: 500, RPSHigh: 500,
 			Timeout: 2 * time.Second,
 		}},
-	})
+	}})
 
 	text := out.String()
 	if !strings.Contains(text, "8.0s") {

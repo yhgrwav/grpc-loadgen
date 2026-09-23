@@ -319,23 +319,25 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 	start := func() error { return eng.Run(ctx) }
 
+	// One report for the final screen and for stdout.
+	reportOf := func() cli.RunReport { return cli.RunReport{Report: eng.Report(), Unchecked: unchecked} }
+
 	var runErr error
 
 	if interactive {
-		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
+		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s, reportOf)
 		view.Store(program)
-		runErr = cli.RunLive(program, start, abort)
+		runErr = cli.RunLive(program, s, start, abort)
 	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil &&
 		!errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
 	}
 
-	report := eng.Report()
+	report := reportOf()
 	cli.PrintReport(stdout, target, report)
-	cli.PrintUnchecked(stdout, unchecked)
 	s.Finish()
 
-	return runResult(report, runErr)
+	return runResult(report.Report, runErr)
 }
 
 // checkFakeFlags rejects tuning of the fake target when it is not in use: the
@@ -432,7 +434,7 @@ func runResult(report engine.Report, runErr error) error {
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
 	}
-	if report.CapHit != nil {
+	if report.CapHit != nil || report.RequestRejected {
 		return ErrInvalidRun
 	}
 	if report.Incomplete {

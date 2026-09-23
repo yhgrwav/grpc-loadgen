@@ -109,9 +109,12 @@ type model struct {
 	// done once a second; a person cannot tell that from every frame.
 	percentilesAt time.Time
 	report        engine.Report
-	warmup        time.Duration
-	overall       history
-	perMethod     map[string]*history
+	unchecked     []Unchecked
+	// reportOf is the finished run's report, called once the run returns.
+	reportOf  func() RunReport
+	warmup    time.Duration
+	overall   history
+	perMethod map[string]*history
 
 	tabs   []string
 	active int
@@ -143,6 +146,7 @@ func newModel(target string, eng *engine.Engine, warmup time.Duration, settings 
 		perMethod: make(map[string]*history),
 		live:      engine.NewLiveBuffer(),
 		settings:  settings,
+		reportOf:  func() RunReport { return RunReport{Report: eng.Report()} },
 	}
 
 	m.applySettings()
@@ -210,7 +214,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case doneMsg:
 		m.engine.SnapshotInto(&m.snapshot, m.live, true)
-		m.report = m.engine.Report()
+		run := m.reportOf()
+		m.report, m.unchecked = run.Report, run.Unchecked
 		m.done = true
 		m.err = msg.err
 
