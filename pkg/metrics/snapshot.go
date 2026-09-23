@@ -15,7 +15,6 @@
 package metrics
 
 import (
-	"fmt"
 	"math"
 	"math/bits"
 	"sort"
@@ -116,29 +115,13 @@ func (s *Snapshot) InvalidCount() int64 {
 // observations. The result is exact only when no censored observation could
 // have taken that rank; otherwise Value is a lower bound. See Quantile.Exact.
 func (s *Snapshot) Percentile(p float64) Quantile {
-	if p < 0 || p > 1 {
-		panic(fmt.Sprintf("metrics: Percentile(%v): p is a fraction in [0, 1], not a 0..100 scale", p))
-	}
-
-	n := s.Count()
-	if n == 0 {
-		return Quantile{}
-	}
-
-	rank := rankFor(p, n)
-	if countAtOrBelow(s.measuredCumBars(), s.censoredMin) >= rank {
-		return Quantile{Value: time.Duration(valueAtRank(s.measuredCumBars(), rank)), Exact: true, Defined: true}
-	}
-
-	// A single threshold c is the bound when fewer than rank measured values
-	// can be below it: the rank-th measured one lies in a bucket above c's.
-	c := s.censoredMin
-	if c == s.censoredMax && (s.measuredN < rank || valueAtRank(s.measuredCumBars(), rank) > highestEquivalent(c)) {
-		return Quantile{Value: time.Duration(c), Defined: true}
-	}
-
-	return Quantile{Value: time.Duration(lowestEquivalent(valueAtRank(s.combinedCumBars(), rank))), Defined: true}
+	return percentile(s, p)
 }
+
+func (s *Snapshot) counts() (measured, censored int64) { return s.measuredN, s.censoredN }
+func (s *Snapshot) thresholds() (lo, hi int64)         { return s.censoredMin, s.censoredMax }
+func (s *Snapshot) measuredAt(rank int64) int64        { return valueAtRank(s.measuredCumBars(), rank) }
+func (s *Snapshot) combinedAt(rank int64) int64        { return valueAtRank(s.combinedCumBars(), rank) }
 
 // Merge combines snapshots by adding their raw counters, not by calling the
 // library's Merge: that walks and re-records every bar and is an order of
@@ -233,18 +216,6 @@ func cumulative(h *hdrhistogram.Histogram) []cumBar {
 		cum = append(cum, cumBar{upperNanos: b.To, cumCount: running})
 	}
 	return cum
-}
-
-// countAtOrBelow returns the count of observations in buckets whose upper
-// bound does not exceed threshold: every one of them is guaranteed below any
-// censored observation with a threshold of at least threshold, since a
-// censored observation's true value always exceeds its own threshold.
-func countAtOrBelow(cum []cumBar, threshold int64) int64 {
-	idx := sort.Search(len(cum), func(i int) bool { return cum[i].upperNanos > threshold })
-	if idx == 0 {
-		return 0
-	}
-	return cum[idx-1].cumCount
 }
 
 // lowestEquivalent is the smallest value stored in v's bucket. With a lowest
