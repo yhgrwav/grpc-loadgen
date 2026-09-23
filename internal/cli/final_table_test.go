@@ -451,6 +451,14 @@ func verdictCases() []struct {
 		{"incomplete", "incomplete: ran 12.0s of the planned 20.0s", "do not compare", func(m *model) {
 			m.report.Incomplete, m.report.Planned = true, 20*time.Second
 		}},
+		{"stream limit", "limited by 1 connection: target allows 1 stream", "not tested above", func(m *model) {
+			for i := range m.report.Methods {
+				m.report.Methods[i].P99WithoutStreamWait = m.report.Methods[i].P99
+			}
+			m.report.Methods[0].P99WithoutStreamWait = exact(5)
+			m.report.StreamWaited, m.report.StreamWaitP99 = 900, exact(9)
+			m.report.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1}
+		}},
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
 			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
@@ -547,7 +555,8 @@ func checkCutCount(t *testing.T, m *model, width int, view string) {
 			cut = atoi(t, strings.Fields(line)[1])
 		}
 		if counting && line != "" && !strings.HasPrefix(line, "> invalid run:") &&
-			!strings.HasPrefix(line, "> incomplete:") && !strings.HasPrefix(line, "> run failed:") {
+			!strings.HasPrefix(line, "> incomplete:") && !strings.HasPrefix(line, "> run failed:") &&
+			!strings.HasPrefix(line, "> limited by") {
 			shown++
 		}
 	}

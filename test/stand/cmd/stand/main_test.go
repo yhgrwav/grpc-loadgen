@@ -81,3 +81,37 @@ func TestRun_CountsWhatArrivedAndWasAnswered(t *testing.T) {
 		}
 	}
 }
+
+// -max-streams 0 must leave the option out rather than pass 0: grpc-go's server then announces
+// nothing, which is "no limit", while a 0 on the wire would be "no streams at all".
+func TestParse_MaxStreamsBecomesAServerOptionUnlessZero(t *testing.T) {
+	tests := []struct {
+		args    []string
+		options int
+	}{
+		{[]string{"-max-streams", "1"}, 1},
+		{[]string{"-max-streams", "0"}, 0},
+		{nil, 0},
+		// A property of the connection, not a way to answer: it goes with any behavior.
+		{[]string{"-max-streams", "2", "-hang-from", "1s"}, 1},
+	}
+
+	for _, tt := range tests {
+		o, err := parse(tt.args, io.Discard)
+		if err != nil {
+			t.Errorf("%v: %v", tt.args, err)
+
+			continue
+		}
+
+		if got := len(o.serverOptions()); got != tt.options {
+			t.Errorf("%v: %d server options, want %d", tt.args, got, tt.options)
+		}
+	}
+}
+
+func TestParse_RejectsNegativeMaxStreams(t *testing.T) {
+	if _, err := parse([]string{"-max-streams", "-1"}, io.Discard); err == nil {
+		t.Error("-max-streams -1 accepted")
+	}
+}

@@ -27,6 +27,10 @@ type callKey struct{}
 // callTimes is what one call recorded about itself, as it stood when it was
 // read.
 type callTimes struct {
+	// begunAt is when grpc-go began the call; pickedAt, when it got a
+	// connection after waiting for one, zero if it did not wait.
+	begunAt  time.Time
+	pickedAt time.Time
 	// headerAt is when the stream's headers went out. grpc-go emits OutHeader
 	// inside NewStream after stream quota is granted, so a call without it
 	// never got a stream.
@@ -83,6 +87,10 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	defer call.mu.Unlock()
 
 	switch v := rpc.(type) {
+	case *stats.Begin:
+		call.times.begunAt = v.BeginTime
+	case *stats.DelayedPickComplete:
+		call.times.pickedAt = time.Now()
 	case *stats.OutHeader:
 		// OutHeader carries no time of its own; the call is synchronous at the
 		// point the headers are handed to the transport.
@@ -97,4 +105,20 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	case *stats.End:
 		call.times.doneAt = v.EndTime
 	}
+}
+
+// streamWait is how long a call that got its headers out waited for a stream
+// after it had a connection: from the pick, or from the start if the pick did
+// not wait.
+func (t callTimes) streamWait() time.Duration {
+	if t.headerAt.IsZero() || t.begunAt.IsZero() {
+		return 0
+	}
+
+	from := t.begunAt
+	if t.pickedAt.After(from) {
+		from = t.pickedAt
+	}
+
+	return max(0, t.headerAt.Sub(from))
 }

@@ -61,6 +61,9 @@ type MethodReport struct {
 	P95    metrics.Quantile
 	P99    metrics.Quantile
 	Max    metrics.Quantile
+	// P99WithoutStreamWait is P99 of the same calls with each one's stream
+	// wait taken out: the time the target had them.
+	P99WithoutStreamWait metrics.Quantile
 	// The percentiles above are the service time: successes, with timeouts and
 	// aborted calls as lower bounds of it. Refusals — the target answering it
 	// will not serve — are a different quantity, often far faster, and are in
@@ -162,6 +165,21 @@ type Report struct {
 	// on its own: how late cancellation ran.
 	LateCancelMax time.Duration
 
+	// NotSentLate, NotSentStream and NotSentConnection split NotSent by what
+	// kept a call from going out: the generator's lag, a ready connection
+	// with no free stream, or a connection that was not ready. They add up
+	// to NotSent.
+	NotSentLate       int
+	NotSentStream     int
+	NotSentConnection int
+	// StreamWaited counts calls that went out after waiting for a stream
+	// longer than StreamWaitFloor; StreamWaitP99 is over those calls.
+	StreamWaited  int
+	StreamWaitP99 metrics.Quantile
+	// Connections is what the sender said about its connections; nil when it
+	// does not tell.
+	Connections *Connections
+
 	// RequestRejected says every measured call of some method came back as a
 	// request the target will never serve: the run tested nothing about load.
 	RequestRejected bool
@@ -190,6 +208,12 @@ type Stats struct {
 	startLag      *metrics.Latencies
 	startLagMax   time.Duration
 	lateCancelMax time.Duration
+	// notSentLate, notSentStream and notSentConnection split notSent by reason;
+	// streamWait is the wait of sent calls that waited over StreamWaitFloor.
+	notSentLate       int
+	notSentStream     int
+	notSentConnection int
+	streamWait        *metrics.Latencies
 }
 
 type methodStats struct {
@@ -200,16 +224,22 @@ type methodStats struct {
 	timedOut   int
 	unsentOut  int
 	latency    *metrics.Latencies
-	refusal    *metrics.Latencies
-	rejected   *metrics.Latencies
-	timeline   timeline
+	// served is latency with each call's stream wait taken out.
+	served   *metrics.Latencies
+	refusal  *metrics.Latencies
+	rejected *metrics.Latencies
+	timeline timeline
 	// lastAnswer is the latest scheduled moment among the calls the target
 	// answered, as an offset from the start of the run; -1 until one is.
 	lastAnswer time.Duration
 }
 
 func NewStats() *Stats {
-	return &Stats{byMethod: make(map[string]*methodStats), startLag: metrics.NewUncensoredLatencies()}
+	return &Stats{
+		byMethod:   make(map[string]*methodStats),
+		startLag:   metrics.NewUncensoredLatencies(),
+		streamWait: metrics.NewUncensoredLatencies(),
+	}
 }
 
 // Reserve fixes the span of the timeline: calls with a moment past it are
@@ -231,6 +261,7 @@ func (s *Stats) Reserve(span time.Duration, methods ...string) {
 func (s *Stats) newMethod() *methodStats {
 	return &methodStats{
 		latency:    metrics.NewLatencies(),
+		served:     metrics.NewLatencies(),
 		refusal:    metrics.NewUncensoredLatencies(),
 		rejected:   metrics.NewUncensoredLatencies(),
 		lastAnswer: -1,
@@ -308,6 +339,14 @@ func (s *Stats) Record(r Result) {
 	if r.NotSent {
 		s.notSent++
 		method.unsentOut++
+		switch {
+		case lateMoreThanQueued(r):
+			s.notSentLate++
+		case r.NotSentOn == BlockedOnStream:
+			s.notSentStream++
+		default:
+			s.notSentConnection++
+		}
 		s.mu.Unlock()
 
 		return
@@ -325,6 +364,10 @@ func (s *Stats) Record(r Result) {
 	method.sent++
 	if failed {
 		method.failed++
+	}
+
+	if r.StreamWait > StreamWaitFloor {
+		s.streamWait.Record(r.StreamWait)
 	}
 
 	if r.Category == CategoryTimeout {
@@ -351,13 +394,17 @@ func (s *Stats) Record(r Result) {
 	// An abandoned call is known only to have lasted at least as long as its
 	// deadline, so it is recorded as a bound rather than as a measurement.
 	if r.Category == CategoryTimeout || r.Category == CategoryAborted {
-		method.latency.RecordCensored(r.CensorThreshold())
+		threshold := r.CensorThreshold()
+		method.latency.RecordCensored(threshold)
+		method.served.RecordCensored(max(0, threshold-r.StreamWait))
+
 		return
 	}
 
 	switch r.Category {
 	case CategorySuccess:
 		method.latency.Record(r.Latency())
+		method.served.Record(r.Latency() - r.StreamWait)
 	case CategoryServerFault, CategoryOverload:
 		method.refusal.Record(r.Latency())
 	case CategoryClientFault:
@@ -376,6 +423,7 @@ type methodView struct {
 	unknown    int
 	lastAnswer time.Duration
 	dist       *metrics.Snapshot
+	served     *metrics.Snapshot
 	refusal    *metrics.Snapshot
 	rejected   *metrics.Snapshot
 }
@@ -405,6 +453,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 
 	for i, src := range sources {
 		out[i].dist = src.latency.Snapshot()
+		out[i].served = src.served.Snapshot()
 		out[i].refusal = src.refusal.Snapshot()
 		out[i].rejected = src.rejected.Snapshot()
 	}
@@ -525,6 +574,7 @@ func (s *Stats) Report() Report {
 	// snapshots the interface takes several times a second.
 	s.mu.Lock()
 	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
+	late, stream, connection := s.notSentLate, s.notSentStream, s.notSentConnection
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
 		entry := MethodReport{
@@ -544,6 +594,7 @@ func (s *Stats) Report() Report {
 		timelines[name] = entry
 	}
 	startLag := s.startLag.Snapshot()
+	streamWait := s.streamWait.Snapshot()
 	startLagMax, lateCancelMax := s.startLagMax, s.lateCancelMax
 	s.mu.Unlock()
 
@@ -558,6 +609,12 @@ func (s *Stats) Report() Report {
 		StartLagP99:   startLag.Percentile(0.99),
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
+
+		NotSentLate:       late,
+		NotSentStream:     stream,
+		NotSentConnection: connection,
+		StreamWaited:      int(streamWait.Count()),
+		StreamWaitP99:     streamWait.Percentile(0.99),
 	}
 
 	for _, v := range views {
@@ -579,8 +636,10 @@ func (s *Stats) Report() Report {
 			P95:          v.dist.Percentile(0.95),
 			P99:          v.dist.Percentile(0.99),
 			Max:          v.dist.Percentile(1),
-			Refusal:      refusalOf(v.refusal),
-			Rejected:     refusalOf(v.rejected),
+
+			P99WithoutStreamWait: v.served.Percentile(0.99),
+			Refusal:              refusalOf(v.refusal),
+			Rejected:             refusalOf(v.rejected),
 
 			Seconds:         timelines[v.name].Seconds,
 			OutsideTimeline: timelines[v.name].OutsideTimeline,
@@ -634,3 +693,8 @@ func (s *Stats) elapsed() time.Duration {
 
 	return s.endedAt.Sub(s.startedAt)
 }
+
+// StreamWaitFloor is the stream wait below which a call is not counted as
+// having waited. A hypothesis: a stream granted at once still takes a few
+// microseconds between picking the connection and writing headers.
+const StreamWaitFloor = time.Millisecond

@@ -88,6 +88,8 @@ func reportNotes(report engine.Report) []string {
 		}
 	}
 
+	notes = append(notes, streamNotes(report)...)
+
 	// What the generator did. Named for what it measures: a generator late to
 	// pick up answers is not in it, so it does not vouch for the latencies.
 	if report.StartLagP99.Defined || report.StartLagMax > 0 {
@@ -144,6 +146,10 @@ func reportNotes(report engine.Report) []string {
 		add("incomplete: the run stopped before its planned end, and ran %s of the planned %s.\n"+
 			"The numbers are honest but cover only the part that ran; do not compare them with a\n"+
 			"full run.", formatDuration(report.Duration), formatDuration(report.Planned))
+	}
+
+	if v := streamVerdict(report); v != "" {
+		notes = append(notes, v)
 	}
 
 	if unanswered > 0 {

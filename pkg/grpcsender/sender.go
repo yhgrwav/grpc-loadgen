@@ -62,13 +62,19 @@ type Sender struct {
 	mu     sync.RWMutex
 	conn   *grpc.ClientConn
 	closed bool
+
+	tracker *connTracker
+	ready   readyWindow
+	// stopWatch ends the connection watcher; watched closes when it has.
+	stopWatch context.CancelFunc
+	watched   chan struct{}
 }
 
 // New prepares a sender. It does not dial: the connection is established by
 // Connect, before the run starts, so a wrong address fails immediately rather
 // than a minute into the load.
 func New(opts Options) *Sender {
-	return &Sender{opts: opts}
+	return &Sender{opts: opts, tracker: &connTracker{}}
 }
 
 // Connect establishes the connection and waits for it to become usable, so an
@@ -95,7 +101,7 @@ func (s *Sender) Connect(ctx context.Context) error {
 	}
 
 	dialOpts := append([]grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
+		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker}),
 		grpc.WithStatsHandler(handler{}),
 	}, s.opts.DialOptions...)
 
@@ -112,7 +118,35 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	s.conn = conn
 
+	// Recorded here, not by the watcher: the run starts the moment Connect
+	// returns, before the watcher's goroutine may have run.
+	s.ready.entered(time.Now())
+
+	watchCtx, stop := context.WithCancel(context.Background())
+	s.stopWatch, s.watched = stop, make(chan struct{})
+
+	go s.watch(watchCtx, conn, s.watched)
+
 	return nil
+}
+
+// watch records the connection's changes of state from READY, which Connect
+// has already recorded, until ctx ends or the connection shuts down.
+func (s *Sender) watch(ctx context.Context, conn *grpc.ClientConn, done chan<- struct{}) {
+	defer close(done)
+
+	for state := connectivity.Ready; conn.WaitForStateChange(ctx, state); {
+		state = conn.GetState()
+
+		switch state {
+		case connectivity.Shutdown:
+			return
+		case connectivity.Ready:
+			s.ready.entered(time.Now())
+		default:
+			s.ready.left(time.Now())
+		}
+	}
 }
 
 // waitReady blocks until the connection is usable, the first attempt fails, or
@@ -182,7 +216,12 @@ func (s *Sender) Close() error {
 	conn := s.conn
 	s.conn = nil
 
-	return conn.Close()
+	err := conn.Close()
+
+	s.stopWatch()
+	<-s.watched
+
+	return err
 }
 
 // Send performs one call. See engine.Sender for what the two failure channels
@@ -245,12 +284,16 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	sentAt, doneAt, notSent := timestamps(times, category)
 
 	outcome := engine.Outcome{
-		SentAt:   sentAt,
-		NotSent:  notSent,
-		DoneAt:   doneAt,
-		Category: category,
-		Code:     status.Code(err).String(),
-		Err:      err,
+		SentAt:     sentAt,
+		NotSent:    notSent,
+		StreamWait: times.streamWait(),
+		DoneAt:     doneAt,
+		Category:   category,
+		Code:       status.Code(err).String(),
+		Err:        err,
+	}
+	if notSent && s.onStream(conn, times.begunAt) {
+		outcome.NotSentOn = engine.BlockedOnStream
 	}
 	if body != nil {
 		outcome.Response = *body
@@ -301,4 +344,11 @@ func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.T
 	}
 
 	return doneAt, doneAt, true
+}
+
+// onStream reports whether an unsent call begun at begun was held back by
+// streams alone: the connection was ready for all of the call and still is.
+// The second check covers a watcher that has not yet seen the connection go.
+func (s *Sender) onStream(conn *grpc.ClientConn, begun time.Time) bool {
+	return !begun.IsZero() && s.ready.throughout(begun) && conn.GetState() == connectivity.Ready
 }

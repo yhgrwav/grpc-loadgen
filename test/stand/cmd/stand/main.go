@@ -32,19 +32,21 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
 	"github.com/yhgrwav/leettest/test/stand"
 )
 
 type options struct {
-	addr      string
-	delay     time.Duration
-	freezeAt  time.Duration
-	freezeFor time.Duration
-	hangFrom  time.Duration
-	failEvery int
-	life      time.Duration
+	addr       string
+	delay      time.Duration
+	freezeAt   time.Duration
+	freezeFor  time.Duration
+	hangFrom   time.Duration
+	failEvery  int
+	maxStreams int
+	life       time.Duration
 }
 
 func parse(args []string, usage io.Writer) (options, error) {
@@ -58,6 +60,7 @@ func parse(args []string, usage io.Writer) (options, error) {
 	fs.DurationVar(&o.freezeFor, "freeze-for", 0, "freeze length: calls arriving in it wait until it ends")
 	fs.DurationVar(&o.hangFrom, "hang-from", -1, "never answer from this long after the first arrival")
 	fs.IntVar(&o.failEvery, "fail-every", 0, "answer every n-th call with RESOURCE_EXHAUSTED")
+	fs.IntVar(&o.maxStreams, "max-streams", 0, "announce this many concurrent streams per connection; 0 announces no limit")
 	fs.DurationVar(&o.life, "life", 0, "exit after this long; 0 waits for Ctrl+C")
 
 	if err := fs.Parse(args); err != nil {
@@ -79,9 +82,9 @@ func parse(args []string, usage io.Writer) (options, error) {
 		return o, fmt.Errorf("one behavior at a time, got %s", strings.Join(modes, " and "))
 	case set["freeze-at"] && !set["freeze-for"]:
 		return o, errors.New("-freeze-at needs -freeze-for")
-	case o.delay < 0, o.freezeAt < 0, o.freezeFor < 0, o.life < 0, o.failEvery < 0,
+	case o.delay < 0, o.freezeAt < 0, o.freezeFor < 0, o.life < 0, o.failEvery < 0, o.maxStreams < 0,
 		set["hang-from"] && o.hangFrom < 0:
-		return o, errors.New("durations and -fail-every must not be negative")
+		return o, errors.New("durations, -fail-every and -max-streams must not be negative")
 	}
 
 	return o, nil
@@ -113,7 +116,7 @@ func run(args []string, out, errOut io.Writer, stop <-chan struct{}, ready func(
 		return err
 	}
 
-	s := stand.StartOn(lis, o.answer())
+	s := stand.StartOn(lis, o.answer(), o.serverOptions()...)
 	fmt.Fprintf(errOut, "stand on %s, method grpc.health.v1.Health/Check\n", s.Target())
 	ready(s.Target())
 
@@ -176,4 +179,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "stand:", err)
 		os.Exit(1)
 	}
+}
+
+// serverOptions is what the stand's server is built with beyond its answer.
+// A zero limit is left out rather than passed: grpc-go would then announce
+// nothing, which reads as no limit, not as no streams.
+func (o options) serverOptions() []grpc.ServerOption {
+	if o.maxStreams == 0 {
+		return nil
+	}
+
+	return []grpc.ServerOption{grpc.MaxConcurrentStreams(uint32(o.maxStreams))}
 }

@@ -715,7 +715,8 @@ type finalParts struct {
 }
 
 func isVerdict(note string) bool {
-	return strings.HasPrefix(note, "invalid run:") || strings.HasPrefix(note, "incomplete:")
+	return strings.HasPrefix(note, "invalid run:") || strings.HasPrefix(note, "incomplete:") ||
+		strings.HasPrefix(note, "limited by")
 }
 
 func (m *model) finalReport(width int) string {
