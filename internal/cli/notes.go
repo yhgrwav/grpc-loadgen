@@ -88,6 +88,25 @@ func reportNotes(report engine.Report) []string {
 		}
 	}
 
+	// The category says whose fault a failure is; the code is what the
+	// target's logs call it.
+	var codeLines []string
+	for i := range report.Methods {
+		m := &report.Methods[i]
+		if len(m.FailureCodes) == 0 {
+			continue
+		}
+
+		codes := make([]string, len(m.FailureCodes))
+		for j, c := range m.FailureCodes {
+			codes[j] = fmt.Sprintf("%s %d", c.Code, c.Count)
+		}
+		codeLines = append(codeLines, fmt.Sprintf("%s codes: %s", displayMethod(m.Method), strings.Join(codes, ", ")))
+	}
+	if len(codeLines) > 0 {
+		notes = append(notes, "failed calls by gRPC code:\n"+strings.Join(codeLines, "\n"))
+	}
+
 	notes = append(notes, streamNotes(report)...)
 
 	// What the generator did. Named for what it measures: a generator late to
