@@ -68,6 +68,9 @@ func (m *MasterConfig) resolve() error {
 	if err := m.App.resolveMetadata(); err != nil {
 		return err
 	}
+	if err := m.App.resolveMaxResponseSize(); err != nil {
+		return err
+	}
 	for i := range m.Load.Calls {
 		m.Load.Calls[i].ResolveTimeout()
 	}

@@ -378,7 +378,7 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	if !strings.Contains(text, "rejected") {
 		t.Errorf("no rejected row:\n%s", text)
 	}
-	for _, want := range []string{"invalid run", "a.B/One", "client's 4MB limit", "larger than it accepts"} {
+	for _, want := range []string{"invalid run", "a.B/One", "client's limit", "app.max_response_size", "larger than it accepts"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("verdict does not say %q:\n%s", want, text)
 		}
@@ -389,7 +389,7 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 		if strings.Contains(text, "cut off") || strings.Contains(text, "truncat") {
 			t.Errorf("the report suggests a partial reply arrived; grpc-go rejects it whole:\n%s", text)
 		}
-		if strings.Contains(text, "target's 4MB") || strings.Contains(text, "4MB limit or a request") {
+		if strings.Contains(text, "target's 4") || strings.Contains(text, "limit or a request") {
 			t.Errorf("the report puts our client limit on the target:\n%s", text)
 		}
 	}
