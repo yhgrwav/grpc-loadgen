@@ -81,7 +81,7 @@ func TestFinalScreenTableCarriesEveryRowAndNumberOfTheTextReport(t *testing.T) {
 	report := tableReport()
 
 	var text strings.Builder
-	PrintReport(&text, "localhost:50051", report)
+	PrintReport(&text, "localhost:50051", RunReport{Report: report})
 	rows := tableRows(text.String())
 	if len(rows) != 3 {
 		t.Fatalf("the text report's table has %d rows, want 3: the test no longer compares:\n%s",

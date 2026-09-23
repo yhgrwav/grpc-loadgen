@@ -319,10 +319,13 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 	start := func() error { return eng.Run(ctx) }
 
+	// One report for the final screen and for stdout.
+	reportOf := func() cli.RunReport { return cli.RunReport{Report: eng.Report(), Unchecked: unchecked} }
+
 	var runErr error
 
 	if interactive {
-		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
+		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s, reportOf)
 		view.Store(program)
 		runErr = cli.RunLive(program, func() error {
 			err := start()
@@ -336,12 +339,11 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		return runErr
 	}
 
-	report := eng.Report()
+	report := reportOf()
 	cli.PrintReport(stdout, target, report)
-	cli.PrintUnchecked(stdout, unchecked)
 	s.Finish()
 
-	return runResult(report, runErr)
+	return runResult(report.Report, runErr)
 }
 
 // checkFakeFlags rejects tuning of the fake target when it is not in use: the

@@ -1,5 +1,3 @@
-//go:build spec
-
 // Copyright 2026 yhgrwav
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,21 +20,26 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yhgrwav/leettest/pkg/descriptor"
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // Ground: contract — one report, two renderings: the methods nothing could be
-// checked against travel in the report, so the screen names them as the log does.
+// checked against travel in the run's report, so the screen names them as the
+// log does.
 func TestFinalScreenNamesTheMethodsNotChecked(t *testing.T) {
-	report := engine.Report{Sent: 10, Methods: []engine.MethodReport{{Method: "a.B/One", Sent: 10}},
-		Unchecked: []engine.UncheckedMethod{{Method: "a.B/One", Reason: "server reflection is off on the target"}}}
+	report := RunReport{
+		Report:    engine.Report{Sent: 10, Methods: []engine.MethodReport{{Method: "a.B/One", Sent: 10}}},
+		Unchecked: []Unchecked{{Method: "a.B/One", Err: descriptor.ErrReflectionUnsupported}},
+	}
 
 	var text strings.Builder
 	PrintReport(&text, "localhost:50051", report)
 
 	m := testModel(t)
+	m.reportOf = func() RunReport { return report }
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m.done, m.report = true, report
+	m.Update(doneMsg{})
 	screen := m.finalReport(contentWidth(120))
 
 	for _, out := range []string{text.String(), screen} {

@@ -28,9 +28,13 @@ import (
 
 // NewProgram builds the full-screen view of a run. RunLive drives it together
 // with the run.
-func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper) *tea.Program {
+// reportOf is called once the run returns, for the report the final screen shows.
+func NewProgram(target, service string, eng *engine.Engine, warmup time.Duration, settings *Settings, stopper *Stopper,
+	reportOf func() RunReport,
+) *tea.Program {
 	m := newModel(target, eng, warmup, settings, stopper)
 	m.service = service
+	m.reportOf = reportOf
 
 	return tea.NewProgram(m,
 		tea.WithAltScreen(),
@@ -675,6 +679,9 @@ func (m *model) finalParts(width int) finalParts {
 		} else {
 			p.notes = append(p.notes, block)
 		}
+	}
+	if note := uncheckedNote(m.unchecked); note != "" {
+		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(note, width)), "\n"))
 	}
 	if m.stopper.Stopping() {
 		p.notes = append(p.notes, strings.Split(m.styles.note.Render(wrapNote(m.text.ReportStoppedNote(), width)), "\n"))

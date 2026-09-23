@@ -144,7 +144,7 @@ func TestAttachData_ReflectionRefusedIsNotTheSameAsReflectionOff(t *testing.T) {
 	}
 
 	var out strings.Builder
-	PrintUnchecked(&out, unchecked)
+	PrintReport(&out, "localhost:50051", RunReport{Unchecked: unchecked})
 
 	if strings.Contains(out.String(), "is off") {
 		t.Errorf("the report says reflection is off, though it was refused:\n%s", out.String())

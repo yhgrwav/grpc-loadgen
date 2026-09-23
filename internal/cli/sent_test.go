@@ -49,7 +49,7 @@ func TestPrintReportStatesSilenceOverTheCallsThatWentOut(t *testing.T) {
 	report.Methods[0].Timeout = 300 * time.Millisecond
 
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", report)
+	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
 	if !strings.Contains(text, "146 of 146 calls (100.0%) got no answer") {
@@ -64,14 +64,14 @@ func TestPrintReportStatesSilenceOverTheCallsThatWentOut(t *testing.T) {
 // the totals name them, or 4 calls of the schedule vanish from the report.
 func TestPrintReportNamesTheCallsThatDidNotGoOut(t *testing.T) {
 	var out strings.Builder
-	PrintReport(&out, "localhost:50051", engine.Report{Sent: 146, Failed: 146, NotSent: 4})
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{Sent: 146, Failed: 146, NotSent: 4}})
 
 	if !strings.Contains(out.String(), "sent 146, failed 146, not sent 4\n") {
 		t.Errorf("the totals do not name the 4 calls that did not go out:\n%s", out.String())
 	}
 
 	out.Reset()
-	PrintReport(&out, "localhost:50051", engine.Report{Sent: 146, Failed: 146})
+	PrintReport(&out, "localhost:50051", RunReport{Report: engine.Report{Sent: 146, Failed: 146}})
 	if strings.Contains(out.String(), "not sent") {
 		t.Errorf("nothing was left unsent, yet the totals say so:\n%s", out.String())
 	}

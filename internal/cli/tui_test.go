@@ -503,7 +503,7 @@ func TestFinalScreenCarriesEveryVerdictOfTheTextReport(t *testing.T) {
 	screen := m.finalReport(contentWidth(100))
 
 	var text strings.Builder
-	PrintReport(&text, "localhost:50051", report)
+	PrintReport(&text, "localhost:50051", RunReport{Report: report})
 
 	for _, note := range reportNotes(report) {
 		want := strings.Fields(note)[0]
