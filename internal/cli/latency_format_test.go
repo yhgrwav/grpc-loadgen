@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HdrHistogram/hdrhistogram-go"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yhgrwav/leettest/pkg/metrics"
@@ -96,5 +97,31 @@ func BenchmarkFormatQuantile(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = formatQuantile(q)
+	}
+}
+
+// Ground: boundary — a lower bound at an ordinary timeout keeps the 6 columns
+// the table's floors give it, read as the histograms read it: the upper edge
+// of the timeout's bucket.
+func TestBoundsAtOrdinaryTimeoutsAreSixColumnsWide(t *testing.T) {
+	for _, tc := range []struct {
+		timeout time.Duration
+		want    string
+	}{
+		{200 * time.Millisecond, ">200ms"},
+		{time.Second, ">1.00s"},
+		{5 * time.Second, ">5.00s"},
+		{30 * time.Second, ">30.0s"},
+	} {
+		h := hdrhistogram.New(1, int64(time.Hour), 3)
+		if err := h.RecordValue(int64(tc.timeout)); err != nil {
+			t.Fatal(err)
+		}
+		// Max is the upper edge of the bucket the value fell in.
+		for _, edge := range []time.Duration{tc.timeout, time.Duration(h.Max())} {
+			if got := formatQuantile(metrics.Quantile{Value: edge, Defined: true}); got != tc.want {
+				t.Errorf("bound at %v = %q, want %q", edge, got, tc.want)
+			}
+		}
 	}
 }

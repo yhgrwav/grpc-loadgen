@@ -62,7 +62,7 @@ func TestPrintReport(t *testing.T) {
 
 	text := out.String()
 
-	for _, want := range []string{"localhost:50051", "sent 1000, failed 22", "a.B/One", "31ms", "36ms"} {
+	for _, want := range []string{"localhost:50051", "sent 1000, failed 22", "a.B/One", "31.0ms", "36.0ms"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report does not mention %q:\n%s", want, text)
 		}
@@ -87,7 +87,7 @@ func TestPrintReportMarksPercentilesThatRanPastTheTimeout(t *testing.T) {
 
 	text := out.String()
 
-	if !strings.Contains(text, ">1.0s") {
+	if !strings.Contains(text, ">1.00s") {
 		t.Errorf("a percentile that ran past the deadline must be printed as a bound:\n%s", text)
 	}
 	if !strings.Contains(text, "3 requests were abandoned") {
@@ -202,7 +202,7 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 			row = line
 		}
 	}
-	if row == "" || !strings.Contains(row, "2ms") || !strings.Contains(row, "3ms") {
+	if row == "" || !strings.Contains(row, "2.00ms") || !strings.Contains(row, "3.00ms") {
 		t.Errorf("want a refused row with 990 calls, p50 2ms and p99 3ms:\n%s", text)
 	}
 	if !strings.Contains(text, "time to serve") {
@@ -331,7 +331,7 @@ func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
 	PrintReport(&out, "localhost:50051", RunReport{Report: report})
 	text := out.String()
 
-	for _, want := range []string{"start lag", "3ms", "12ms", "7ms"} {
+	for _, want := range []string{"start lag", "3.00ms", "12.0ms", "7.00ms"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report does not mention %q:\n%s", want, text)
 		}
