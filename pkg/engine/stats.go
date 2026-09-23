@@ -148,8 +148,6 @@ type Report struct {
 	// on its own: how late cancellation ran.
 	LateCancelMax time.Duration
 
-	// overDeadline is the calls cut off past their deadline, for CapHit.
-	overDeadline int
 	// Incomplete says the run ended before its plan, by Stop or by an abort.
 	// Every number is honest, but it covers less than was asked for.
 	Incomplete bool
@@ -167,11 +165,10 @@ type Stats struct {
 	byMethod  map[string]*methodStats
 	// startLag is how late calls began against their schedule, startLagMax
 	// its exact maximum; lateCancelMax how far past its deadline a timeout
-	// returned; overDeadline, calls cut off after their deadline had passed.
+	// returned.
 	startLag      *metrics.Latencies
 	startLagMax   time.Duration
 	lateCancelMax time.Duration
-	overDeadline  int
 }
 
 type methodStats struct {
@@ -246,10 +243,6 @@ func (s *Stats) Record(r Result) {
 	// The timeline keeps warmup: a target failing on the way up is exactly
 	// what it should show, and the report says which seconds were warmup.
 	method.timeline.record(s.startedAt, r)
-
-	if r.Category == CategoryAborted && !r.Deadline.IsZero() && r.DoneAt.After(r.Deadline) {
-		s.overDeadline++
-	}
 
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
 		s.mu.Unlock()
@@ -496,7 +489,7 @@ func (s *Stats) Report() Report {
 		timelines[name] = entry
 	}
 	startLag := s.startLag.Snapshot()
-	startLagMax, lateCancelMax, overDeadline := s.startLagMax, s.lateCancelMax, s.overDeadline
+	startLagMax, lateCancelMax := s.startLagMax, s.lateCancelMax
 	s.mu.Unlock()
 
 	report := Report{
@@ -509,7 +502,6 @@ func (s *Stats) Report() Report {
 		StartLagP99:   startLag.Percentile(0.99),
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
-		overDeadline:  overDeadline,
 	}
 
 	for _, v := range views {

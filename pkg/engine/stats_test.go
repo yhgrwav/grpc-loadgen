@@ -225,32 +225,3 @@ func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
 		t.Errorf("rps = %.3f, want ~0.5: one request over the two measured seconds", got)
 	}
 }
-
-// Ground: boundary — CapHit.OverDeadline is what puts a cap hit on the generator: only a call cut
-// off strictly past its own deadline counts (review of #52: counting every aborted call went
-// unseen).
-func TestStatsCountsOnlyCallsCutOffPastTheirDeadline(t *testing.T) {
-	stats := NewStats()
-	start := time.Now()
-	stats.Start(start, 0)
-
-	deadline := start.Add(time.Second)
-	record := func(category Category, done, deadline time.Time) {
-		stats.Record(Result{
-			Method:      "a",
-			ScheduledAt: start,
-			Deadline:    deadline,
-			Outcome:     Outcome{Category: category, SentAt: start, DoneAt: done},
-		})
-	}
-
-	record(CategoryAborted, deadline.Add(time.Millisecond), deadline)  // counts
-	record(CategoryAborted, deadline.Add(-time.Millisecond), deadline) // still within its deadline
-	record(CategoryAborted, deadline, deadline)                        // exactly at it: not past
-	record(CategoryAborted, deadline.Add(time.Second), time.Time{})    // no deadline at all
-	record(CategoryTimeout, deadline.Add(time.Millisecond), deadline)  // ended by itself, not cut off
-
-	if got := stats.Report().overDeadline; got != 1 {
-		t.Errorf("overDeadline = %d, want 1", got)
-	}
-}

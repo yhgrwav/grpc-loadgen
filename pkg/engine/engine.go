@@ -191,7 +191,7 @@ func (e *Engine) Report() Report {
 	report.Planned = e.plannedDuration()
 
 	if hit := e.capHit.Load(); hit != nil {
-		report.CapHit = &CapHit{At: hit.At.Sub(e.startedAt), Unsent: 1, OverDeadline: report.overDeadline}
+		report.CapHit = &CapHit{At: hit.At.Sub(e.startedAt), Unsent: 1, OverDeadline: hit.OverDeadline}
 	}
 
 	for i := range report.Methods {

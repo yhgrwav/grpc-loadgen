@@ -120,14 +120,26 @@ func TestReport_SlotsHeldPastTheAllowanceHitTheCap(t *testing.T) {
 	if report.CapHit.Unsent != 1 {
 		t.Errorf("unsent = %d, want 1: the cap refuses the call that did not fit, and the run stops", report.CapHit.Unsent)
 	}
-	if report.CapHit.OverDeadline == 0 {
-		t.Error("no call in flight was past its deadline, yet only such calls fill the cap")
-	}
 	if !report.Incomplete {
 		t.Error("a run stopped by the cap must be incomplete")
 	}
 	if report.Planned != 2*time.Second || report.Duration >= report.Planned {
 		t.Errorf("planned %v, ran %v; want 2s and less", report.Planned, report.Duration)
+	}
+	// Arithmetic of this run: the cap is ⌈1000×200ms⌉ + 1 + ⌈1000×100ms⌉ = 301
+	// slots, and the wrapper frees a slot only 120ms past each deadline, so
+	// nothing is released before 320ms. The cap therefore fills at 301ms, and
+	// the calls scheduled in the first 101ms are past their 200ms deadline by
+	// then. Anything far from 101 means the slots were not held the way the
+	// verdict says they were.
+	// 0..101ms inclusive is 102 calls; the band allows only the jitter of a
+	// real run, and an off-by-one in the counting is pinned exactly by
+	// TestPoolCountsHeldSlotsExactlyAndDecidesItsEdges.
+	if got := report.CapHit.OverDeadline; got < 95 || got > 110 {
+		t.Errorf("over deadline = %d, want about 102: the slots held past their deadline at the hit\n"+
+			"start lag max %v, run %v of the planned %v, cap hit at %v, aborted %d, timed out %d",
+			got, report.StartLagMax, report.Duration, report.Planned, report.CapHit.At,
+			report.Aborted, report.Methods[0].TimedOut)
 	}
 }
 
@@ -317,5 +329,87 @@ func TestReport_AHangingTargetFailsEveryCallLiveAndInTheReport(t *testing.T) {
 	if report.Failed != report.Sent || report.Methods[0].Failed != report.Methods[0].Sent {
 		t.Errorf("report: failed %d of %d, method %d of %d; want all",
 			report.Failed, report.Sent, report.Methods[0].Failed, report.Methods[0].Sent)
+	}
+}
+
+// holdingMethod holds the slots of one method past its deadline and leaves the
+// other alone: one method's sender misbehaving, not the whole run's.
+type holdingMethod struct {
+	engine.Sender
+	method string
+	hold   time.Duration
+}
+
+func (h holdingMethod) Send(ctx context.Context, req engine.Request) (engine.Outcome, error) {
+	out, err := h.Sender.Send(ctx, req)
+
+	if req.Method == h.method {
+		select {
+		case <-time.After(time.Until(req.Deadline.Add(h.hold))):
+		case <-ctx.Done():
+		}
+	}
+
+	return out, err
+}
+
+// Two methods share one budget: A with a 200ms timeout holds its slots, B with
+// a 2s timeout answers at once and leaves most of its own budget unused. A
+// fills that room, so the cap comes about 2.4s in — long after A's deadlines,
+// which are 200ms. By then the held slots are seconds past their deadline, not
+// milliseconds, and the report must still describe them without claiming how
+// far past they were.
+func TestReport_TwoMethodsOfDifferentBudgetsStillNameTheHeldSlots(t *testing.T) {
+	target := stand.Start(stand.Constant(time.Millisecond))
+	t.Cleanup(target.Stop)
+
+	const (
+		rate      = 100
+		fast      = 2 * time.Second
+		slow      = 200 * time.Millisecond
+		otherPath = "/grpc.health.v1.Health/Check"
+	)
+
+	sender := grpcsender.New(grpcsender.Options{
+		Target:      target.Target(),
+		DialOptions: []grpc.DialOption{target.DialOption()},
+	})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	holding := holdingMethod{Sender: sender, method: otherPath, hold: time.Minute}
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{
+			// A is the stand's method; B is a path the stand does not serve, so
+			// it comes back at once and holds a slot for a moment only — which
+			// is exactly the shape of a method whose budget stays unused.
+			load(otherPath, rate, 5*time.Second, slow),
+			load(target.Method()+"/", rate, 5*time.Second, fast),
+		},
+		Sender:      holding,
+		MaxInFlight: budget(rate, slow) + budget(rate, fast),
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+
+	if err := eng.Run(ctx); !errors.Is(err, engine.ErrInFlightCapExceeded) {
+		t.Fatalf("run = %v, want the cap", err)
+	}
+
+	report := eng.Report()
+	if report.CapHit == nil {
+		t.Fatal("no cap hit in the report")
+	}
+	// The cap comes around 2.4s; everything of A older than its 200ms deadline
+	// is still held, which is the bulk of what is in flight.
+	if got := report.CapHit.OverDeadline; got < 150 {
+		t.Errorf("over deadline = %d at %v, want the held slots of the method with the short timeout",
+			got, report.CapHit.At)
 	}
 }

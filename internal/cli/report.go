@@ -80,8 +80,9 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	if hit := report.CapHit; hit != nil {
 		fmt.Fprintf(w, "\ninvalid run: calls held their slots more than %s (the allowance) past their\n"+
 			"deadline, and the in-flight cap was hit at %s. The generator lacked CPU, or the sender\n"+
-			"does not honor deadlines; the target is not what filled the cap. %d calls in flight were\n"+
-			"past their deadline; %d was refused by the cap and never sent.\n",
+			"does not honor deadlines; the target is not what filled the cap. At the hit %d slots\n"+
+			"were being held past their own deadline; %d call was refused by the cap and\n"+
+			"never sent.\n",
 			formatDuration(engine.ReleaseMargin), formatDuration(hit.At), hit.OverDeadline, hit.Unsent)
 	}
 
