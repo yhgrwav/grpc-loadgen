@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
@@ -54,5 +56,45 @@ func TestPrintReportStatesSilenceOverTheCallsThatWentOut(t *testing.T) {
 	}
 	if !strings.Contains(text, "and the target answered nothing at all.\na.B/One: 4 calls timed out before going out") {
 		t.Errorf("the 4 unsent calls are not in the same block:\n%s", text)
+	}
+}
+
+// Ground: contract — calls that never went out leave "sent" and "failed", so
+// the totals name them, or 4 calls of the schedule vanish from the report.
+func TestPrintReportNamesTheCallsThatDidNotGoOut(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{Sent: 146, Failed: 146, NotSent: 4})
+
+	if !strings.Contains(out.String(), "sent 146, failed 146, not sent 4\n") {
+		t.Errorf("the totals do not name the 4 calls that did not go out:\n%s", out.String())
+	}
+
+	out.Reset()
+	PrintReport(&out, "localhost:50051", engine.Report{Sent: 146, Failed: 146})
+	if strings.Contains(out.String(), "not sent") {
+		t.Errorf("nothing was left unsent, yet the totals say so:\n%s", out.String())
+	}
+}
+
+// Ground: contract — the live view and the final screen show the same totals
+// as the text report, in every language.
+func TestScreensNameTheCallsThatDidNotGoOut(t *testing.T) {
+	for _, lang := range allLangs {
+		t.Run(string(lang), func(t *testing.T) {
+			m := testModel(t)
+			m.text = NewText(lang)
+			m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+			tickN(m, 3)
+			m.snapshot.Sent, m.snapshot.NotSent = 146, 4
+
+			if line := statLineWith(t, m.body(minWidth), m.text.NotSent()); !strings.Contains(line, "4") {
+				t.Errorf("live: %q", line)
+			}
+
+			m.done, m.report = true, engine.Report{Sent: 146, Failed: 146, NotSent: 4}
+			if line := statLineWith(t, m.body(minWidth), m.text.NotSent()); !strings.Contains(line, "4") {
+				t.Errorf("final: %q", line)
+			}
+		})
 	}
 }

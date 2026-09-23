@@ -135,7 +135,7 @@ $ leettest -c leettest.yaml
 没有终端时（CI 中、输出被重定向）——每秒一行进度：
 
 ```
-32.0s  sent 25600  rps 800  in-flight 47  failed 51  p99 43ms
+32.0s  sent 25600  rps 800  in-flight 47  failed 51  not-sent 0  p99 43ms
 ```
 
 结束时按方法给出报告：发送数、失败数、RPS、p50/p90/p95/p99。被超时中断的请求不会用一个数字

@@ -73,3 +73,94 @@ func TestStats_LiveSentCountsOnlyCallsThatWentOut(t *testing.T) {
 		t.Errorf("live sent/s: run %v, method %v; want 73", snap.RPS, snap.Methods[0].RPS)
 	}
 }
+
+// Ground: contract — every call after warmup either went out or did not;
+// "not sent" is its own count so the two add up to what was scheduled.
+func TestStats_SentAndNotSentAddUpToEveryCall(t *testing.T) {
+	stats := silentWithUnsent(t)
+	report, snap := stats.Report(), stats.Snapshot()
+
+	if report.Sent+report.NotSent != 150 || report.NotSent != 4 {
+		t.Errorf("report: sent %d + not sent %d; want 146 + 4 = 150", report.Sent, report.NotSent)
+	}
+	if snap.Sent+snap.NotSent != 150 || snap.NotSent != 4 {
+		t.Errorf("live: sent %d + not sent %d; want 146 + 4 = 150", snap.Sent, snap.NotSent)
+	}
+}
+
+// Ground: contract — "failed" is a number about the target; a call that never
+// went out is not its failure. Failed over sent then stays within 100%.
+func TestStats_FailedCountsOnlyCallsThatWentOut(t *testing.T) {
+	stats := silentWithUnsent(t)
+	report, snap := stats.Report(), stats.Snapshot()
+
+	if report.Failed != 146 || report.Methods[0].Failed != 146 {
+		t.Errorf("failed: run %d, method %d; want 146", report.Failed, report.Methods[0].Failed)
+	}
+	if snap.Failed != 146 || snap.Methods[0].Failed != 146 {
+		t.Errorf("live failed: run %d, method %d; want 146", snap.Failed, snap.Methods[0].Failed)
+	}
+}
+
+// Ground: contract — a censored observation is a lower bound on how long the
+// target took; a call that never went out gives no such bound. Were the 4 in
+// the distribution, 4 of the 150 would be ">1s" bounds on nothing.
+func TestStats_UnsentCallsStayOutOfTheLatencies(t *testing.T) {
+	m := silentWithUnsent(t).Report().Methods[0]
+
+	if m.Censored != 146 || m.Latencies != 146 {
+		t.Errorf("censored %d of %d observations; want 146 of 146", m.Censored, m.Latencies)
+	}
+}
+
+// Ground: contract — an unreachable target is the target's state: the call
+// went out and failed, so it is sent and failed, and not "not sent".
+func TestStats_UnreachableCallsWentOut(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+	for i := range 10 {
+		at := start.Add(time.Duration(i) * time.Millisecond)
+		stats.Record(Result{Method: "a", ScheduledAt: at, BegunAt: at,
+			Outcome: Outcome{Category: CategoryUnreachable, SentAt: at, DoneAt: at}})
+	}
+	stats.Finish(start.Add(time.Second))
+	report := stats.Report()
+
+	if report.Sent != 10 || report.Failed != 10 || report.NotSent != 0 {
+		t.Errorf("sent %d, failed %d, not sent %d; want 10, 10, 0", report.Sent, report.Failed, report.NotSent)
+	}
+}
+
+// Ground: contract — the verdict says every call the target saw was rejected.
+// Calls that never went out are not calls it saw: 10 rejected and 4 unsent is
+// still "every call rejected"; 4 unsent and nothing else is no verdict.
+func TestStats_RequestRejectedCountsOnlyCallsThatWentOut(t *testing.T) {
+	record := func(stats *Stats, start time.Time, method string, rejected, unsent int) {
+		for i := range rejected + unsent {
+			at := start.Add(time.Duration(i) * time.Millisecond)
+			out := Outcome{Category: CategoryClientFault, SentAt: at, DoneAt: at}
+			if i < unsent {
+				out = Outcome{Category: CategoryTimeout, NotSent: true, SentAt: at, DoneAt: at.Add(time.Second)}
+			}
+			stats.Record(Result{Method: method, ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second), Outcome: out})
+		}
+	}
+
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+	record(stats, start, "a", 10, 4)
+	stats.Finish(start.Add(time.Second))
+	if !stats.Report().RequestRejected {
+		t.Error("10 rejected and 4 unsent: want the verdict, every call that went out was rejected")
+	}
+
+	stats = NewStats()
+	stats.Start(start, 0)
+	record(stats, start, "a", 0, 4)
+	stats.Finish(start.Add(time.Second))
+	if stats.Report().RequestRejected {
+		t.Error("4 unsent and nothing sent: want no verdict, the target saw nothing")
+	}
+}

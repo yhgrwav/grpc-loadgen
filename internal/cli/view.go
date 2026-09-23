@@ -270,6 +270,16 @@ func (m *model) tabBar(width int) string {
 	return row + "\n" + m.styles.faint.Render(strings.Repeat("─", width))
 }
 
+// notSentLine is its own line so no width drops it, and absent when every
+// call went out.
+func (m *model) notSentLine(width, n int) string {
+	if n == 0 {
+		return ""
+	}
+
+	return fitStatLine(m.styles, width, countField(m.text.NotSent(), n, 0)) + "\n"
+}
+
 func (m *model) summary(width int) string {
 	s := m.snapshot
 
@@ -287,7 +297,7 @@ func (m *model) summary(width int) string {
 		[2]string{"p90", formatQuantile(s.P90)},
 		[2]string{"p99", formatQuantile(s.P99)},
 	))
-	b.WriteString("\n\n")
+	b.WriteString("\n" + m.notSentLine(width, s.NotSent) + "\n")
 
 	b.WriteString(m.gaugeRow("rps", s.RPS, m.totalTarget(), fmt.Sprintf("%.0f", s.RPS)))
 	b.WriteString("\n")
@@ -634,7 +644,7 @@ func (m *model) finalReport(width int) string {
 		statField{label: "rps", value: fmt.Sprintf("%.0f", float64(report.Sent)/max(report.Duration.Seconds(), 1)), drop: 2},
 		statField{label: m.text.Duration(), value: formatDuration(report.Duration)},
 	))
-	b.WriteString("\n" + "\n")
+	b.WriteString("\n" + m.notSentLine(width, report.NotSent) + "\n")
 
 	// Sent, errors and p99 always fit; p50 and p90 go first when the terminal
 	// is narrow, and the method name takes whatever is left. Columns are sized

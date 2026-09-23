@@ -49,8 +49,8 @@ func RunPlain(w io.Writer, target string, eng *engine.Engine, run func() error) 
 			return err
 		case <-ticker.C:
 			s := eng.Snapshot()
-			fmt.Fprintf(w, "%s  sent %d  rps %.0f  in-flight %d  failed %d  p99 %s\n",
-				formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, formatQuantile(s.P99))
+			fmt.Fprintf(w, "%s  sent %d  rps %.0f  in-flight %d  failed %d  not-sent %d  p99 %s\n",
+				formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, s.NotSent, formatQuantile(s.P99))
 		}
 	}
 }
