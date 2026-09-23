@@ -72,9 +72,11 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	printStartLag(w, report)
 
 	if len(rejected) > 0 {
-		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls the target will not serve whatever the load: no\n"+
-			"such method, a bad argument, a reply over the client's 4MB limit or a request over\n"+
-			"the target's. Check the config for %s.\n", strings.Join(rejected, ", "))
+		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
+			"request is wrong — no such method, a bad argument, a body that does not match\n"+
+			"the schema — or a message did not fit: a reply cut off at the client's 4MB limit,\n"+
+			"or a request the target refused as larger than it accepts. Check the config for\n"+
+			"%s.\n", strings.Join(rejected, ", "))
 	}
 
 	if report.RequestRejected {
