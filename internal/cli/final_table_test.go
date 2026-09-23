@@ -87,6 +87,14 @@ func TestFinalScreenTableCarriesEveryRowAndNumberOfTheTextReport(t *testing.T) {
 	m.done, m.report = true, report
 	screen := strings.Split(m.finalReport(contentWidth(120)), "\n")
 
+	// The stdout report has no run-wide rate, so the screen shows none: a rate
+	// over the run's length (83 here) would be a second, wrong sent/s.
+	for _, line := range screen {
+		if f := strings.Fields(line); len(f) > 0 && strings.Contains(line, "83") {
+			t.Errorf("the screen shows a rate the text report does not have: %q", line)
+		}
+	}
+
 	for _, row := range rows {
 		label := row[0]
 		if label == "pkg.Svc/One" {
@@ -114,12 +122,13 @@ func TestFinalScreenTableCarriesEveryRowAndNumberOfTheTextReport(t *testing.T) {
 
 // Ground: boundary — the alternate screen shows the last lines of a view
 // taller than the terminal and drops the top ones without a word (TASK,
-// «Терминал ниже содержимого»). The table must not be what goes: the notes
-// give way first, and the screen says how many lines it left out and where
-// they are.
-func TestFinalScreenOnAShortTerminalKeepsTheTableAndSaysWhatItCut(t *testing.T) {
+// «Терминал ниже содержимого»). What gives way is fixed: the verdict never,
+// and it stands above the table; then the notes; then table rows, with a
+// count of those left out; and the screen says where the rest is.
+func TestFinalScreenOnAShortTerminalKeepsTheVerdictAndSaysWhatItCut(t *testing.T) {
 	report := tableReport()
-	for i := range 5 {
+	report.CapHit = &engine.CapHit{At: time.Second, Unsent: 1, OverDeadline: 3}
+	for i := range 20 {
 		report.Methods = append(report.Methods, engine.MethodReport{
 			Method: "pkg.Svc/M" + string(rune('a'+i)), Sent: 10, Failed: 10, TimedOut: 10,
 			RPSLow: 1, RPSHigh: 1, Timeout: time.Second,
@@ -136,12 +145,58 @@ func TestFinalScreenOnAShortTerminalKeepsTheTableAndSaysWhatItCut(t *testing.T) 
 	if lines := strings.Count(view, "\n") + 1; lines > height {
 		t.Errorf("the view is %d lines on a %d-line terminal: the top of it is lost unseen", lines, height)
 	}
-	for i := range report.Methods {
-		if name := shortMethod(report.Methods[i].Method); !strings.Contains(view, name) {
-			t.Errorf("the %s row is not on the screen", name)
+
+	verdict, table := strings.Index(view, "invalid run"), strings.Index(view, "method")
+	switch {
+	case verdict < 0:
+		t.Errorf("the verdict is not on the screen:\n%s", view)
+	case table >= 0 && verdict > table:
+		t.Errorf("the verdict stands below the table:\n%s", view)
+	}
+	if !strings.Contains(view, "more methods") {
+		t.Errorf("rows left out are not counted:\n%s", view)
+	}
+	if !strings.Contains(view, "the full report is printed after exit") {
+		t.Errorf("the screen does not say where the rest is:\n%s", view)
+	}
+}
+
+// Ground: boundary — below the height of a heading, the verdict and one row,
+// no part of the report can be shown honestly, so none is.
+func TestFinalScreenTooShortForAnyRowSaysSo(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 5})
+	m.done, m.report = true, tableReport()
+
+	if view := m.View(); !strings.Contains(view, "terminal too small, the full report is printed after exit") {
+		t.Errorf("a 5-line terminal does not say it is too small:\n%s", view)
+	}
+}
+
+// Ground: contract — latencies are never dropped (decisions): a name too long
+// for the column gives way instead, from its head, since methods of one
+// service differ in their tail.
+func TestFinalScreenCutsALongNameFromTheHead(t *testing.T) {
+	report := tableReport()
+	report.Methods[0].Method = "pkg.Svc/AVeryLongMethodNameThatEndsInHistory"
+
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.done, m.report = true, report
+
+	var row string
+	for _, line := range strings.Split(m.finalReport(contentWidth(80)), "\n") {
+		if strings.Contains(line, "InHistory") || strings.Contains(line, "AVery") {
+			row = line
+			break
 		}
 	}
-	if !strings.Contains(view, "printed after exit") {
-		t.Errorf("the screen does not say that the rest of the report is printed after exit:\n%s", view)
+	if !strings.Contains(row, "...") || !strings.Contains(row, "EndsInHistory") {
+		t.Errorf("the name is not cut from the head with an ASCII mark: %q", row)
+	}
+	for _, cell := range []string{"11ms", "12ms", "13ms", "14ms"} {
+		if !strings.Contains(row, cell) {
+			t.Errorf("the row at 80 columns lacks %s: %q", cell, row)
+		}
 	}
 }
