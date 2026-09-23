@@ -631,3 +631,36 @@ func TestStats_ATargetThatNeverAnsweredHasNoLastAnswer(t *testing.T) {
 		t.Errorf("last answer at %v, want none", *got)
 	}
 }
+
+// Ground: boundary — a timeout of a call that never went out is the
+// generator's, and the statement "the target answered nothing from here on"
+// must not rest on it. End to end this needs a generator starved on purpose.
+func TestTimeline_ATimeoutThatNeverWentOutIsNotTheTargetsSilence(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Reserve(10*time.Second, "a")
+	stats.Start(start, 0)
+
+	answered := start.Add(time.Second)
+	stats.Record(Result{
+		Method: "a", ScheduledAt: answered, BegunAt: answered, Deadline: answered.Add(time.Second),
+		Outcome: Outcome{Category: CategorySuccess, SentAt: answered, DoneAt: answered.Add(time.Millisecond)},
+	})
+
+	for i := range 3 {
+		at := start.Add(time.Duration(2+i) * time.Second)
+		stats.Record(Result{
+			Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+			Outcome: Outcome{Category: CategoryTimeout, NotSent: true, SentAt: at, DoneAt: at.Add(time.Second)},
+		})
+	}
+	stats.Finish(start.Add(6 * time.Second))
+
+	m := stats.Report().Methods[0]
+	if m.SilentFrom != nil {
+		t.Errorf("silent from second %d, yet every timeout was the generator's own", *m.SilentFrom)
+	}
+	if m.UnsentTimedOut != 3 {
+		t.Errorf("unsent timeouts = %d, want 3", m.UnsentTimedOut)
+	}
+}
