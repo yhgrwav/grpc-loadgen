@@ -76,7 +76,8 @@ func failureReason(err error, room int) string {
 		// What LeetTest put around the status: "connect to host:port".
 		if context, _, found := strings.Cut(text, "rpc error:"); found {
 			if context = strings.TrimSuffix(strings.TrimSpace(context), ":"); context != "" && isASCII(context) {
-				reason = context + ": " + reason
+				// The code stays whole; the context gives way from its head.
+				reason = truncateLeft(context, room-len(reason)-2) + ": " + reason
 			}
 		}
 		if desc := st.Message(); desc != "" && isASCII(desc) && len(reason)+2+len(desc) <= room {

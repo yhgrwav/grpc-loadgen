@@ -571,7 +571,7 @@ func TestShortVerdictNamesTheReasonOfAFailedRun(t *testing.T) {
 		{"gRPC status in another script", status.Error(codes.Unavailable, "соединение отклонено"),
 			[]string{"run failed: Unavailable"}, []string{"?", "rpc error", "отклонено"}},
 		{"gRPC status LeetTest wrapped", fmt.Errorf("connect to localhost:50051: %w", status.Error(codes.Unavailable, "refused")),
-			[]string{"connect to localhost:50051: Unavailable"}, []string{"rpc error"}},
+			[]string{"localhost:50051: Unavailable"}, []string{"rpc error"}},
 		{"wrapped connection error", fmt.Errorf("connect to localhost:50051: %w", errors.New("dial tcp: connection refused")),
 			[]string{"localhost:50051"}, nil},
 		{"plain", errors.New("connection lost: rpc error: code = Unavailable desc = x"),
