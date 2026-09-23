@@ -105,6 +105,12 @@ func main() {
 //	3   the run stopped before its planned end; the report covers less
 //	130 aborted without a report after Ctrl+C
 //	143 aborted without a report after SIGTERM
+//
+// The codes are ranked, not summed: a run that is both invalid and short
+// reports 2, because numbers that do not describe the target are worse news
+// than covering less of the plan. 130 and 143 are not outcomes of a run at
+// all — they are the exit that prints nothing, so a stop that did print a
+// report is 3 whichever key ended it.
 func exitCode(err error) int {
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):

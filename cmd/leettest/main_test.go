@@ -1009,3 +1009,33 @@ func TestExitCode_AnAbortedRunCarriesItsSignal(t *testing.T) {
 		t.Errorf("without a signal = %d, want 130", got)
 	}
 }
+
+// A run can be both invalid and short: the cap ends it early. The codes are
+// ranked, not summed — an invalid run's numbers do not describe the target at
+// all, which is worse news than covering less of the plan.
+func TestRunResult_AnInvalidRunOutranksAnIncompleteOne(t *testing.T) {
+	err := runResult(engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}, engine.ErrInFlightCapExceeded)
+
+	if got := exitCode(err); got != 2 {
+		t.Errorf("exit code = %d, want 2: invalid outranks incomplete", got)
+	}
+	if !errors.Is(err, ErrInvalidRun) || errors.Is(err, ErrIncomplete) {
+		t.Errorf("err = %v, want the invalid verdict alone", err)
+	}
+}
+
+// The gentle stop prints a report, so it is an outcome of the run, not a kill:
+// 130 and 143 belong to the exit that prints nothing at all.
+func TestRun_AStoppedRunExitsWithTheIncompleteCodeNotASignalOne(t *testing.T) {
+	res := runStopped(t, 1, "      timeout: 300ms\n")
+
+	if got := exitCode(res.err); got != 3 {
+		t.Errorf("exit code = %d, want 3: the run stopped early and printed its report (%v)", got, res.err)
+	}
+	if abortCode(os.Interrupt) == 3 {
+		t.Fatal("the signal code equals the incomplete code: the test no longer separates them")
+	}
+	if !strings.Contains(res.stdout, "run finished") {
+		t.Errorf("no report on stdout:\n%s", res.stdout)
+	}
+}
