@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,25 +113,122 @@ func formatQuantile(q metrics.Quantile) string {
 		return "-"
 	}
 	if !q.Exact {
-		return ">" + formatDuration(q.Value)
+		// A lower bound is rounded down: rounded up it would state more than
+		// is known.
+		return ">" + formatLatencyWith(q.Value, scaledDown)
 	}
 
-	return formatDuration(q.Value)
+	return formatLatency(q.Value)
 }
 
-func formatDuration(d time.Duration) string {
+// formatLatency prints a latency with the 3 significant figures the
+// histograms keep: 312us, 10.3ms, 1.71s, 12.3s, then minutes and seconds.
+func formatLatency(d time.Duration) string {
+	return formatLatencyWith(d, scaled)
+}
+
+// formatLatencyWith is formatLatency with the rounding given: scaled for a
+// measured value, scaledDown for a lower bound.
+func formatLatencyWith(d time.Duration, scale func(n, unit int64, dec int) int64) string {
+	n := d.Nanoseconds()
 	switch {
-	case d == 0:
+	case n < 0:
+		return "-" + formatLatencyWith(-d, scale)
+	case n == 0:
 		return "0"
-	case d < time.Microsecond:
-		return fmt.Sprintf("%dns", d.Nanoseconds())
-	case d < time.Millisecond:
-		return fmt.Sprintf("%.0fus", float64(d.Nanoseconds())/1e3)
-	case d < time.Second:
-		return fmt.Sprintf("%.0fms", float64(d.Nanoseconds())/1e6)
-	case d < time.Minute:
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	default:
-		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	case n < 1000:
+		return fmt.Sprintf("%dns", n)
 	}
+
+	for _, u := range []struct {
+		size int64
+		name string
+	}{{1e3, "us"}, {1e6, "ms"}} {
+		for dec := 2; dec >= 0; dec-- {
+			if v := scale(n, u.size, dec); v < 1000 {
+				return fixed(v, dec) + u.name
+			}
+		}
+	}
+	if v := scale(n, 1e9, 2); v < 1000 {
+		return fixed(v, 2) + "s"
+	}
+	if v := scale(n, 1e9, 1); v < 600 {
+		return fixed(v, 1) + "s"
+	}
+
+	secs := scale(n, 1e9, 0)
+
+	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+}
+
+// formatDuration prints a length of time: to the microsecond below a
+// millisecond, the millisecond below a second, the tenth below a minute.
+func formatDuration(d time.Duration) string {
+	n := d.Nanoseconds()
+	switch {
+	case n < 0:
+		return "-" + formatDuration(-d)
+	case n == 0:
+		return "0"
+	case n < 1000:
+		return fmt.Sprintf("%dns", n)
+	}
+
+	if v := scaled(n, 1e3, 0); v < 1000 {
+		return fmt.Sprintf("%dus", v)
+	}
+	if v := scaled(n, 1e6, 0); v < 1000 {
+		return fmt.Sprintf("%dms", v)
+	}
+
+	return formatSeconds(n)
+}
+
+// formatSeconds prints n nanoseconds to the tenth of a second below a minute,
+// to the second from then on. Both round: 59.96s is 1m00s.
+func formatSeconds(n int64) string {
+	if v := scaled(n, 1e9, 1); v < 600 {
+		return fixed(v, 1) + "s"
+	}
+
+	secs := scaled(n, 1e9, 0)
+
+	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+}
+
+// scaled is n in units of unit with dec decimals, as an integer rounded half
+// away from zero: 10.35ms at 1e6 and 1 is 104. Integer arithmetic, since a
+// float of 10.35 is 10.3499… and would round down.
+func scaled(n, unit int64, dec int) int64 {
+	k := int64(1)
+	for range dec {
+		k *= 10
+	}
+
+	return (n*k + unit/2) / unit
+}
+
+// scaledDown is scaled rounded down, for a lower bound.
+func scaledDown(n, unit int64, dec int) int64 {
+	k := int64(1)
+	for range dec {
+		k *= 10
+	}
+
+	return n * k / unit
+}
+
+// fixed writes v, holding dec decimals, as a number: 104 with 1 is 10.4.
+func fixed(v int64, dec int) string {
+	if dec == 0 {
+		return strconv.FormatInt(v, 10)
+	}
+
+	k := int64(1)
+	for range dec {
+		k *= 10
+	}
+
+	return fmt.Sprintf("%d.%0*d", v/k, dec, v%k)
 }

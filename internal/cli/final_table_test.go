@@ -210,7 +210,7 @@ func TestFinalScreenCutsALongNameFromTheHead(t *testing.T) {
 	if !strings.Contains(row, "...") || !strings.Contains(row, "EndsInHistory") {
 		t.Errorf("the name is not cut from the head with an ASCII mark: %q", row)
 	}
-	for _, cell := range []string{"11ms", "12ms", "13ms", "14ms"} {
+	for _, cell := range []string{"11.0ms", "12.0ms", "13.0ms", "14.0ms"} {
 		if !strings.Contains(row, cell) {
 			t.Errorf("the row at 80 columns lacks %s: %q", cell, row)
 		}
@@ -221,7 +221,7 @@ func TestFinalScreenCutsALongNameFromTheHead(t *testing.T) {
 // left for it next to the seven numbers; in English that happens below 64
 // columns. Either way no number is lost.
 func TestFinalScreenPutsTheNameOnItsOwnLineBelow64Columns(t *testing.T) {
-	numbers := []string{"1000", "150", "97", "11ms", "12ms", "13ms", "14ms"}
+	numbers := []string{"1000", "150", "97", "11.0ms", "12.0ms", "13.0ms", "14.0ms"}
 	hasAll := func(line string) bool {
 		f := " " + strings.Join(strings.Fields(line), " ") + " "
 		for _, n := range numbers {
@@ -314,7 +314,7 @@ func TestFinalScreenInRussianKeepsEveryNumberAt60Columns(t *testing.T) {
 
 	screen := m.finalReport(contentWidth(minWidth))
 	row := rowsAfter(t, screen, shortMethod("pkg.Svc/One"), 1)[0]
-	if got := strings.Join(row, " "); got != "1000 150 97 11ms 12ms 13ms 14ms" {
+	if got := strings.Join(row, " "); got != "1000 150 97 11.0ms 12.0ms 13.0ms 14.0ms" {
 		t.Errorf("numbers %q, want all seven", got)
 	}
 	if !strings.Contains(screen, "отпр.") || strings.Contains(screen, "отправлено ") {
@@ -483,7 +483,7 @@ func TestFinalScreenShortensTheVerdictToKeepARow(t *testing.T) {
 				if short == full {
 					t.Errorf("want the verdict once, short %q or full: short %v, full %v:\n%s", tc.short, short, full, view)
 				}
-				if !strings.Contains(flat, "11ms 12ms 13ms 14ms") {
+				if !strings.Contains(flat, "11.0ms 12.0ms 13.0ms 14.0ms") {
 					t.Errorf("no table row with its numbers:\n%s", view)
 				}
 				if !strings.Contains(flat, "the full report is printed after exit") {

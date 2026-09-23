@@ -93,9 +93,9 @@ func reportNotes(report engine.Report) []string {
 	if report.StartLagP99.Defined || report.StartLagMax > 0 {
 		lag := fmt.Sprintf("start lag, how late calls began against their schedule: p99 %s, max %s.\n"+
 			"It does not see answers picked up late.",
-			formatQuantile(report.StartLagP99), formatDuration(report.StartLagMax))
+			formatQuantile(report.StartLagP99), formatLatency(report.StartLagMax))
 		if report.LateCancelMax > 0 {
-			lag += fmt.Sprintf("\nTimeouts returned up to %s past their deadline.", formatDuration(report.LateCancelMax))
+			lag += fmt.Sprintf("\nTimeouts returned up to %s past their deadline.", formatLatency(report.LateCancelMax))
 		}
 		notes = append(notes, lag)
 	}

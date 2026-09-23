@@ -17,6 +17,7 @@ package metrics
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"sort"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ type Snapshot struct {
 	measuredN   int64
 	censoredN   int64
 	censoredMin int64
+	censoredMax int64
 	invalidN    int64
 
 	measuredOnce sync.Once
@@ -73,22 +75,16 @@ func (l *Latencies) Snapshot() *Snapshot {
 	if l.censored != nil {
 		censoredRaw = l.censored.Export()
 	}
+	censoredMin, censoredMax := l.censoredMin, l.censoredMax
 	l.mu.Unlock()
-
-	measuredN := hdrhistogram.Import(measuredRaw).TotalCount()
-	censored := hdrhistogram.Import(censoredRaw)
-	censoredN := censored.TotalCount()
-	censoredMin := int64(math.MaxInt64)
-	if censoredN > 0 {
-		censoredMin = censored.Min()
-	}
 
 	return &Snapshot{
 		measuredRaw: measuredRaw,
 		censoredRaw: censoredRaw,
-		measuredN:   measuredN,
-		censoredN:   censoredN,
+		measuredN:   hdrhistogram.Import(measuredRaw).TotalCount(),
+		censoredN:   hdrhistogram.Import(censoredRaw).TotalCount(),
 		censoredMin: censoredMin,
+		censoredMax: censoredMax,
 		invalidN:    l.invalid.Load(),
 	}
 }
@@ -133,7 +129,15 @@ func (s *Snapshot) Percentile(p float64) Quantile {
 	if countAtOrBelow(s.measuredCumBars(), s.censoredMin) >= rank {
 		return Quantile{Value: time.Duration(valueAtRank(s.measuredCumBars(), rank)), Exact: true, Defined: true}
 	}
-	return Quantile{Value: time.Duration(valueAtRank(s.combinedCumBars(), rank)), Defined: true}
+
+	// A single threshold c is the bound when fewer than rank measured values
+	// can be below it: the rank-th measured one lies in a bucket above c's.
+	c := s.censoredMin
+	if c == s.censoredMax && (s.measuredN < rank || valueAtRank(s.measuredCumBars(), rank) > highestEquivalent(c)) {
+		return Quantile{Value: time.Duration(c), Defined: true}
+	}
+
+	return Quantile{Value: time.Duration(lowestEquivalent(valueAtRank(s.combinedCumBars(), rank))), Defined: true}
 }
 
 // Merge combines snapshots by adding their raw counters, not by calling the
@@ -153,8 +157,9 @@ func Merge(snapshots ...*Snapshot) *Snapshot {
 		merged.measuredN += s.measuredN
 		merged.censoredN += s.censoredN
 		merged.invalidN += s.invalidN
-		if s.censoredN > 0 && s.censoredMin < merged.censoredMin {
-			merged.censoredMin = s.censoredMin
+		if s.censoredN > 0 {
+			merged.censoredMin = min(merged.censoredMin, s.censoredMin)
+			merged.censoredMax = max(merged.censoredMax, s.censoredMax)
 		}
 	}
 	merged.measuredRaw = withCounts(snapshots[0].measuredRaw, measuredCounts)
@@ -240,6 +245,22 @@ func countAtOrBelow(cum []cumBar, threshold int64) int64 {
 		return 0
 	}
 	return cum[idx-1].cumCount
+}
+
+// lowestEquivalent is the smallest value stored in v's bucket. With a lowest
+// trackable value of 1 and 3 significant figures the histograms keep 2048
+// sub-buckets: below 2048 a bucket is one value, above it 2^(bits(v)-11).
+func lowestEquivalent(v int64) int64 {
+	shift := max(0, bits.Len64(uint64(v))-11)
+
+	return v >> shift << shift
+}
+
+// highestEquivalent is the largest value stored in v's bucket.
+func highestEquivalent(v int64) int64 {
+	shift := max(0, bits.Len64(uint64(v))-11)
+
+	return lowestEquivalent(v) + 1<<shift - 1
 }
 
 func valueAtRank(cum []cumBar, rank int64) int64 {
