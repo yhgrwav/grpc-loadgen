@@ -24,6 +24,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
@@ -676,32 +678,160 @@ func TestConnections_CallersOwnCredentialsLeaveTheReportSilent(t *testing.T) {
 	}
 }
 
-// Ground: boundary — with no limit announced the time from the pick to the headers is the
-// scheduler's, not a stream wait: CI saw 1–3 calls over 1ms at 300 rps (run 35901535339). An
-// end-to-end test sees it only on a loaded runner, at random.
-func TestStreamWait_NoLimitAnnouncedNoStreamWait(t *testing.T) {
+// Ground: boundary — a delay before the headers is a wait for a stream only if every stream
+// the target allows was open when the wait began; below the limit it is ours (CI run
+// 35901535339: 1–3 calls of 600 over 1ms with no limit). The edge, open == limit, is a wait.
+func TestStreamWait_OnlyAtTheLimit(t *testing.T) {
 	begun := time.Now()
-	times := callTimes{begunAt: begun, headerAt: begun.Add(5 * time.Millisecond)}
 
-	if got := times.streamWait(false); got != 0 {
-		t.Errorf("stream wait %v with no limit announced, want 0", got)
-	}
-	if got := times.streamWait(true); got != 5*time.Millisecond {
-		t.Errorf("stream wait %v under a limit, want 5ms", got)
+	for _, tt := range []struct {
+		name   string
+		open   int64
+		limit  uint32
+		waited time.Duration
+	}{
+		{"no limit announced", 10, math.MaxUint32, 0},
+		{"below the limit", 10, 250, 0},
+		{"one below", 249, 250, 0},
+		{"at the limit", 250, 250, 5 * time.Millisecond},
+		{"over it, the target lowered it", 3, 1, 5 * time.Millisecond},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			times := callTimes{begunAt: begun, headerAt: begun.Add(5 * time.Millisecond), activeAtWait: tt.open}
+
+			if got := times.streamWait(tt.limit); got != tt.waited {
+				t.Errorf("stream wait %v with %d open of %d, want %v", got, tt.open, tt.limit, tt.waited)
+			}
+		})
 	}
 }
 
-// Ground: boundary — an unsent call on a ready connection with no limit announced cannot have
-// waited for a stream; putting it there would print a stream verdict about a limit that does
-// not exist.
-func TestOnStream_NoLimitAnnouncedIsNeverAStreamWait(t *testing.T) {
-	sender := serve(t, slowTarget{})
+// Ground: boundary — on a ready connection an unsent call is a stream wait only at the limit;
+// below it, or with no limit announced, the delay was the generator's. The moment of the
+// limit cannot be set end to end.
+func TestBlocker_ReadyConnectionIsAStreamOnlyAtTheLimit(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		opts []grpc.ServerOption
+		open int64
+		want engine.Blocker
+	}{
+		{"no limit announced", nil, 5, engine.BlockedOnGenerator},
+		{"below the limit", []grpc.ServerOption{grpc.MaxConcurrentStreams(2)}, 1, engine.BlockedOnGenerator},
+		{"at the limit", []grpc.ServerOption{grpc.MaxConcurrentStreams(2)}, 2, engine.BlockedOnStream},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sender := serve(t, slowTarget{}, tt.opts...)
 
-	if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
-		t.Fatalf("send: %v", err)
+			if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
+				t.Fatalf("send: %v", err)
+			}
+
+			times := callTimes{begunAt: time.Now(), activeAtWait: tt.open}
+			if got := sender.blocker(sender.conn, times); got != tt.want {
+				t.Errorf("blocked on %v, want %v", got, tt.want)
+			}
+		})
 	}
+}
 
-	if sender.onStream(sender.conn, time.Now()) {
-		t.Errorf("a call on a ready connection with no limit announced was put down to streams")
+// sleepOnBegin holds every call before it picks a connection: grpc-go calls HandleRPC(Begin)
+// synchronously, before the pick and NewStream, so the headers are late with quota to spare.
+type sleepOnBegin struct{ d time.Duration }
+
+func (sleepOnBegin) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context   { return ctx }
+func (sleepOnBegin) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context { return ctx }
+func (sleepOnBegin) HandleConn(context.Context, stats.ConnStats)                       {}
+
+func (s sleepOnBegin) HandleRPC(_ context.Context, rpc stats.RPCStats) {
+	if _, ok := rpc.(*stats.Begin); ok {
+		time.Sleep(s.d)
+	}
+}
+
+// Ground: boundary — a delay on our side before the headers, with the limit far from reached,
+// is not a wait for a stream, and the report must not blame streams for it. The delay is set by
+// construction, not by a loaded runner. Mutations "no check of open streams against the limit"
+// and "an unannounced limit reads as 0" turn it red.
+func TestSend_OurOwnDelayBelowTheLimitIsNoStreamWait(t *testing.T) {
+	const delay = 5 * time.Millisecond
+
+	for _, tt := range []struct {
+		name       string
+		opts       []grpc.ServerOption
+		limit      uint32
+		sequential bool
+	}{
+		{"limit 1000", []grpc.ServerOption{grpc.MaxConcurrentStreams(1000)}, 1000, false},
+		{"no limit announced", nil, 0, false},
+		// Five calls one after another under a limit of 2: a stream that ended
+		// and is still counted as open puts the third at the limit.
+		{"limit 2, one call at a time", []grpc.ServerOption{grpc.MaxConcurrentStreams(2)}, 2, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lis := bufconn.Listen(1024 * 1024)
+			srv := grpc.NewServer(tt.opts...)
+			grpc_health_v1.RegisterHealthServer(srv, slowTarget{delay: 20 * time.Millisecond})
+
+			go func() { _ = srv.Serve(lis) }()
+
+			sender := New(Options{
+				Target: "passthrough:///bufnet",
+				DialOptions: []grpc.DialOption{
+					grpc.WithStatsHandler(sleepOnBegin{d: delay}),
+					grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+						return lis.DialContext(ctx)
+					}),
+				},
+			})
+
+			t.Cleanup(func() {
+				_ = sender.Close()
+				srv.Stop()
+			})
+
+			if err := sender.Connect(bounded(t)); err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+
+			// A few calls, far below the limit or one at a time.
+			var wg sync.WaitGroup
+
+			outs := make([]engine.Outcome, 5)
+			starts := make([]time.Time, len(outs))
+
+			for i := range outs {
+				wg.Add(1)
+
+				send := func() {
+					defer wg.Done()
+
+					starts[i] = time.Now()
+					outs[i], _ = sender.Send(bounded(t), request(starts[i]))
+				}
+
+				if tt.sequential {
+					send()
+				} else {
+					go send()
+				}
+			}
+			wg.Wait()
+
+			for i, out := range outs {
+				// Proof the delay happened, or the test checks nothing.
+				if held := out.SentAt.Sub(starts[i]); held < delay {
+					t.Fatalf("call %d went out %v after it began, the handler holds %v", i, held, delay)
+				}
+				if out.StreamWait != 0 {
+					t.Errorf("call %d: stream wait %v with streams to spare; the delay was ours", i, out.StreamWait)
+				}
+			}
+
+			conns, _ := sender.Connections()
+			if conns.LimitAnnounced != (tt.limit > 0) || conns.LastLimit != tt.limit {
+				t.Errorf("connections %+v, want the limit %d", conns, tt.limit)
+			}
+		})
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -68,6 +69,9 @@ type Sender struct {
 
 	tracker *connTracker
 	ready   readyWindow
+	// active counts the streams open now, for telling a wait for a stream
+	// from a delay on our side.
+	active atomic.Int64
 	// rootCAs verifies the target under TLS; nil means the system pool. Set
 	// only by this package's tests until the config gets a CA of its own.
 	rootCAs *x509.CertPool
@@ -108,7 +112,7 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	dialOpts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker}),
-		grpc.WithStatsHandler(handler{}),
+		grpc.WithStatsHandler(handler{active: &s.active}),
 	}, s.opts.DialOptions...)
 
 	conn, err := grpc.NewClient(s.opts.Target, dialOpts...)
@@ -292,14 +296,14 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	outcome := engine.Outcome{
 		SentAt:     sentAt,
 		NotSent:    notSent,
-		StreamWait: times.streamWait(s.tracker.limited()),
+		StreamWait: times.streamWait(s.tracker.limit()),
 		DoneAt:     doneAt,
 		Category:   category,
 		Code:       status.Code(err).String(),
 		Err:        err,
 	}
-	if notSent && s.onStream(conn, times.begunAt) {
-		outcome.NotSentOn = engine.BlockedOnStream
+	if notSent {
+		outcome.NotSentOn = s.blocker(conn, times)
 	}
 	if body != nil {
 		outcome.Response = *body
@@ -352,10 +356,17 @@ func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.T
 	return doneAt, doneAt, true
 }
 
-// onStream reports whether an unsent call begun at begun was held back by
-// streams alone: the target announced a limit, and the connection was ready
-// for all of the call and still is.
-// The second check covers a watcher that has not yet seen the connection go.
-func (s *Sender) onStream(conn *grpc.ClientConn, begun time.Time) bool {
-	return !begun.IsZero() && s.tracker.limited() && s.ready.throughout(begun) && conn.GetState() == connectivity.Ready
+// blocker says what an unsent call waited for. A connection not ready for all
+// of the call, or not ready now in case the watcher is behind, is the
+// connection. On a ready one it is a stream only if the limit was reached when
+// the wait began; below it the delay was ours.
+func (s *Sender) blocker(conn *grpc.ClientConn, t callTimes) engine.Blocker {
+	switch {
+	case t.begunAt.IsZero() || !s.ready.throughout(t.begunAt) || conn.GetState() != connectivity.Ready:
+		return engine.BlockedOnConnection
+	case t.atLimit(s.tracker.limit()):
+		return engine.BlockedOnStream
+	default:
+		return engine.BlockedOnGenerator
+	}
 }

@@ -68,8 +68,8 @@ func checkReasons(t *testing.T, report engine.Report) {
 // stream and an answer. Waited for a stream: 49 of 50 in every run (the
 // first call waits 0). p99 of the wait: 130–131ms on both. p99 without the
 // wait: 150–152ms, the two answered calls at the stand's 150ms.
-// After the fix counting stream waits only under an announced limit: 20
-// more runs under -race on Linux limited to 2 CPUs, like the CI runner,
+// After stream waits began to count only with the open streams at the limit:
+// 20 more runs under -race on Linux limited to 2 CPUs, like the CI runner,
 // same: waited 49 of 50, p99 of the wait 131ms, not sent 0.
 //
 // Ranges: not sent at most 5 (10%, five times the worst seen); timed out at
@@ -124,10 +124,9 @@ func TestReport_OneStreamIsWhereTheLatencyGoes(t *testing.T) {
 	}
 }
 
-// The sender counts a stream wait only under an announced limit: without one
-// the time to the headers is the scheduler's, and CI saw 1–3 of 600 calls over
-// 1ms (run 35901535339) before that rule. 20 runs under -race on Linux with 2
-// CPUs after it: all green.
+// The sender counts a stream wait only with the open streams at the limit, and
+// an unannounced limit is never reached: before that rule CI saw 1–3 of 600
+// calls over 1ms here (run 35901535339), the scheduler's time, not a stream's.
 //
 // Ground: signal grpc-go v1.84.0 — a target that announces no limit leaves the client with
 // none (http2_client.go:1344), so 300 calls held at once all reach it and none waits for a

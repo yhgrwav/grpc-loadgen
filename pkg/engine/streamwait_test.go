@@ -52,17 +52,19 @@ func TestStats_NotSentSplitsIntoThreeReasonsThatAddUp(t *testing.T) {
 	recordUnsent(stats, at, 0, timeout, BlockedOnStream)
 	// Connection: the connection was not ready for some of the wait.
 	recordUnsent(stats, at, 10*time.Millisecond, timeout, BlockedOnConnection)
+	// Generator: a ready connection with streams to spare; the delay was ours.
+	recordUnsent(stats, at, 10*time.Millisecond, timeout, BlockedOnGenerator)
 
 	stats.EndSending(start.Add(2 * time.Second))
 	stats.Finish(start.Add(2 * time.Second))
 
 	r := stats.Report()
 
-	if r.NotSent != 5 {
-		t.Fatalf("not sent %d, want 5", r.NotSent)
+	if r.NotSent != 6 {
+		t.Fatalf("not sent %d, want 6", r.NotSent)
 	}
-	if r.NotSentLate != 2 || r.NotSentStream != 2 || r.NotSentConnection != 1 {
-		t.Errorf("late %d, stream %d, connection %d; want 2, 2, 1", r.NotSentLate, r.NotSentStream, r.NotSentConnection)
+	if r.NotSentLate != 3 || r.NotSentStream != 2 || r.NotSentConnection != 1 {
+		t.Errorf("late %d, stream %d, connection %d; want 3, 2, 1", r.NotSentLate, r.NotSentStream, r.NotSentConnection)
 	}
 	if sum := r.NotSentLate + r.NotSentStream + r.NotSentConnection; sum != r.NotSent {
 		t.Errorf("reasons add up to %d, not sent is %d", sum, r.NotSent)

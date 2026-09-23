@@ -17,6 +17,7 @@ package grpcsender
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/stats"
@@ -31,6 +32,8 @@ type callTimes struct {
 	// connection after waiting for one, zero if it did not wait.
 	begunAt  time.Time
 	pickedAt time.Time
+	// activeAtWait is how many streams were open when the wait for one began.
+	activeAtWait int64
 	// headerAt is when the stream's headers went out. grpc-go emits OutHeader
 	// inside NewStream after stream quota is granted, so a call without it
 	// never got a stream.
@@ -69,7 +72,11 @@ func (c *callStats) read() callTimes {
 
 // handler collects per-call timings. One instance serves the whole connection;
 // the state lives in the context.
-type handler struct{}
+type handler struct {
+	// active counts the streams open now: headers out, call not over. Nil in
+	// tests that feed events by hand.
+	active *atomic.Int64
+}
 
 func (handler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
 
@@ -77,7 +84,7 @@ func (handler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Contex
 
 func (handler) HandleConn(context.Context, stats.ConnStats) {}
 
-func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
+func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	call, ok := ctx.Value(callKey{}).(*callStats)
 	if !ok {
 		return
@@ -89,9 +96,15 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	switch v := rpc.(type) {
 	case *stats.Begin:
 		call.times.begunAt = v.BeginTime
+		call.times.activeAtWait = h.open()
 	case *stats.DelayedPickComplete:
+		// The wait for a stream starts once there is a connection.
 		call.times.pickedAt = time.Now()
+		call.times.activeAtWait = h.open()
 	case *stats.OutHeader:
+		if h.active != nil {
+			h.active.Add(1)
+		}
 		// OutHeader carries no time of its own; the call is synchronous at the
 		// point the headers are handed to the transport.
 		call.times.headerAt = time.Now()
@@ -103,17 +116,26 @@ func (handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	case *stats.InTrailer:
 		call.times.answered = true
 	case *stats.End:
+		if h.active != nil && !call.times.headerAt.IsZero() {
+			h.active.Add(-1)
+		}
 		call.times.doneAt = v.EndTime
 	}
 }
 
+// atLimit reports whether every stream the target allows was open when the
+// call began to wait for one. Below the limit the quota was there, and
+// whatever held the headers back was on our side: CI saw 1–3 calls of 600
+// held over 1ms at 300 rps with no limit at all.
+func (t callTimes) atLimit(limit uint32) bool {
+	return t.activeAtWait >= int64(limit)
+}
+
 // streamWait is how long a call that got its headers out waited for a stream
 // after it had a connection: from the pick, or from the start if the pick did
-// not wait. Without a limit announced the client's quota is MaxUint32 and no
-// call can wait for a stream: the time to the headers is then the scheduler's
-// and the transport's, 1–3 calls over 1ms at 300 rps on a CI runner.
-func (t callTimes) streamWait(limited bool) time.Duration {
-	if !limited || t.headerAt.IsZero() || t.begunAt.IsZero() {
+// not wait. Zero unless the limit was reached when the wait began.
+func (t callTimes) streamWait(limit uint32) time.Duration {
+	if t.headerAt.IsZero() || t.begunAt.IsZero() || !t.atLimit(limit) {
 		return 0
 	}
 
@@ -123,4 +145,12 @@ func (t callTimes) streamWait(limited bool) time.Duration {
 	}
 
 	return max(0, t.headerAt.Sub(from))
+}
+
+func (h handler) open() int64 {
+	if h.active == nil {
+		return 0
+	}
+
+	return h.active.Load()
 }

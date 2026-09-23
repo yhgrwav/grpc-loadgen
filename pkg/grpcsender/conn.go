@@ -17,6 +17,7 @@ package grpcsender
 import (
 	"context"
 	"encoding/binary"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -219,11 +220,15 @@ func (s *Sender) Connections() (engine.Connections, bool) {
 	return s.tracker.report()
 }
 
-// limited reports whether the last handshake heard announced a stream limit.
-// Without one a call cannot wait for a stream.
-func (c *connTracker) limited() bool {
+// limit is the stream limit of the last handshake heard; MaxUint32, the
+// client's own quota, when none was announced or none was heard.
+func (c *connTracker) limit() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.heard > 0 && c.last.announced
+	if c.heard == 0 || !c.last.announced {
+		return math.MaxUint32
+	}
+
+	return c.last.limit
 }

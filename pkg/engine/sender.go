@@ -127,6 +127,9 @@ const (
 	// BlockedOnStream is a ready connection with every stream the target
 	// allows already in use.
 	BlockedOnStream
+	// BlockedOnGenerator is a ready connection with streams to spare: what held
+	// the call back was on the generator's side.
+	BlockedOnGenerator
 )
 
 // Connections is what a sender knows about the connections it ran over.

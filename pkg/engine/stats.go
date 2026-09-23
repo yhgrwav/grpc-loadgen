@@ -340,7 +340,7 @@ func (s *Stats) Record(r Result) {
 		s.notSent++
 		method.unsentOut++
 		switch {
-		case lateMoreThanQueued(r):
+		case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
 			s.notSentLate++
 		case r.NotSentOn == BlockedOnStream:
 			s.notSentStream++
