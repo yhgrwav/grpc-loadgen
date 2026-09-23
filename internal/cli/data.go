@@ -60,6 +60,13 @@ func RequestBody(desc protoreflect.MessageDescriptor, data any) ([]byte, error) 
 	return proto.MarshalOptions{Deterministic: true}.Marshal(msg)
 }
 
+// Unchecked is a method nothing could be checked against before the run, and
+// why: reflection off, refused, or not answering.
+type Unchecked struct {
+	Method string
+	Err    error
+}
+
 // AttachData resolves every method the run will call and fills in the payload
 // of the calls that have data. It runs once, before the load: a method the
 // target does not serve, or a body that does not fit its message, is a config
@@ -71,7 +78,7 @@ func RequestBody(desc protoreflect.MessageDescriptor, data any) ([]byte, error) 
 func AttachData(
 	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
 	calls []engine.Call,
-) (unchecked []string, err error) {
+) (unchecked []Unchecked, err error) {
 	var errs []error
 
 	for i := range cfg.Load.Calls {
@@ -81,8 +88,13 @@ func AttachData(
 
 		switch {
 
-		case errors.Is(resolveErr, descriptor.ErrReflectionUnsupported) && call.Data == nil:
-			unchecked = append(unchecked, call.Method)
+		case resolveErr == nil:
+		// A method with no data needs no schema, so a resolver that could not
+		// answer only costs the check, not the run. Which it was matters: a
+		// target that never enabled reflection is not the same as one that
+		// asked for credentials or did not answer in time.
+		case call.Data == nil && !errors.Is(resolveErr, descriptor.ErrMethodNotFound):
+			unchecked = append(unchecked, Unchecked{Method: call.Method, Err: resolveErr})
 
 			continue
 		case errors.Is(resolveErr, descriptor.ErrReflectionUnsupported):
@@ -90,7 +102,7 @@ func AttachData(
 				"without data the method runs with an empty message", call.Method, resolveErr))
 
 			continue
-		case resolveErr != nil:
+		default:
 			// Named here rather than left to the resolver: which method the
 			// run cannot make is ours to say, whoever resolves it.
 			errs = append(errs, fmt.Errorf("%s: %w", call.Method, resolveErr))

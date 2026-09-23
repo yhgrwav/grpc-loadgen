@@ -236,7 +236,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 	// Methods nothing could be checked against: named again with the report,
 	// where a full-screen run does not scroll them away.
-	var unchecked []string
+	var unchecked []cli.Unchecked
 
 	if grpcSender != nil {
 		defer func() { _ = grpcSender.Close() }()
@@ -254,9 +254,9 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		if dataErr != nil {
 			return dataErr
 		}
-		for _, method := range unchecked {
-			fmt.Fprintf(stderr, "%s: server reflection is off on the target, so the method was not "+
-				"checked before the run; it sends an empty message\n", method)
+		for _, m := range unchecked {
+			fmt.Fprintf(stderr, "%s: %v; the method was not checked before the run and sends an "+
+				"empty message\n", m.Method, m.Err)
 		}
 	}
 

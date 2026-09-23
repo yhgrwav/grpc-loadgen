@@ -15,11 +15,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
+	"github.com/yhgrwav/leettest/pkg/descriptor"
 	"github.com/yhgrwav/leettest/pkg/engine"
 	"github.com/yhgrwav/leettest/pkg/metrics"
 )
@@ -64,14 +65,25 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 // a warning printed before a full-screen run is gone by the time the numbers
 // are read, and a typo in one of these methods shows up above only as
 // failures.
-func PrintUnchecked(w io.Writer, methods []string) {
+func PrintUnchecked(w io.Writer, methods []Unchecked) {
 	if len(methods) == 0 {
 		return
 	}
 
-	fmt.Fprintf(w, "\nnot checked before the run: %s. Server reflection is off on the target, so\n"+
-		"a method that does not exist there is seen only as the failures above.\n",
-		strings.Join(methods, ", "))
+	fmt.Fprintf(w, "\nnot checked before the run:\n")
+	for _, m := range methods {
+		// "off" only when the target said it does not implement reflection.
+		// Refused, timed out or answered with something else is a different
+		// fact, and naming it "off" would send the reader to the wrong place.
+		why := fmt.Sprintf("server reflection could not be used: %v", m.Err)
+		if errors.Is(m.Err, descriptor.ErrReflectionUnsupported) {
+			why = "server reflection is off on the target"
+		}
+
+		fmt.Fprintf(w, "  %s: %s\n", displayMethod(m.Method), why)
+	}
+	fmt.Fprint(w, "A method that does not exist on the target is then seen only as the failures\n"+
+		"above.\n")
 }
 
 // formatQuantile prints a percentile the way it is known: an exact value, a

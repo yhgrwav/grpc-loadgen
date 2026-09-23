@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -105,8 +107,11 @@ func TestAttachData_WithoutReflectionAMethodWithoutDataOnlyWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if len(unchecked) != 1 || unchecked[0] != "wallet.v1.Wallet/One" {
-		t.Errorf("unchecked = %v, want the one method nothing could be checked against", unchecked)
+	if len(unchecked) != 1 || unchecked[0].Method != "wallet.v1.Wallet/One" {
+		t.Fatalf("unchecked = %v, want the one method nothing could be checked against", unchecked)
+	}
+	if !errors.Is(unchecked[0].Err, descriptor.ErrReflectionUnsupported) {
+		t.Errorf("reason = %v, want the reflection error itself", unchecked[0].Err)
 	}
 }
 
@@ -116,5 +121,35 @@ func TestAttachData_WithoutReflectionAMethodWithDataStillFails(t *testing.T) {
 
 	if _, err := AttachData(t.Context(), resolver, cfg, calls); !errors.Is(err, descriptor.ErrReflectionUnsupported) {
 		t.Fatalf("error = %v, want %v", err, descriptor.ErrReflectionUnsupported)
+	}
+}
+
+// Reflection can fail for reasons other than being off: it may want
+// credentials, or not answer in time. A method without data still runs — but
+// calling that "reflection is off" would send the reader to the wrong place.
+func TestAttachData_ReflectionRefusedIsNotTheSameAsReflectionOff(t *testing.T) {
+	cfg, calls := loadOf(config.Call{Method: "wallet.v1.Wallet/One"})
+	refused := status.Error(codes.PermissionDenied, "reflection needs a token")
+	resolver := &fakeResolver{err: refused}
+
+	unchecked, err := AttachData(t.Context(), resolver, cfg, calls)
+	if err != nil {
+		t.Fatalf("attach: %v, want the run to go on", err)
+	}
+	if len(unchecked) != 1 {
+		t.Fatalf("unchecked = %v, want the method", unchecked)
+	}
+	if errors.Is(unchecked[0].Err, descriptor.ErrReflectionUnsupported) {
+		t.Errorf("a refusal was read as reflection being off: %v", unchecked[0].Err)
+	}
+
+	var out strings.Builder
+	PrintUnchecked(&out, unchecked)
+
+	if strings.Contains(out.String(), "is off") {
+		t.Errorf("the report says reflection is off, though it was refused:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "PermissionDenied") {
+		t.Errorf("the report does not say why it could not be used:\n%s", out.String())
 	}
 }

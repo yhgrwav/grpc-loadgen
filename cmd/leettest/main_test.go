@@ -1058,10 +1058,11 @@ func TestRun_WithoutReflectionAMethodWithoutDataStillRuns(t *testing.T) {
 	// In stderr before the run, and again with the report: a full-screen run
 	// scrolls the first away, and the person reading the numbers is the one
 	// who needs to know that nothing was checked.
-	if !strings.Contains(res.stderr, "reflection is off") || !strings.Contains(res.stderr, checkMethod) {
+	if !strings.Contains(res.stderr, "reflection is not enabled") || !strings.Contains(res.stderr, checkMethod) {
 		t.Errorf("stderr does not warn about the unchecked method:\n%s", res.stderr)
 	}
-	if !strings.Contains(res.stdout, "not checked before the run") || !strings.Contains(res.stdout, checkMethod) {
+	if !strings.Contains(res.stdout, "not checked before the run") || !strings.Contains(res.stdout, checkMethod) ||
+		!strings.Contains(res.stdout, "reflection is off") {
 		t.Errorf("the report does not say the method was never checked:\n%s", res.stdout)
 	}
 }
