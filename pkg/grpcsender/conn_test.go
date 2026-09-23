@@ -16,8 +16,15 @@ package grpcsender
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -25,6 +32,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -545,5 +554,124 @@ func TestConnect_TheConnectionIsReadyFromTheMomentConnectReturns(t *testing.T) {
 		if begun := time.Now(); !sender.ready.throughout(begun) {
 			t.Fatalf("a call begun right after Connect is not on a ready connection")
 		}
+	}
+}
+
+// selfSigned makes a certificate for the name bufconn targets resolve to.
+func selfSigned(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("key: %v", err)
+	}
+
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "bufnet"}, DNSNames: []string{"bufnet"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("certificate: %v", err)
+	}
+
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pool
+}
+
+// Ground: contract — under TLS the frames are readable only after the handshake; a wrapper put
+// on the raw connection reads ciphertext and finds no limit. This goes through Connect with
+// TLS on, the path a user takes. Mutation "wrap before the TLS handshake" turns it red.
+func TestConnections_ReadTheLimitUnderTLS(t *testing.T) {
+	cert, pool := selfSigned(t)
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&cert)), grpc.MaxConcurrentStreams(7))
+	grpc_health_v1.RegisterHealthServer(srv, slowTarget{})
+
+	go func() { _ = srv.Serve(lis) }()
+
+	sender := New(Options{
+		Target: "passthrough:///bufnet",
+		TLS:    true,
+		DialOptions: []grpc.DialOption{grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		})},
+	})
+	sender.rootCAs = pool
+
+	t.Cleanup(func() {
+		_ = sender.Close()
+		srv.Stop()
+	})
+
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect over TLS: %v", err)
+	}
+	if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	want := engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 7, LastLimit: 7}
+	if got, ok := sender.Connections(); !ok || got != want {
+		t.Errorf("connections %+v (known %v), want %+v", got, ok, want)
+	}
+}
+
+// Ground: contract — credentials of the caller's in DialOptions replace the sender's, so no
+// handshake passes its wrapper; the report must then say nothing about connections rather than
+// "no limit announced" about a limit nobody read. Goes through the engine, as the CLI does.
+// Mutation "report what was seen even with no handshake" turns it red.
+func TestConnections_CallersOwnCredentialsLeaveTheReportSilent(t *testing.T) {
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer(grpc.MaxConcurrentStreams(1))
+	grpc_health_v1.RegisterHealthServer(srv, slowTarget{})
+
+	go func() { _ = srv.Serve(lis) }()
+
+	sender := New(Options{
+		Target: "passthrough:///bufnet",
+		DialOptions: []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+		},
+	})
+
+	t.Cleanup(func() {
+		_ = sender.Close()
+		srv.Stop()
+	})
+
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{{
+			Method: checkMethod, Timeout: time.Second,
+			Stages: []engine.Stage{{StartRPS: 10, TargetRPS: 10, Duration: 200 * time.Millisecond}},
+		}},
+		Sender:      sender,
+		MaxInFlight: 20,
+	})
+	if err != nil {
+		t.Fatalf("build the engine: %v", err)
+	}
+	if err := eng.Run(bounded(t)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if got := eng.Report().Connections; got != nil {
+		t.Errorf("connections %+v, want none: no handshake went through the sender's credentials", *got)
 	}
 }

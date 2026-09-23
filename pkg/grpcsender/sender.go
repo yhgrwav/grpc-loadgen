@@ -17,6 +17,7 @@ package grpcsender
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"sync"
@@ -51,7 +52,9 @@ type Options struct {
 	// insecure, which is the usual case for a service behind a mesh.
 	TLS bool
 	// DialOptions are passed through for cases the fields above do not cover,
-	// such as custom credentials or an in-process dialer in tests.
+	// such as custom credentials or an in-process dialer in tests. Custom
+	// transport credentials replace the sender's own, which read the stream
+	// limit the target announces; Connections then reports nothing.
 	DialOptions []grpc.DialOption
 }
 
@@ -65,6 +68,9 @@ type Sender struct {
 
 	tracker *connTracker
 	ready   readyWindow
+	// rootCAs verifies the target under TLS; nil means the system pool. Set
+	// only by this package's tests until the config gets a CA of its own.
+	rootCAs *x509.CertPool
 	// stopWatch ends the connection watcher; watched closes when it has.
 	stopWatch context.CancelFunc
 	watched   chan struct{}
@@ -97,7 +103,7 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	creds := insecure.NewCredentials()
 	if s.opts.TLS {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: s.rootCAs})
 	}
 
 	dialOpts := append([]grpc.DialOption{
