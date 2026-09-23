@@ -153,3 +153,43 @@ func TestAttachData_ReflectionRefusedIsNotTheSameAsReflectionOff(t *testing.T) {
 		t.Errorf("the report does not say why it could not be used:\n%s", out.String())
 	}
 }
+
+// A body needs the schema, and the schema comes from reflection. If reflection
+// is unusable for any reason, the only honest outcome is a refusal before the
+// run: sending an empty message instead would report honest latencies of a
+// request nobody asked for.
+func TestAttachData_AMethodWithDataFailsWhenReflectionIsUnusable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "refused", err: status.Error(codes.PermissionDenied, "reflection needs a token")},
+		{name: "timed out", err: status.Error(codes.DeadlineExceeded, "reflection did not answer")},
+		{name: "off", err: descriptor.ErrReflectionUnsupported},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, calls := loadOf(config.Call{
+				Method: "wallet.v1.Wallet/One",
+				Data:   map[string]any{"wallet_id": "w-1"},
+			})
+			resolver := &fakeResolver{err: tt.err}
+
+			unchecked, err := AttachData(t.Context(), resolver, cfg, calls)
+
+			if err == nil {
+				t.Fatal("the run was allowed to start without the schema its body needs")
+			}
+			if !strings.Contains(err.Error(), "wallet.v1.Wallet/One") {
+				t.Errorf("error %q does not name the method", err)
+			}
+			if len(unchecked) != 0 {
+				t.Errorf("unchecked = %v, want none: this is a refusal, not a warning", unchecked)
+			}
+			if calls[0].Payload != nil {
+				t.Errorf("payload = %q, want nothing built from an unknown schema", calls[0].Payload)
+			}
+		})
+	}
+}
