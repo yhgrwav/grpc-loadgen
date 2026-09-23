@@ -89,10 +89,16 @@ func main() {
 	signal.Stop(signals)
 
 	if err != nil && !errors.Is(err, flag.ErrHelp) {
-		fmt.Fprintf(os.Stderr, "leettest: %v\n", err)
+		printError(os.Stderr, err)
 	}
 
 	os.Exit(exitCode(err))
+}
+
+// printError writes a failed run's error as it came: the final screen's short
+// verdict sends the reader here for the details.
+func printError(w io.Writer, err error) {
+	fmt.Fprintf(w, "leettest: %v\n", err)
 }
 
 // exitCode maps the outcome onto codes a pipeline can tell apart. Whether the

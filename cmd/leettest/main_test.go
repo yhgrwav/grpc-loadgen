@@ -1097,3 +1097,14 @@ func TestRunResult_ARejectedMethodIsAnInvalidRun(t *testing.T) {
 		})
 	}
 }
+
+// Ground: contract — a failed run's error goes to stderr as it came, in any
+// script: the final screen's short verdict points there.
+func TestPrintError_WritesTheErrorAsItCame(t *testing.T) {
+	var out bytes.Buffer
+	printError(&out, fmt.Errorf("connect to localhost:50051: %w", errors.New("соединение сброшено")))
+
+	if got, want := out.String(), "leettest: connect to localhost:50051: соединение сброшено\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -465,5 +466,30 @@ func TestRunLiveLetsASignalCloseTheFinalScreen(t *testing.T) {
 	case <-c.exited:
 		t.Fatal("exit without a report fired")
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// closedView records that the screen was closed before RunLive returned.
+type closedView struct{ closed *atomic.Bool }
+
+func (v closedView) Run() (tea.Model, error) { v.closed.Store(true); return nil, nil }
+func (closedView) Send(tea.Msg)              {}
+func (closedView) Quit()                     {}
+
+// Ground: contract — RunLive hands back the run's own error only once the
+// screen is closed, so what the caller prints lands on the normal screen, not
+// the alternate one that vanishes with it.
+func TestRunLiveReturnsTheRunsErrorAfterTheScreenCloses(t *testing.T) {
+	var closed atomic.Bool
+	runErr := errors.New("соединение сброшено")
+
+	err := RunLive(closedView{closed: &closed}, NewStopper(func() {}, func() {}, func() {}, time.Hour),
+		func() error { return runErr }, func() {})
+
+	if !closed.Load() {
+		t.Error("RunLive returned before the screen closed")
+	}
+	if !errors.Is(err, runErr) || err.Error() != runErr.Error() {
+		t.Errorf("err = %v, want the run's own error unchanged", err)
 	}
 }

@@ -66,9 +66,9 @@ func (m *model) shortVerdicts(width int) []string {
 // failureReason is why a run failed, in at most room columns of ASCII: a gRPC
 // status by its code and, room allowing, its description; otherwise the
 // context LeetTest wrapped the error in. Text in another script is not cut to
-// "?" but left to the full report.
+// "?" but left to stderr, where the error is printed after exit.
 func failureReason(err error, room int) string {
-	const elsewhere = "details in the full report after exit"
+	const elsewhere = "details are printed after exit"
 
 	text := err.Error()
 	if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
