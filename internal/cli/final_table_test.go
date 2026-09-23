@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -198,5 +199,52 @@ func TestFinalScreenCutsALongNameFromTheHead(t *testing.T) {
 		if !strings.Contains(row, cell) {
 			t.Errorf("the row at 80 columns lacks %s: %q", cell, row)
 		}
+	}
+}
+
+// Ground: boundary — the name gets its own line when fewer than 8 columns are
+// left for it next to the seven numbers; in English that happens below 64
+// columns. Either way no number is lost.
+func TestFinalScreenPutsTheNameOnItsOwnLineBelow64Columns(t *testing.T) {
+	numbers := []string{"1000", "150", "97", "11ms", "12ms", "13ms", "14ms"}
+	hasAll := func(line string) bool {
+		f := " " + strings.Join(strings.Fields(line), " ") + " "
+		for _, n := range numbers {
+			if !strings.Contains(f, " "+n+" ") {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	for _, tc := range []struct {
+		width   int
+		twoRows bool
+	}{{60, true}, {63, true}, {64, false}} {
+		t.Run(strconv.Itoa(tc.width), func(t *testing.T) {
+			m := testModel(t)
+			m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 40})
+			m.done, m.report = true, tableReport()
+			lines := strings.Split(m.finalReport(contentWidth(tc.width)), "\n")
+
+			name := -1
+			for i, line := range lines {
+				if f := strings.Fields(line); len(f) > 0 && f[0] == shortMethod("pkg.Svc/One") {
+					name = i
+					break
+				}
+			}
+			if name < 0 {
+				t.Fatalf("no row for the method:\n%s", strings.Join(lines, "\n"))
+			}
+
+			switch {
+			case tc.twoRows && (len(strings.Fields(lines[name])) != 1 || name+1 >= len(lines) || !hasAll(lines[name+1])):
+				t.Errorf("want the name alone and all seven numbers on the next line:\n%s", strings.Join(lines, "\n"))
+			case !tc.twoRows && !hasAll(lines[name]):
+				t.Errorf("want the name and all seven numbers on one line:\n%s", strings.Join(lines, "\n"))
+			}
+		})
 	}
 }
