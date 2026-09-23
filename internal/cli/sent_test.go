@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -96,5 +97,50 @@ func TestScreensNameTheCallsThatDidNotGoOut(t *testing.T) {
 				t.Errorf("final: %q", line)
 			}
 		})
+	}
+}
+
+// Ground: contract — "not sent" appears only when some call did not go out: a
+// line saying "not sent 0" on every run is noise the reader learns to skip.
+func TestScreensSayNothingWhenEveryCallWentOut(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	tickN(m, 3)
+	m.snapshot.Sent, m.snapshot.NotSent = 146, 0
+	if body := m.body(120); strings.Contains(body, m.text.NotSent()) {
+		t.Errorf("live view names unsent calls when there are none:\n%s", body)
+	}
+
+	m.done, m.report = true, engine.Report{Sent: 146, Failed: 146}
+	if body := m.body(120); strings.Contains(body, m.text.NotSent()) {
+		t.Errorf("final screen names unsent calls when there are none:\n%s", body)
+	}
+}
+
+type unsentSender struct{}
+
+func (unsentSender) Send(_ context.Context, _ engine.Request) (engine.Outcome, error) {
+	return engine.Outcome{Category: engine.CategoryTimeout, NotSent: true, Err: context.DeadlineExceeded,
+		DoneAt: time.Now()}, nil
+}
+
+// Ground: contract — the progress line without a terminal carries the same
+// totals as the live view.
+func TestPlainProgressCountsTheCallsThatDidNotGoOut(t *testing.T) {
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{{Method: "a.B/One", Timeout: time.Second,
+			Stages: []engine.Stage{{StartRPS: 20, TargetRPS: 20, Duration: 1500 * time.Millisecond}}}},
+		Sender: unsentSender{}, MaxInFlight: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if err := RunPlain(&out, "localhost:50051", eng, func() error { return eng.Run(t.Context()) }); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "not-sent 0 ") || !strings.Contains(out.String(), "not-sent ") {
+		t.Errorf("the progress line does not count the unsent calls:\n%s", out.String())
 	}
 }

@@ -15,6 +15,9 @@
 package engine
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -162,5 +165,67 @@ func TestStats_RequestRejectedCountsOnlyCallsThatWentOut(t *testing.T) {
 	stats.Finish(start.Add(time.Second))
 	if stats.Report().RequestRejected {
 		t.Error("4 unsent and nothing sent: want no verdict, the target saw nothing")
+	}
+}
+
+// stuckSender holds every call past its deadline and the release margin, so
+// the cap fills on the generator's side; every third call never went out.
+type stuckSender struct{ sends atomic.Int64 }
+
+func (s *stuckSender) Send(ctx context.Context, _ Request) (Outcome, error) {
+	i := s.sends.Add(1)
+	time.Sleep(500 * time.Millisecond) // the hold under test, not synchronisation
+
+	return Outcome{Category: CategoryTimeout, NotSent: i%3 == 0, Err: context.DeadlineExceeded, DoneAt: time.Now()}, nil
+}
+
+// Ground: contract — the report accounts for every call the schedule handed
+// out: sent, not sent, and the one the cap refused, which it prints as
+// CapHit.Unsent. A call counted twice or in none breaks the sum.
+func TestEngine_SentNotSentAndCapRefusedAddUpToEveryCall(t *testing.T) {
+	sender := &stuckSender{}
+	// 100/s with a 100ms timeout needs 10 + 1 + 10 slots; the sender holds
+	// each for 500ms, so the cap of 21 is hit at about 210ms.
+	eng, err := New(Options{Calls: []Call{budgetCall("a", 100, 100*time.Millisecond)}, Sender: sender, MaxInFlight: 21})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Run(t.Context()); !errors.Is(err, ErrInFlightCapExceeded) {
+		t.Fatalf("run: %v, want the cap hit", err)
+	}
+
+	report := eng.Report()
+	if report.CapHit == nil {
+		t.Fatal("no cap hit in the report")
+	}
+	sends := int(sender.sends.Load())
+	if got := report.Sent + report.NotSent; got != sends {
+		t.Errorf("sent %d + not sent %d = %d; the sender was handed %d", report.Sent, report.NotSent, got, sends)
+	}
+	if report.NotSent != sends/3 || report.CapHit.Unsent != 1 {
+		t.Errorf("not sent %d, refused by the cap %d; want %d and 1", report.NotSent, report.CapHit.Unsent, sends/3)
+	}
+}
+
+// Ground: contract — start lag and late cancellation are the generator's
+// numbers, and a call that timed out before going out is most often the one
+// the generator was late with: leaving it out hides the lag that caused it.
+func TestStats_UnsentCallsStillCountForTheGeneratorsLag(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+	at := start.Add(10 * time.Millisecond)
+	stats.Record(Result{
+		Method: "a", ScheduledAt: at, BegunAt: at.Add(300 * time.Millisecond), Deadline: at.Add(time.Second),
+		Outcome: Outcome{Category: CategoryTimeout, NotSent: true, DoneAt: at.Add(time.Second + 50*time.Millisecond)},
+	})
+	stats.Finish(start.Add(2 * time.Second))
+	report := stats.Report()
+
+	if report.StartLagMax != 300*time.Millisecond {
+		t.Errorf("start lag max %v, want 300ms from the unsent call", report.StartLagMax)
+	}
+	if report.LateCancelMax != 50*time.Millisecond {
+		t.Errorf("late cancel max %v, want 50ms from the unsent call", report.LateCancelMax)
 	}
 }
