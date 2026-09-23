@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -899,12 +901,12 @@ func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
 	}
 }
 
-func TestRunResult_CapHitIsAnIncompleteRunNotAnError(t *testing.T) {
+func TestRunResult_CapHitIsAnInvalidRunNotAnError(t *testing.T) {
 	report := engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}
 	err := runResult(report, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
 
-	if !errors.Is(err, ErrIncomplete) {
-		t.Errorf("err = %v, want ErrIncomplete: the report and its verdict were printed", err)
+	if !errors.Is(err, ErrInvalidRun) {
+		t.Errorf("err = %v, want ErrInvalidRun: the report and its verdict were printed", err)
 	}
 	if errors.Is(err, engine.ErrInFlightCapExceeded) {
 		t.Errorf("err = %v: a cap hit is a verdict in the report, not an error printed without one", err)
@@ -966,5 +968,74 @@ func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
 				t.Errorf("cap %d, rates %v: advised %v, New says %v", maxInFlight, rates, fits, err)
 			}
 		}
+	}
+}
+
+// A pipeline reads the code, not the words: a config error, a run that stopped
+// early and a run whose numbers say nothing must not look the same.
+func TestExitCode_TellsTheOutcomesApart(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "plan finished", err: nil, want: 0},
+		{name: "help", err: flag.ErrHelp, want: 0},
+		{name: "config error", err: errors.New("cannot read config"), want: 1},
+		{name: "invalid run", err: ErrInvalidRun, want: 2},
+		{name: "invalid run, wrapped", err: fmt.Errorf("run: %w", ErrInvalidRun), want: 2},
+		{name: "incomplete run", err: ErrIncomplete, want: 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := exitCode(tt.err); got != tt.want {
+				t.Errorf("exitCode(%v) = %d, want %d", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// 128 + the signal, the shell's own convention: a script that kills the run
+// with SIGTERM must not read the result as "the person pressed Ctrl+C".
+func TestExitCode_AnAbortedRunCarriesItsSignal(t *testing.T) {
+	if got := abortCode(syscall.SIGTERM); got != 143 {
+		t.Errorf("after SIGTERM = %d, want 143", got)
+	}
+	if got := abortCode(os.Interrupt); got != 130 {
+		t.Errorf("after Ctrl+C = %d, want 130", got)
+	}
+	if got := abortCode(nil); got != 130 {
+		t.Errorf("without a signal = %d, want 130", got)
+	}
+}
+
+// A run can be both invalid and short: the cap ends it early. The codes are
+// ranked, not summed — an invalid run's numbers do not describe the target at
+// all, which is worse news than covering less of the plan.
+func TestRunResult_AnInvalidRunOutranksAnIncompleteOne(t *testing.T) {
+	err := runResult(engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}, engine.ErrInFlightCapExceeded)
+
+	if got := exitCode(err); got != 2 {
+		t.Errorf("exit code = %d, want 2: invalid outranks incomplete", got)
+	}
+	if !errors.Is(err, ErrInvalidRun) || errors.Is(err, ErrIncomplete) {
+		t.Errorf("err = %v, want the invalid verdict alone", err)
+	}
+}
+
+// The gentle stop prints a report, so it is an outcome of the run, not a kill:
+// 130 and 143 belong to the exit that prints nothing at all.
+func TestRun_AStoppedRunExitsWithTheIncompleteCodeNotASignalOne(t *testing.T) {
+	res := runStopped(t, 1, "      timeout: 300ms\n")
+
+	if got := exitCode(res.err); got != 3 {
+		t.Errorf("exit code = %d, want 3: the run stopped early and printed its report (%v)", got, res.err)
+	}
+	if abortCode(os.Interrupt) == 3 {
+		t.Fatal("the signal code equals the incomplete code: the test no longer separates them")
+	}
+	if !strings.Contains(res.stdout, "run finished") {
+		t.Errorf("no report on stdout:\n%s", res.stdout)
 	}
 }
