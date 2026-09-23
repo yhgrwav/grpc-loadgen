@@ -358,9 +358,37 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	if !strings.Contains(text, "rejected") {
 		t.Errorf("no rejected row:\n%s", text)
 	}
-	for _, want := range []string{"invalid run", "a.B/One"} {
+	for _, want := range []string{"invalid run", "a.B/One", "4MB"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("verdict does not say %q:\n%s", want, text)
 		}
+	}
+}
+
+// With three methods and one rejected outright, the verdict is about that
+// method: a share taken over the run would be 33% and no verdict at all.
+func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration:        time.Second,
+		Sent:            300,
+		Failed:          100,
+		RequestRejected: true,
+		Methods: []engine.MethodReport{
+			{Method: "a.B/Good", Sent: 100, RPS: 100},
+			{Method: "a.B/AlsoGood", Sent: 100, RPS: 100},
+			{Method: "a.B/Typo", Sent: 100, Failed: 100, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 100}},
+		},
+	})
+
+	text := out.String()
+	verdict := text[strings.Index(text, "invalid run"):]
+
+	if !strings.Contains(verdict, "a.B/Typo") {
+		t.Errorf("the verdict does not name the method it is about:\n%s", verdict)
+	}
+	if strings.Contains(verdict, "a.B/Good") {
+		t.Errorf("the verdict names a method the target served:\n%s", verdict)
 	}
 }

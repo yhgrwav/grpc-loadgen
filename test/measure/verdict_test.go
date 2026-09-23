@@ -539,3 +539,54 @@ func TestReport_ARejectedMethodAloneDoesNotInvalidateTheRun(t *testing.T) {
 		t.Error("refusals not counted")
 	}
 }
+
+// A run of three methods where one is misspelled: two thirds of the calls are
+// served, so a share taken over the run says 33% and no verdict. The verdict
+// belongs to the method.
+func TestReport_OneRejectedMethodAmongServedOnesIsStillAVerdict(t *testing.T) {
+	served := stand.Start(stand.Constant(time.Millisecond))
+	t.Cleanup(served.Stop)
+
+	sender := grpcsender.New(grpcsender.Options{
+		Target:      served.Target(),
+		DialOptions: []grpc.DialOption{served.DialOption()},
+	})
+	if err := sender.Connect(t.Context()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = sender.Close() })
+
+	eng, err := engine.New(engine.Options{
+		Calls: []engine.Call{
+			load(served.Method(), silentRPS, time.Second, silentTimeout),
+			load("/grpc.health.v1.Health/Watch", silentRPS, time.Second, silentTimeout),
+			load("/grpc.health.v1.Health/Typo", silentRPS, time.Second, silentTimeout),
+		},
+		Sender:      sender,
+		MaxInFlight: 1000,
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), ceiling)
+	defer cancel()
+	if err := eng.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	report := eng.Report()
+	if !report.RequestRejected {
+		t.Error("one method rejected every call, yet the run passed as valid")
+	}
+
+	var rejected []string
+	for _, m := range report.Methods {
+		if m.Rejected.Count > 0 && m.Rejected.Count == m.Sent {
+			rejected = append(rejected, m.Method)
+		}
+	}
+	if len(rejected) != 2 {
+		t.Errorf("methods rejected outright = %v, want the typo and the streaming one", rejected)
+	}
+}

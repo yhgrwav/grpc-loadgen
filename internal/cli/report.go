@@ -38,6 +38,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 
 	censored, invalid, unanswered, unclassified, outside, refused := 0, 0, 0, 0, 0, 0
 	rejected := make([]string, 0, len(report.Methods))
+	outright := make([]string, 0, len(report.Methods))
 
 	for i := range report.Methods {
 		m := &report.Methods[i]
@@ -54,6 +55,9 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 
 		if r := m.Rejected; r.Count > 0 {
 			rejected = append(rejected, displayMethod(m.Method))
+			if r.Count == m.Sent {
+				outright = append(outright, displayMethod(m.Method))
+			}
 			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  rejected", "", r.Count, "",
 				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
 		}
@@ -68,15 +72,15 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	printStartLag(w, report)
 
 	if len(rejected) > 0 {
-		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls the target will not serve whatever the load:\n"+
-			"no such method, a bad argument, a message over a size limit. Check the config\n"+
-			"for %s.\n", strings.Join(rejected, ", "))
+		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls the target will not serve whatever the load: no\n"+
+			"such method, a bad argument, a reply over the client's 4MB limit or a request over\n"+
+			"the target's. Check the config for %s.\n", strings.Join(rejected, ", "))
 	}
 
 	if report.RequestRejected {
-		fmt.Fprint(w, "\ninvalid run: every measured call of a method came back as a request the\n"+
-			"target will not serve. Nothing about the load was tested; fix the request and\n"+
-			"run again.\n")
+		fmt.Fprintf(w, "\ninvalid run: every measured call of %s came back as a request the target\n"+
+			"will not serve. Nothing about the load was tested there; fix the request and run\n"+
+			"again.\n", strings.Join(outright, ", "))
 	}
 	if refused > 0 {
 		fmt.Fprint(w, "\nA method's percentiles are the time to serve a call: successes, and timeouts\n"+
