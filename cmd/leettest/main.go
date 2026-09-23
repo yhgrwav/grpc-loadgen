@@ -18,6 +18,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -224,7 +226,11 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		target = cli.FakeTarget
 		sender = engine.FakeSender{Delay: *fakeDelay, Jitter: *fakeJitter, FailRatio: *fakeFail}
 	} else {
-		grpcSender = grpcsender.New(grpcsender.Options{Target: target, TLS: cfg.App.UseTLS})
+		var senderOpts grpcsender.Options
+		if senderOpts, err = senderOptions(&cfg.App); err != nil {
+			return err
+		}
+		grpcSender = grpcsender.New(senderOpts)
 		sender = grpcSender
 	}
 
@@ -391,6 +397,34 @@ func withBudgetAdvice(err error) error {
 	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d\n"+
 		"(the cap keeps a slot per call for the call on the window's edge, and room for calls released up\n"+
 		"to %s past their deadline)", err, fits, budget.Need, engine.ReleaseMargin)
+}
+
+// senderOptions reads the certificate files the config names, before any
+// connection: a wrong path is a config error, not a failed handshake.
+func senderOptions(app *config.App) (grpcsender.Options, error) {
+	opts := grpcsender.Options{Target: string(app.Address), TLS: app.UseTLS, Metadata: app.Metadata}
+
+	if app.CA != "" {
+		raw, err := os.ReadFile(app.CA)
+		if err != nil {
+			return opts, fmt.Errorf("app.ca: %w", err)
+		}
+
+		opts.RootCAs = x509.NewCertPool()
+		if !opts.RootCAs.AppendCertsFromPEM(raw) {
+			return opts, fmt.Errorf("app.ca: %s holds no PEM certificate", app.CA)
+		}
+	}
+
+	if app.Cert != "" {
+		cert, err := tls.LoadX509KeyPair(app.Cert, app.Key)
+		if err != nil {
+			return opts, fmt.Errorf("app.cert %s, app.key %s: %w", app.Cert, app.Key, err)
+		}
+		opts.Certificates = []tls.Certificate{cert}
+	}
+
+	return opts, nil
 }
 
 // connect reaches the target before the run, so an unreachable one is an error

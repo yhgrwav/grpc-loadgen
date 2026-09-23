@@ -35,6 +35,9 @@ var (
 	ErrDuplicateMethod     = errors.New("method appears in more than one call: the report is per method, keep one call for it")
 	ErrFractionalRPS       = errors.New("rps must be a whole number of requests")
 	ErrWarmupCoversTheCall = errors.New("warmup must be shorter than the call: otherwise nothing of it is measured")
+	ErrInvalidMetadata     = errors.New("invalid metadata")
+	ErrTLSFilesWithoutTLS  = errors.New("ca, cert and key need TLS: remove them or set app.tls: true")
+	ErrCertWithoutKey      = errors.New("cert and key go together: set both or neither")
 	ErrInvalidTimeout      = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
 )
 
@@ -50,6 +53,18 @@ type App struct {
 	Address ConnectionString       `yaml:"-"`
 	TLS     *bool                  `yaml:"tls"`
 	UseTLS  bool                   `yaml:"-"`
+	// CA is a PEM file of certificates that verify the target instead of the
+	// system pool. Cert and Key are a PEM client certificate and its key for a
+	// target that asks for one. LoadFile makes relative paths relative to the
+	// config file; Parse keeps them as written.
+	CA   string `yaml:"ca"`
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
+	// RawMetadata is the field as written. Metadata is what every call
+	// carries: keys lowercased, ${NAME} replaced from the environment; nil
+	// when there is none.
+	RawMetadata map[string]string `yaml:"metadata"`
+	Metadata    map[string]string `yaml:"-"`
 }
 
 type ConnectionStringTarget struct {
