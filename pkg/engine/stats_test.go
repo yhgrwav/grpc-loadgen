@@ -286,3 +286,22 @@ func TestStatsRateIsZeroWhenSendingEndsInsideTheWarmup(t *testing.T) {
 		t.Errorf("rps = %v, want 0", got)
 	}
 }
+
+// Ground: boundary — the live view during a long plan: the window is the time
+// the run has been sending so far, not the hour it was asked for. Dividing by
+// the plan would show 0.03 rps a second into a 3600s run.
+func TestStatsLiveRateDividesByTheTimeSoFarNotThePlan(t *testing.T) {
+	stats := NewStats()
+	start := time.Now().Add(-time.Second)
+	stats.Start(start, 0)
+	stats.EndSending(start.Add(time.Hour))
+
+	recordSent(stats, start, 0, time.Second, 100)
+
+	var snapshot Snapshot
+	stats.SnapshotInto(&snapshot, NewLiveBuffer(), false)
+
+	if got := snapshot.RPS; got < 50 || got > 200 {
+		t.Errorf("live rps = %.2f after 100 calls in a second, want about 100", got)
+	}
+}
