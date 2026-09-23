@@ -452,6 +452,9 @@ func verdictCases() []struct {
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
 			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
+		{"failed, not ASCII", "run failed: ?????????? ????????", "rpc error", func(m *model) {
+			m.err = errors.New("соединение потеряно: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
+		}},
 	}
 }
 
@@ -484,6 +487,9 @@ func TestFinalScreenShortensTheVerdictToKeepARow(t *testing.T) {
 				if !strings.Contains(flat, "the full report is printed after exit") {
 					t.Errorf("the screen does not say where the rest is:\n%s", view)
 				}
+				if short {
+					checkCutCount(t, m, width, ansiCodes.ReplaceAllString(view, ""))
+				}
 			})
 		}
 	}
@@ -507,5 +513,43 @@ func TestShortVerdictsAreASCIIAndTwoLinesAt60(t *testing.T) {
 				t.Errorf("%s: %q takes %d lines at 60 columns", tc.name, v, n)
 			}
 		}
+	}
+}
+
+// checkCutCount checks "N more lines" against the full screen: every line of
+// the report the view left out is counted, the full verdict its short form
+// replaced among them.
+func checkCutCount(t *testing.T, m *model, width int, view string) {
+	t.Helper()
+
+	full := 0
+	for line := range strings.Lines(m.finalReport(contentWidth(width))) {
+		if strings.TrimSpace(line) != "" {
+			full++
+		}
+	}
+
+	var body []string
+	for line := range strings.Lines(view) {
+		body = append(body, strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│")))
+	}
+	shown, counting, cut := 0, false, -1
+	for _, line := range body {
+		switch {
+		case strings.HasPrefix(line, "Run finished"):
+			counting = true
+		case strings.Contains(line, "more methods"):
+			counting = false
+		case strings.HasPrefix(line, "> ") && strings.Contains(line, "more lines"):
+			counting = false
+			cut = atoi(t, strings.Fields(line)[1])
+		}
+		if counting && line != "" && !strings.HasPrefix(line, "> invalid run:") &&
+			!strings.HasPrefix(line, "> incomplete:") && !strings.HasPrefix(line, "> run failed:") {
+			shown++
+		}
+	}
+	if cut != full-shown {
+		t.Errorf("the screen says %d more lines; the full screen has %d and %d are shown:\n%s", cut, full, shown, view)
 	}
 }
