@@ -454,7 +454,7 @@ func verdictCases() []struct {
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
 			m.err = errors.New("connection lost: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
-		{"failed, not ASCII", "run failed: details in the full report after exit", "rpc error", func(m *model) {
+		{"failed, not ASCII", "run failed: details are printed after exit", "rpc error", func(m *model) {
 			m.err = errors.New("соединение потеряно: rpc error: code = Unavailable desc = " + strings.Repeat("x", 200))
 		}},
 	}
@@ -577,7 +577,7 @@ func TestShortVerdictNamesTheReasonOfAFailedRun(t *testing.T) {
 		{"plain", errors.New("connection lost: rpc error: code = Unavailable desc = x"),
 			[]string{"run failed: connection lost"}, nil},
 		{"another script", errors.New("соединение потеряно: сброс"),
-			[]string{"run failed: details in the full report after exit"}, []string{"?"}},
+			[]string{"run failed: details are printed after exit"}, []string{"?"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := testModel(t)
