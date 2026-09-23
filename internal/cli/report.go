@@ -81,8 +81,8 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 		fmt.Fprintf(w, "\ninvalid run: calls held their slots more than %s (the allowance) past their\n"+
 			"deadline, and the in-flight cap was hit at %s. The generator lacked CPU, or the sender\n"+
 			"does not honor deadlines; the target is not what filled the cap. At the hit %d slots\n"+
-			"were being held past their own deadline, most of them by less than the allowance;\n"+
-			"%d call was refused by the cap and never sent.\n",
+			"were being held past their own deadline; %d call was refused by the cap and\n"+
+			"never sent.\n",
 			formatDuration(engine.ReleaseMargin), formatDuration(hit.At), hit.OverDeadline, hit.Unsent)
 	}
 

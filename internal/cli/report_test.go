@@ -242,6 +242,16 @@ func TestPrintReportSaysACapHitIsTheGenerators(t *testing.T) {
 	if !strings.Contains(text, "21 slots") || !strings.Contains(text, "past their own deadline") {
 		t.Errorf("the count is not captioned for what it counts:\n%s", text)
 	}
+
+	// Nothing is said about how far past the deadline they were: that is not
+	// counted. With several methods in one budget the cap can fall seconds
+	// after the first deadline, and "most of them within the allowance" would
+	// be false.
+	for _, wrong := range []string{"most of them", "allowance;", "within the allowance"} {
+		if strings.Contains(text, wrong) {
+			t.Errorf("the caption claims %q, which nothing measures:\n%s", wrong, text)
+		}
+	}
 }
 
 func TestPrintReportStatesWhatTheTargetDidNotAnswer(t *testing.T) {
