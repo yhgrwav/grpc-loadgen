@@ -326,11 +326,16 @@ func table(w *strings.Builder, m mode, results map[string][]result) {
 
 			return fmt.Sprintf("%v [%v–%v]", round(xs[len(xs)/2]), round(xs[0]), round(xs[len(xs)-1]))
 		}
+		// LeetTest prints no per-call data: a count of -1 would read as a number.
+		over1s := "n/a"
+		if rs[0].over1s >= 0 {
+			over1s = ints(func(r result) int { return r.over1s })
+		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s |\n", v,
 			ints(func(r result) int { return r.sent }), ints(func(r result) int { return r.failed }),
 			durs(func(r result) time.Duration { return r.p50 }), durs(func(r result) time.Duration { return r.p90 }),
 			durs(func(r result) time.Duration { return r.p95 }), durs(func(r result) time.Duration { return r.p99 }),
-			ints(func(r result) int { return r.over1s }))
+			over1s)
 	}
 	fmt.Fprintln(w)
 }
