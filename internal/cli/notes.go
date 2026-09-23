@@ -61,6 +61,8 @@ func reportNotes(report engine.Report) []string {
 			rate = fmt.Sprintf("%d-%d", m.RPSLow, m.RPSHigh)
 		}
 
+		// Both facts are about one method, so they make one note.
+		var lines []string
 		if m.TimedOut > 0 {
 			silence := ""
 			switch {
@@ -71,14 +73,18 @@ func reportNotes(report engine.Report) []string {
 				silence = ",\nand the target answered nothing at all"
 			}
 
-			add("%s: at %s rps, %d of %d calls (%.1f%%) got no answer within %s%s.",
+			lines = append(lines, fmt.Sprintf("%s: at %s rps, %d of %d calls (%.1f%%) got no answer within %s%s.",
 				displayMethod(m.Method), rate, m.TimedOut, m.Sent, share(m.TimedOut, m.Sent),
-				formatDuration(m.Timeout), silence)
+				formatDuration(m.Timeout), silence))
 		}
 
 		if m.UnsentTimedOut > 0 {
-			add("%s: %d calls timed out before going out: they waited on the connection or the\n"+
-				"generator, not the target.", displayMethod(m.Method), m.UnsentTimedOut)
+			lines = append(lines, fmt.Sprintf("%s: %d calls timed out before going out: they waited on the connection or the\n"+
+				"generator, not the target.", displayMethod(m.Method), m.UnsentTimedOut))
+		}
+
+		if len(lines) > 0 {
+			notes = append(notes, strings.Join(lines, "\n"))
 		}
 	}
 
