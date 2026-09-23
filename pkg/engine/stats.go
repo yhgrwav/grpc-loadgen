@@ -156,13 +156,16 @@ type Report struct {
 type Stats struct {
 	mu        sync.Mutex
 	startedAt time.Time
-	endedAt   time.Time
-	warmup    time.Duration
-	sent      int
-	failed    int
-	aborted   int
-	reserve   int
-	byMethod  map[string]*methodStats
+	// sendingEndedAt is when the schedule stopped handing out calls: its
+	// planned end or an earlier stop. Zero until reported.
+	sendingEndedAt time.Time
+	endedAt        time.Time
+	warmup         time.Duration
+	sent           int
+	failed         int
+	aborted        int
+	reserve        int
+	byMethod       map[string]*methodStats
 	// startLag is how late calls began against their schedule, startLagMax
 	// its exact maximum; lateCancelMax how far past its deadline a timeout
 	// returned.
@@ -217,6 +220,18 @@ func (s *Stats) Start(at time.Time, warmup time.Duration) {
 
 	s.startedAt = at
 	s.warmup = warmup
+}
+
+// EndSending reports a moment the schedule stopped handing out calls; the
+// earliest reported one counts. Rates divide by the time up to it: what comes
+// after is waiting for answers, not sending.
+func (s *Stats) EndSending(at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.sendingEndedAt.IsZero() || at.Before(s.sendingEndedAt) {
+		s.sendingEndedAt = at
+	}
 }
 
 func (s *Stats) Finish(at time.Time) {
@@ -334,13 +349,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	s.mu.Lock()
 	elapsed, sent, failed = s.elapsed(), s.sent, s.failed
 
-	// Rates divide by the measured window, not by the whole run: the counters
-	// exclude warmup, so dividing by elapsed would report a rate lower than the
-	// one actually driven.
-	measured = elapsed - s.warmup
-	if measured < 0 {
-		measured = 0
-	}
+	measured = s.sendingWindow(elapsed)
 
 	out = make([]methodView, 0, len(s.byMethod))
 	sources := make([]*methodStats, 0, len(s.byMethod))
@@ -399,7 +408,7 @@ func (s *Stats) SnapshotInto(dst *Snapshot, buf *LiveBuffer, percentiles bool) {
 	}
 
 	elapsed, sent, failed := s.elapsed(), s.sent, s.failed
-	measured := max(elapsed-s.warmup, 0)
+	measured := s.sendingWindow(elapsed)
 
 	if len(dst.Methods) != len(buf.names) {
 		dst.Methods = make([]MethodSnapshot, len(buf.names))
@@ -544,6 +553,19 @@ func (s *Stats) Report() Report {
 	}
 
 	return report
+}
+
+// sendingWindow is what rates divide by: from the end of warmup to the end of
+// sending, or to now while sending goes on. The counters exclude warmup and
+// the drain after sending sends nothing, so either in the window would report
+// a rate lower than the one driven.
+func (s *Stats) sendingWindow(elapsed time.Duration) time.Duration {
+	window := elapsed
+	if !s.sendingEndedAt.IsZero() {
+		window = min(window, s.sendingEndedAt.Sub(s.startedAt))
+	}
+
+	return max(0, window-s.warmup)
 }
 
 func (s *Stats) elapsed() time.Duration {

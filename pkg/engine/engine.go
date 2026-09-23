@@ -254,6 +254,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.stats.Reserve(e.plannedDuration()+e.longestTimeout()+timelineSlack, methods...)
 	e.startedAt = time.Now()
 	e.stats.Start(e.startedAt, e.opts.Warmup)
+	// Nothing is scheduled past the plan, so rates never divide by more than
+	// it; a stop reports an earlier moment below.
+	e.stats.EndSending(e.startedAt.Add(e.plannedDuration()))
 
 	scheduleCtx, stopScheduling := context.WithCancel(runCtx)
 	defer stopScheduling()
@@ -261,8 +264,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	go func() {
 		select {
 		case <-e.stopped:
+			e.stats.EndSending(time.Now())
 			stopScheduling()
 		case <-scheduleCtx.Done():
+			e.stats.EndSending(time.Now())
 		}
 	}()
 

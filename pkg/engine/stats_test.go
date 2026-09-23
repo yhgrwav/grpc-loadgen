@@ -225,3 +225,83 @@ func TestStatsExcludesWarmupFromCountsAndRate(t *testing.T) {
 		t.Errorf("rps = %.3f, want ~0.5: one request over the two measured seconds", got)
 	}
 }
+
+func recordSent(stats *Stats, start time.Time, from, to time.Duration, n int) {
+	step := (to - from) / time.Duration(n)
+	for i := range n {
+		at := start.Add(from + time.Duration(i)*step)
+		stats.Record(Result{Method: "a", ScheduledAt: at, Outcome: Outcome{Category: CategorySuccess, SentAt: at, DoneAt: at}})
+	}
+}
+
+// Ground: boundary — the rate window with warmup and a drain at once: the
+// warmup is out of both the count and the window, the drain is out of the
+// window. An end-to-end run cannot pin both edges without conducting time.
+func TestStatsRatesOverTheSendingWindowWithoutWarmupOrDrain(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, time.Second)
+
+	recordSent(stats, start, 0, time.Second, 50)              // warmup
+	recordSent(stats, start, time.Second, 3*time.Second, 200) // measured
+	stats.EndSending(start.Add(3 * time.Second))
+	stats.Finish(start.Add(5 * time.Second)) // two seconds of drain
+
+	if got := stats.Report().Methods[0].RPS; got != 100 {
+		t.Errorf("rps = %v, want 200 calls over the 2s between warmup and the end of sending", got)
+	}
+}
+
+// Ground: boundary — a stop that comes earlier than the planned end wins,
+// whichever is reported first.
+func TestStatsSendingEndsAtTheEarliestReportedMoment(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	recordSent(stats, start, 0, time.Second, 100)
+	stats.EndSending(start.Add(3 * time.Second))
+	stats.EndSending(start.Add(time.Second))
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(4 * time.Second))
+
+	if got := stats.Report().Methods[0].RPS; got != 100 {
+		t.Errorf("rps = %v, want 100 calls over the 1s until the stop", got)
+	}
+}
+
+// Ground: boundary — sending ended inside the warmup: nothing was measured,
+// and the rate is zero, not a division by zero.
+func TestStatsRateIsZeroWhenSendingEndsInsideTheWarmup(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 2*time.Second)
+
+	recordSent(stats, start, 0, time.Second, 50)
+	stats.EndSending(start.Add(time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	report := stats.Report()
+	if got := report.Methods[0].RPS; got != 0 {
+		t.Errorf("rps = %v, want 0", got)
+	}
+}
+
+// Ground: boundary — the live view during a long plan: the window is the time
+// the run has been sending so far, not the hour it was asked for. Dividing by
+// the plan would show 0.03 rps a second into a 3600s run.
+func TestStatsLiveRateDividesByTheTimeSoFarNotThePlan(t *testing.T) {
+	stats := NewStats()
+	start := time.Now().Add(-time.Second)
+	stats.Start(start, 0)
+	stats.EndSending(start.Add(time.Hour))
+
+	recordSent(stats, start, 0, time.Second, 100)
+
+	var snapshot Snapshot
+	stats.SnapshotInto(&snapshot, NewLiveBuffer(), false)
+
+	if got := snapshot.RPS; got < 50 || got > 200 {
+		t.Errorf("live rps = %.2f after 100 calls in a second, want about 100", got)
+	}
+}
