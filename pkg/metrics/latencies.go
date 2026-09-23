@@ -15,6 +15,7 @@
 package metrics
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,13 +39,17 @@ type Latencies struct {
 	// censored is nil in an uncensored distribution until a value past the
 	// range needs it.
 	censored *hdrhistogram.Histogram
-	invalid  atomic.Int64
+	// censoredMin and censoredMax are the extreme thresholds exactly, not
+	// their buckets: a bound that is one threshold is stated as that.
+	censoredMin, censoredMax int64
+	invalid                  atomic.Int64
 }
 
 func NewLatencies() *Latencies {
 	return &Latencies{
-		measured: newHistogram(),
-		censored: newHistogram(),
+		measured:    newHistogram(),
+		censored:    newHistogram(),
+		censoredMin: math.MaxInt64,
 	}
 }
 
@@ -52,7 +57,7 @@ func NewLatencies() *Latencies {
 // a target took to refuse. It skips the histogram of lower bounds, half the
 // memory, and creates it only if a value past the range turns up.
 func NewUncensoredLatencies() *Latencies {
-	return &Latencies{measured: newHistogram()}
+	return &Latencies{measured: newHistogram(), censoredMin: math.MaxInt64}
 }
 
 func newHistogram() *hdrhistogram.Histogram {
@@ -101,4 +106,6 @@ func (l *Latencies) recordCensoredLocked(nanos int64) {
 		l.censored = newHistogram()
 	}
 	_ = l.censored.RecordValue(nanos)
+	l.censoredMin = min(l.censoredMin, nanos)
+	l.censoredMax = max(l.censoredMax, nanos)
 }

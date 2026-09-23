@@ -35,6 +35,7 @@ type Buffer struct {
 	combinedValid bool
 
 	censoredMin int64
+	censoredMax int64
 	invalidN    int64
 }
 
@@ -60,12 +61,10 @@ func (l *Latencies) CopyInto(b *Buffer) {
 	if l.censored != nil {
 		b.censored.Merge(l.censored)
 	}
+	b.censoredMin, b.censoredMax = l.censoredMin, l.censoredMax
 	l.mu.Unlock()
 
 	b.invalidN = l.invalid.Load()
-	if b.censored.TotalCount() > 0 {
-		b.censoredMin = b.censored.Min()
-	}
 }
 
 // MergeInto replaces what dst holds with the sum of sources.
@@ -77,8 +76,9 @@ func MergeInto(dst *Buffer, sources ...*Buffer) {
 		dst.censored.Merge(s.censored)
 		dst.invalidN += s.invalidN
 
-		if s.censored.TotalCount() > 0 && s.censoredMin < dst.censoredMin {
-			dst.censoredMin = s.censoredMin
+		if s.censored.TotalCount() > 0 {
+			dst.censoredMin = min(dst.censoredMin, s.censoredMin)
+			dst.censoredMax = max(dst.censoredMax, s.censoredMax)
 		}
 	}
 }
@@ -87,7 +87,7 @@ func (b *Buffer) reset() {
 	b.measured.Reset()
 	b.censored.Reset()
 	b.combinedValid = false
-	b.censoredMin = math.MaxInt64
+	b.censoredMin, b.censoredMax = math.MaxInt64, 0
 	b.invalidN = 0
 }
 
@@ -128,6 +128,15 @@ func (b *Buffer) Percentile(p float64) Quantile {
 		}
 	}
 
+	// The same bound as Snapshot's: a single threshold c when the rank-th
+	// measured value lies in a bucket above c's, else the bottom of the
+	// rank's bucket.
+	if c := b.censoredMin; c == b.censoredMax {
+		if m := b.measured.TotalCount(); m < rank || valueAtRankOf(b.measured, rank) > highestEquivalent(c) {
+			return Quantile{Value: time.Duration(c), Defined: true}
+		}
+	}
+
 	if !b.combinedValid {
 		b.combined.Reset()
 		b.combined.Merge(b.measured)
@@ -135,7 +144,7 @@ func (b *Buffer) Percentile(p float64) Quantile {
 		b.combinedValid = true
 	}
 
-	return Quantile{Value: time.Duration(valueAtRankOf(b.combined, rank)), Defined: true}
+	return Quantile{Value: time.Duration(lowestEquivalent(valueAtRankOf(b.combined, rank))), Defined: true}
 }
 
 // valueAtRankOf returns the upper bound of the bucket holding the rank-th

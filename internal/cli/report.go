@@ -113,7 +113,9 @@ func formatQuantile(q metrics.Quantile) string {
 		return "-"
 	}
 	if !q.Exact {
-		return ">" + formatLatency(q.Value)
+		// A lower bound is rounded down: rounded up it would state more than
+		// is known.
+		return ">" + formatLatencyWith(q.Value, scaledDown)
 	}
 
 	return formatLatency(q.Value)
@@ -122,10 +124,16 @@ func formatQuantile(q metrics.Quantile) string {
 // formatLatency prints a latency with the 3 significant figures the
 // histograms keep: 312us, 10.3ms, 1.71s, 12.3s, then minutes and seconds.
 func formatLatency(d time.Duration) string {
+	return formatLatencyWith(d, scaled)
+}
+
+// formatLatencyWith is formatLatency with the rounding given: scaled for a
+// measured value, scaledDown for a lower bound.
+func formatLatencyWith(d time.Duration, scale func(n, unit int64, dec int) int64) string {
 	n := d.Nanoseconds()
 	switch {
 	case n < 0:
-		return "-" + formatLatency(-d)
+		return "-" + formatLatencyWith(-d, scale)
 	case n == 0:
 		return "0"
 	case n < 1000:
@@ -137,16 +145,21 @@ func formatLatency(d time.Duration) string {
 		name string
 	}{{1e3, "us"}, {1e6, "ms"}} {
 		for dec := 2; dec >= 0; dec-- {
-			if v := scaled(n, u.size, dec); v < 1000 {
+			if v := scale(n, u.size, dec); v < 1000 {
 				return fixed(v, dec) + u.name
 			}
 		}
 	}
-	if v := scaled(n, 1e9, 2); v < 1000 {
+	if v := scale(n, 1e9, 2); v < 1000 {
 		return fixed(v, 2) + "s"
 	}
+	if v := scale(n, 1e9, 1); v < 600 {
+		return fixed(v, 1) + "s"
+	}
 
-	return formatSeconds(n)
+	secs := scale(n, 1e9, 0)
+
+	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
 }
 
 // formatDuration prints a length of time: to the microsecond below a
@@ -194,6 +207,16 @@ func scaled(n, unit int64, dec int) int64 {
 	}
 
 	return (n*k + unit/2) / unit
+}
+
+// scaledDown is scaled rounded down, for a lower bound.
+func scaledDown(n, unit int64, dec int) int64 {
+	k := int64(1)
+	for range dec {
+		k *= 10
+	}
+
+	return n * k / unit
 }
 
 // fixed writes v, holding dec decimals, as a number: 104 with 1 is 10.4.
