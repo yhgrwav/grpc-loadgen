@@ -402,6 +402,7 @@ func serve(t *testing.T, target grpc_health_v1.HealthServer, opts ...grpc.Server
 	}
 
 	t.Cleanup(func() {
+		checkNoOpenStreams(t, sender)
 		_ = sender.Close()
 		srv.Stop()
 	})
@@ -461,6 +462,7 @@ func dropping(t *testing.T) *droppingTarget {
 
 	t.Cleanup(func() {
 		d.open()
+		checkNoOpenStreams(t, d.sender)
 		_ = d.sender.Close()
 		srv.Stop()
 	})
@@ -678,29 +680,53 @@ func TestConnections_CallersOwnCredentialsLeaveTheReportSilent(t *testing.T) {
 	}
 }
 
-// Ground: boundary — a delay before the headers is a wait for a stream only if every stream
-// the target allows was open when the wait began; below the limit it is ours (CI run
-// 35901535339: 1–3 calls of 600 over 1ms with no limit). The edge, open == limit, is a wait.
-func TestStreamWait_OnlyAtTheLimit(t *testing.T) {
-	begun := time.Now()
+// Ground: boundary — a wait is for a stream only if the connection was full at some moment of
+// it; the moments are microseconds apart and cannot be set end to end. Five calls that all see
+// 99 of 100 open and four of which then wait is the case a snapshot at the start gets wrong.
+func TestStreamGauge_FullAtSomeMomentOfTheWait(t *testing.T) {
+	at := func(ms int) time.Time { return time.Unix(0, 0).Add(time.Duration(ms) * time.Millisecond) }
 
 	for _, tt := range []struct {
 		name   string
-		open   int64
 		limit  uint32
-		waited time.Duration
+		events func(g *streamGauge)
+		since  time.Time
+		full   bool
 	}{
-		{"no limit announced", 10, math.MaxUint32, 0},
-		{"below the limit", 10, 250, 0},
-		{"one below", 249, 250, 0},
-		{"at the limit", 250, 250, 5 * time.Millisecond},
-		{"over it, the target lowered it", 3, 1, 5 * time.Millisecond},
+		{"no limit announced", math.MaxUint32, func(g *streamGauge) { g.opened(at(1)); g.opened(at(2)) }, at(0), false},
+		{"below the limit throughout", 3, func(g *streamGauge) { g.opened(at(1)); g.opened(at(2)) }, at(0), false},
+		{"full now", 2, func(g *streamGauge) { g.opened(at(1)); g.opened(at(2)) }, at(5), true},
+		{"full during the wait, freed before its end", 2, func(g *streamGauge) {
+			g.opened(at(1))
+			g.opened(at(2))
+			g.closed(at(10))
+		}, at(5), true},
+		{"freed exactly as the wait began", 2, func(g *streamGauge) {
+			g.opened(at(1))
+			g.opened(at(2))
+			g.closed(at(5))
+		}, at(5), true},
+		{"freed before the wait began", 2, func(g *streamGauge) {
+			g.opened(at(1))
+			g.opened(at(2))
+			g.closed(at(4))
+		}, at(5), false},
+		// The last free stream: 99 of 100 open when the wait began, then
+		// another call took it.
+		{"the last free stream taken during the wait", 100, func(g *streamGauge) {
+			for range 99 {
+				g.opened(at(1))
+			}
+			g.opened(at(6))
+			g.closed(at(8))
+		}, at(5), true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			times := callTimes{begunAt: begun, headerAt: begun.Add(5 * time.Millisecond), activeAtWait: tt.open}
+			g := &streamGauge{limit: func() uint32 { return tt.limit }}
+			tt.events(g)
 
-			if got := times.streamWait(tt.limit); got != tt.waited {
-				t.Errorf("stream wait %v with %d open of %d, want %v", got, tt.open, tt.limit, tt.waited)
+			if got := g.fullSince(tt.since); got != tt.full {
+				t.Errorf("full since the wait began = %v, want %v", got, tt.full)
 			}
 		})
 	}
@@ -727,8 +753,16 @@ func TestBlocker_ReadyConnectionIsAStreamOnlyAtTheLimit(t *testing.T) {
 				t.Fatalf("send: %v", err)
 			}
 
-			times := callTimes{begunAt: time.Now(), activeAtWait: tt.open}
-			if got := sender.blocker(sender.conn, times); got != tt.want {
+			begun := time.Now()
+			for range tt.open {
+				sender.streams.opened(time.Now())
+			}
+			got := sender.blocker(sender.conn, callTimes{begunAt: begun})
+			for range tt.open {
+				sender.streams.closed(time.Now())
+			}
+
+			if got != tt.want {
 				t.Errorf("blocked on %v, want %v", got, tt.want)
 			}
 		})
@@ -833,5 +867,109 @@ func TestSend_OurOwnDelayBelowTheLimitIsNoStreamWait(t *testing.T) {
 				t.Errorf("connections %+v, want the limit %d", conns, tt.limit)
 			}
 		})
+	}
+}
+
+// checkNoOpenStreams asserts that every stream counted in was counted out once
+// the calls have returned: a stream left counted pins the connection at the
+// limit, and every later delay would read as a wait for a stream.
+func checkNoOpenStreams(t *testing.T, sender *Sender) {
+	t.Helper()
+
+	if n := sender.OpenStreams(); n != 0 {
+		t.Errorf("%d streams still counted open after the calls returned", n)
+	}
+}
+
+// barrierOnBegin holds each call in Begin until n calls have got there, so all
+// of them start waiting with the same streams open.
+type barrierOnBegin struct {
+	arrived *atomic.Int32
+	all     chan struct{}
+	n       int32
+}
+
+func (barrierOnBegin) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context   { return ctx }
+func (barrierOnBegin) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context { return ctx }
+func (barrierOnBegin) HandleConn(context.Context, stats.ConnStats)                       {}
+
+func (b barrierOnBegin) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
+	if _, ok := rpc.(*stats.Begin); !ok {
+		return
+	}
+	if b.arrived.Add(1) == b.n {
+		close(b.all)
+	}
+
+	select {
+	case <-b.all:
+	case <-ctx.Done():
+	}
+}
+
+// Ground: concurrency — two calls race for the last free stream: both begin with 0 of 1 open,
+// one takes it and the other waits for it. The loser waited for a stream, though nothing was
+// full when its wait began; no end-to-end test lines two calls up on one stream this exactly.
+// Mutation "only a snapshot at the start of the wait" turns it red.
+func TestSend_TheLoserOfTheRaceForTheLastStreamWaitedForIt(t *testing.T) {
+	const hold = 300 * time.Millisecond
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer(grpc.MaxConcurrentStreams(1))
+	grpc_health_v1.RegisterHealthServer(srv, slowTarget{delay: hold})
+
+	go func() { _ = srv.Serve(lis) }()
+
+	barrier := barrierOnBegin{arrived: &atomic.Int32{}, all: make(chan struct{}), n: 2}
+	sender := New(Options{
+		Target: "passthrough:///bufnet",
+		DialOptions: []grpc.DialOption{
+			grpc.WithStatsHandler(barrier),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+		},
+	})
+
+	t.Cleanup(func() {
+		checkNoOpenStreams(t, sender)
+		_ = sender.Close()
+		srv.Stop()
+	})
+
+	// Connect makes no call, so only the two under test meet the barrier.
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	var wg sync.WaitGroup
+
+	outs := make([]engine.Outcome, 2)
+	for i := range outs {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			outs[i], _ = sender.Send(bounded(t), request(time.Now()))
+		}()
+	}
+	wg.Wait()
+
+	waited, straight := outs[0], outs[1]
+	if waited.StreamWait < straight.StreamWait {
+		waited, straight = straight, waited
+	}
+
+	if waited.StreamWait < hold-50*time.Millisecond {
+		t.Errorf("the loser's stream wait is %v; it waited for the winner's %v on the only stream", waited.StreamWait, hold)
+	}
+	// The stand then holds the loser too: its whole call is ~2×hold, and a wait
+	// that ran to the end of the call would take in the target's time.
+	if waited.StreamWait > hold+100*time.Millisecond {
+		t.Errorf("the loser's stream wait is %v, past the %v the stream was busy: the target's time is in it", waited.StreamWait, hold)
+	}
+	if straight.StreamWait != 0 {
+		t.Errorf("the winner's stream wait is %v; it got the stream at once", straight.StreamWait)
 	}
 }

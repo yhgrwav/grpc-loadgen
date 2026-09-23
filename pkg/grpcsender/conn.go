@@ -232,3 +232,51 @@ func (c *connTracker) limit() uint32 {
 
 	return c.last.limit
 }
+
+// streamGauge counts the streams open on the connection, headers out and call
+// not over, and remembers when it last stopped being full: every stream the
+// target allows open. A snapshot at the start of a wait is not enough: five
+// calls may all see 99 of 100 open, and four of them then wait for quota.
+type streamGauge struct {
+	limit func() uint32
+
+	mu       sync.Mutex
+	open     int64
+	full     bool
+	leftFull time.Time
+}
+
+func (g *streamGauge) opened(at time.Time) { g.change(1, at) }
+
+func (g *streamGauge) closed(at time.Time) { g.change(-1, at) }
+
+func (g *streamGauge) change(by int64, at time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.open += by
+	full := g.open >= int64(g.limit())
+	if g.full && !full {
+		g.leftFull = at
+	}
+	g.full = full
+}
+
+// fullSince reports whether the connection was full at some moment from
+// since until now: it is full now, or it stopped being full no earlier.
+func (g *streamGauge) fullSince(since time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.full || !g.leftFull.Before(since)
+}
+
+// OpenStreams is how many streams are open now: headers out, call not over.
+// Zero once every call has returned; anything else is a stream counted in and
+// never out, which would read every later delay as a wait for a stream.
+func (s *Sender) OpenStreams() int {
+	s.streams.mu.Lock()
+	defer s.streams.mu.Unlock()
+
+	return int(s.streams.open)
+}

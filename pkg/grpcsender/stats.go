@@ -17,7 +17,6 @@ package grpcsender
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/stats"
@@ -32,8 +31,9 @@ type callTimes struct {
 	// connection after waiting for one, zero if it did not wait.
 	begunAt  time.Time
 	pickedAt time.Time
-	// activeAtWait is how many streams were open when the wait for one began.
-	activeAtWait int64
+	// streamFull says every stream the target allows was open at some moment
+	// between the start of the wait for one and the headers going out.
+	streamFull bool
 	// headerAt is when the stream's headers went out. grpc-go emits OutHeader
 	// inside NewStream after stream quota is granted, so a call without it
 	// never got a stream.
@@ -73,9 +73,9 @@ func (c *callStats) read() callTimes {
 // handler collects per-call timings. One instance serves the whole connection;
 // the state lives in the context.
 type handler struct {
-	// active counts the streams open now: headers out, call not over. Nil in
-	// tests that feed events by hand.
-	active *atomic.Int64
+	// streams counts the streams open on the connection. Nil in tests that
+	// feed events by hand.
+	streams *streamGauge
 }
 
 func (handler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
@@ -96,18 +96,20 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	switch v := rpc.(type) {
 	case *stats.Begin:
 		call.times.begunAt = v.BeginTime
-		call.times.activeAtWait = h.open()
 	case *stats.DelayedPickComplete:
 		// The wait for a stream starts once there is a connection.
 		call.times.pickedAt = time.Now()
-		call.times.activeAtWait = h.open()
 	case *stats.OutHeader:
-		if h.active != nil {
-			h.active.Add(1)
-		}
 		// OutHeader carries no time of its own; the call is synchronous at the
 		// point the headers are handed to the transport.
-		call.times.headerAt = time.Now()
+		now := time.Now()
+		call.times.headerAt = now
+		if h.streams != nil {
+			// Asked before this stream counts: whether the wait met a full
+			// connection, not whether this call filled it.
+			call.times.streamFull = h.streams.fullSince(call.times.waitFrom())
+			h.streams.opened(now)
+		}
 	case *stats.OutPayload:
 		// SentTime is when the request went out on the wire, after the transport
 		// granted stream quota. Taking it here rather than with time.Now() in the
@@ -116,41 +118,31 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 	case *stats.InTrailer:
 		call.times.answered = true
 	case *stats.End:
-		if h.active != nil && !call.times.headerAt.IsZero() {
-			h.active.Add(-1)
+		if h.streams != nil && !call.times.headerAt.IsZero() {
+			h.streams.closed(time.Now())
 		}
 		call.times.doneAt = v.EndTime
 	}
 }
 
-// atLimit reports whether every stream the target allows was open when the
-// call began to wait for one. Below the limit the quota was there, and
-// whatever held the headers back was on our side: CI saw 1–3 calls of 600
-// held over 1ms at 300 rps with no limit at all.
-func (t callTimes) atLimit(limit uint32) bool {
-	return t.activeAtWait >= int64(limit)
+// waitFrom is when the call began to wait for a stream: once it had a
+// connection, at its pick if the pick waited, at its start otherwise.
+func (t callTimes) waitFrom() time.Time {
+	if t.pickedAt.After(t.begunAt) {
+		return t.pickedAt
+	}
+
+	return t.begunAt
 }
 
-// streamWait is how long a call that got its headers out waited for a stream
-// after it had a connection: from the pick, or from the start if the pick did
-// not wait. Zero unless the limit was reached when the wait began.
-func (t callTimes) streamWait(limit uint32) time.Duration {
-	if t.headerAt.IsZero() || t.begunAt.IsZero() || !t.atLimit(limit) {
+// streamWait is how long a call that got its headers out waited for a stream.
+// Zero unless the connection was full at some moment of that wait: below the
+// limit the quota was there, and whatever held the headers back was on our
+// side — CI saw 1–3 calls of 600 held over 1ms at 300 rps with no limit.
+func (t callTimes) streamWait() time.Duration {
+	if t.headerAt.IsZero() || t.begunAt.IsZero() || !t.streamFull {
 		return 0
 	}
 
-	from := t.begunAt
-	if t.pickedAt.After(from) {
-		from = t.pickedAt
-	}
-
-	return max(0, t.headerAt.Sub(from))
-}
-
-func (h handler) open() int64 {
-	if h.active == nil {
-		return 0
-	}
-
-	return h.active.Load()
+	return max(0, t.headerAt.Sub(t.waitFrom()))
 }

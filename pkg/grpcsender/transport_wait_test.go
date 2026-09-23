@@ -82,6 +82,7 @@ func oneStreamTarget(t *testing.T) *Sender {
 	t.Cleanup(func() {
 		close(hold.release)
 		<-held
+		checkNoOpenStreams(t, sender)
 		_ = sender.Close()
 		srv.Stop()
 	})
