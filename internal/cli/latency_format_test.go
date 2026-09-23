@@ -41,7 +41,8 @@ func TestFormatLatencyPrintsThreeSignificantFigures(t *testing.T) {
 		{999_500 * time.Microsecond, "1.00s"},
 		{1_705 * time.Millisecond, "1.71s"},
 		{1_795 * time.Millisecond, "1.80s"},
-		{59_990 * time.Millisecond, "60.0s"},
+		{59_940 * time.Millisecond, "59.9s"},
+		{59_990 * time.Millisecond, "1m00s"},
 		{59_996 * time.Millisecond, "1m00s"},
 		{95_500 * time.Millisecond, "1m36s"},
 		{312 * time.Microsecond, "312us"},
@@ -67,5 +68,33 @@ func TestFormatLatencyIsNoWiderThanEightColumns(t *testing.T) {
 	}
 	if lipgloss.Width(widest) > 8 {
 		t.Errorf("%q is %d columns wide, more than 8", widest, lipgloss.Width(widest))
+	}
+}
+
+// Ground: contract — a duration keeps its precision but obeys the rule the
+// latencies do: rounded, not cut, and a value that rounds up to the next unit
+// moves to it. Cut, a run of 95.9s reads 1m35s.
+func TestFormatDurationRoundsAndMovesToTheNextUnit(t *testing.T) {
+	for _, tc := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{95_900 * time.Millisecond, "1m36s"},
+		{999_600 * time.Nanosecond, "1ms"},
+		{59_960 * time.Millisecond, "1m00s"},
+		{12 * time.Second, "12.0s"},
+		{100 * time.Millisecond, "100ms"},
+	} {
+		if got := formatDuration(tc.in); got != tc.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func BenchmarkFormatQuantile(b *testing.B) {
+	q := metrics.Quantile{Value: 10_340 * time.Microsecond, Exact: true, Defined: true}
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = formatQuantile(q)
 	}
 }
