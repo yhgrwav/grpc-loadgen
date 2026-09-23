@@ -46,8 +46,9 @@ func dialWith(t testing.TB, srvOpts []grpc.ServerOption, callOpts ...grpc.DialOp
 	return sender
 }
 
-// Ground: signal grpc-go v1.84.0 — the client cuts a reply over its size limit
-// off before the trailer, so nothing says the target answered. Read as
+// Ground: signal grpc-go v1.84.0 — the client rejects a reply over its size
+// limit whole, before the trailer, so nothing says the target answered and no
+// part of the message is delivered. Read as
 // "unreachable" it would drop the call out of the numbers altogether, and read
 // as overload it would blame the load; the request simply does not fit.
 func TestSend_AReplyOverTheClientLimitIsARequestError(t *testing.T) {

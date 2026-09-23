@@ -74,7 +74,7 @@ func PrintReport(w io.Writer, target string, report engine.Report) {
 	if len(rejected) > 0 {
 		fmt.Fprintf(w, "\nThe \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
 			"request is wrong — no such method, a bad argument, a body that does not match\n"+
-			"the schema — or a message did not fit: a reply cut off at the client's 4MB limit,\n"+
+			"the schema — or a message did not fit: a reply rejected by the client's 4MB limit,\n"+
 			"or a request the target refused as larger than it accepts. Check the config for\n"+
 			"%s.\n", strings.Join(rejected, ", "))
 	}

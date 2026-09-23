@@ -366,6 +366,9 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 		// The two causes are told apart: a reply the client cut off, and a request
 		// the target refused. The target's own limit is unknown to us, so no number
 		// is put on it.
+		if strings.Contains(text, "cut off") || strings.Contains(text, "truncat") {
+			t.Errorf("the report suggests a partial reply arrived; grpc-go rejects it whole:\n%s", text)
+		}
 		if strings.Contains(text, "target's 4MB") || strings.Contains(text, "4MB limit or a request") {
 			t.Errorf("the report puts our client limit on the target:\n%s", text)
 		}
