@@ -376,19 +376,28 @@ func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {
 		RequestRejected: true,
 		Methods: []engine.MethodReport{
 			{Method: "a.B/Good", Sent: 100, RPS: 100},
-			{Method: "a.B/AlsoGood", Sent: 100, RPS: 100},
+			// Some of its calls were rejected, not all: the target does serve this
+			// method, so the verdict is not about it.
+			{Method: "a.B/Partly", Sent: 100, Failed: 10, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 10}},
 			{Method: "a.B/Typo", Sent: 100, Failed: 100, RPS: 100,
 				Rejected: engine.RefusalLatency{Count: 100}},
 		},
 	})
 
 	text := out.String()
-	verdict := text[strings.Index(text, "invalid run"):]
+	at := strings.Index(text, "invalid run")
+	if at < 0 {
+		t.Fatalf("no verdict at all:\n%s", text)
+	}
+	verdict := text[at:]
 
 	if !strings.Contains(verdict, "a.B/Typo") {
 		t.Errorf("the verdict does not name the method it is about:\n%s", verdict)
 	}
-	if strings.Contains(verdict, "a.B/Good") {
-		t.Errorf("the verdict names a method the target served:\n%s", verdict)
+	for _, served := range []string{"a.B/Good", "a.B/Partly"} {
+		if strings.Contains(verdict, served) {
+			t.Errorf("the verdict names %s, which the target does serve:\n%s", served, verdict)
+		}
 	}
 }
