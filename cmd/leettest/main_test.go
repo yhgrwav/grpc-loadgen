@@ -360,9 +360,10 @@ func TestRun_EverySentRequestReachesTheTarget(t *testing.T) {
 func TestRun_MissingMethodIsReportedNotFatal(t *testing.T) {
 	target := startTarget(t)
 
+	// Every call rejected: the run finishes and reports, and is invalid.
 	res := runCLI(t.Context(), t, 10*time.Second, "-c", writeConfig(t, target.addr, missingMethod, plaintext))
-	if res.err != nil {
-		t.Fatalf("run: %v, want the run to finish and report the failures", res.err)
+	if !errors.Is(res.err, ErrInvalidRun) {
+		t.Fatalf("run: %v, want the run to finish, report the failures and be invalid", res.err)
 	}
 
 	sent, failed := reportRow(t, res.stdout, missingMethod)

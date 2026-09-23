@@ -432,7 +432,7 @@ func runResult(report engine.Report, runErr error) error {
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
 	}
-	if report.CapHit != nil {
+	if report.CapHit != nil || report.RequestRejected {
 		return ErrInvalidRun
 	}
 	if report.Incomplete {
