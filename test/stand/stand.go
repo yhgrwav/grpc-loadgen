@@ -116,19 +116,35 @@ func Frozen(from, length, delay time.Duration) Answer {
 	}
 }
 
+// HangingFrom answers after delay until from after the first arrival, and
+// never answers from then on: the target stops in the middle of the run and
+// does not come back.
+func HangingFrom(from, delay time.Duration) Answer {
+	return func(c Call) Behavior {
+		if c.Since >= from {
+			return Behavior{Hang: true}
+		}
+
+		return Behavior{Delay: delay}
+	}
+}
+
 // Stand serves the gRPC health service and answers the way it was told to.
 type Stand struct {
 	grpc_health_v1.UnimplementedHealthServer
 
-	answer   Answer
-	srv      *grpc.Server
-	lis      *bufconn.Listener
+	answer Answer
+	srv    *grpc.Server
+	lis    net.Listener
+	// buf is set when the stand listens in process; nil on a network listener.
+	buf      *bufconn.Listener
 	stopped  chan struct{}
 	stopOnce sync.Once
 
 	mu       sync.Mutex
 	first    time.Time
 	arrivals []time.Time
+	holds    []time.Duration
 }
 
 // Start serves a stand on an in-process listener until Stop. A nil answer
@@ -139,6 +155,16 @@ func Start(answer Answer) *Stand { return StartWith(answer) }
 // a stream quota makes calls wait inside the generator before they are sent,
 // which is where coordinated omission hides.
 func StartWith(answer Answer, opts ...grpc.ServerOption) *Stand {
+	buf := bufconn.Listen(bufSize)
+	s := StartOn(buf, answer, opts...)
+	s.buf = buf
+
+	return s
+}
+
+// StartOn serves a stand on lis until Stop, so a separate process, such as
+// another load tool, can reach it over the network.
+func StartOn(lis net.Listener, answer Answer, opts ...grpc.ServerOption) *Stand {
 	if answer == nil {
 		answer = Constant(0)
 	}
@@ -146,7 +172,7 @@ func StartWith(answer Answer, opts ...grpc.ServerOption) *Stand {
 	s := &Stand{
 		answer:  answer,
 		srv:     grpc.NewServer(opts...),
-		lis:     bufconn.Listen(bufSize),
+		lis:     lis,
 		stopped: make(chan struct{}),
 	}
 
@@ -158,17 +184,27 @@ func StartWith(answer Answer, opts ...grpc.ServerOption) *Stand {
 	return s
 }
 
-// Target is the address to dial. It resolves to nothing on its own: the
-// connection is made by DialOption.
-func (s *Stand) Target() string { return "passthrough:///stand" }
+// Target is the address to dial. In process it resolves to nothing on its
+// own: the connection is made by DialOption.
+func (s *Stand) Target() string {
+	if s.buf == nil {
+		return s.lis.Addr().String()
+	}
+
+	return "passthrough:///stand"
+}
 
 // Method is the full gRPC path the stand answers on.
 func (s *Stand) Method() string { return "/grpc.health.v1.Health/Check" }
 
 // DialOption points a client at this stand instead of the network.
 func (s *Stand) DialOption() grpc.DialOption {
+	if s.buf == nil {
+		return grpc.EmptyDialOption{}
+	}
+
 	return grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return s.lis.DialContext(ctx)
+		return s.buf.DialContext(ctx)
 	})
 }
 
@@ -191,10 +227,21 @@ func (s *Stand) Arrivals() []time.Time {
 	return slices.Clone(s.arrivals)
 }
 
+// Holds reports how long the stand held each call it answered, a refusal
+// included, in the order the answers went out. A call that hung or that the
+// caller gave up on is not in the list: nothing was answered.
+func (s *Stand) Holds() []time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.holds)
+}
+
 func (s *Stand) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (
 	*grpc_health_v1.HealthCheckResponse, error,
 ) {
-	behavior := s.answer(s.arrived(time.Now()))
+	arrivedAt := time.Now()
+	behavior := s.answer(s.arrived(arrivedAt))
 
 	if behavior.Hang {
 		select {
@@ -217,6 +264,10 @@ func (s *Stand) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest)
 			return nil, status.Error(codes.Unavailable, "stand stopped")
 		}
 	}
+
+	s.mu.Lock()
+	s.holds = append(s.holds, time.Since(arrivedAt))
+	s.mu.Unlock()
 
 	if behavior.Code != codes.OK {
 		return nil, status.Error(behavior.Code, "as the stand was told")
