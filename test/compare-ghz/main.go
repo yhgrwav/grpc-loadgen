@@ -48,8 +48,8 @@ type mode struct {
 
 var modes = []mode{
 	{"A", []string{"-delay", "10ms"}, []string{"leettest", "ghz-sync", "ghz-async"}},
-	{"B1", []string{"-delay", "10ms", "-freeze-at", "10s", "-freeze-for", "2s"}, []string{"leettest", "ghz-sync", "ghz-async"}},
-	{"B2", []string{"-delay", "100ms"}, []string{"leettest", "ghz-sync"}},
+	{"B1", []string{"-delay", "10ms", "-freeze-at", "10s", "-freeze-for", "2s"}, []string{"leettest", "ghz-sync", "ghz-sync50", "ghz-async"}},
+	{"B2", []string{"-delay", "100ms"}, []string{"leettest", "ghz-sync", "ghz-sync50"}},
 }
 
 // result is one run's numbers; latencies are zero where the tool gave none.
@@ -74,6 +74,7 @@ func run() error {
 	out := flag.String("out", filepath.Join("test", "compare-ghz", "out"), "directory for binaries and raw outputs")
 	ghz := flag.String("ghz", "ghz", "path to ghz")
 	only := flag.String("modes", "A,B1,B2", "modes to run, comma-separated")
+	tools := flag.String("variants", "", "variants to run, comma-separated; all when empty")
 	flag.Parse()
 
 	bin := filepath.Join(*out, "bin")
@@ -90,6 +91,14 @@ func run() error {
 	var summary strings.Builder
 	for _, m := range modes {
 		if !slices.Contains(strings.Split(*only, ","), m.name) {
+			continue
+		}
+		if *tools != "" {
+			m.variants = slices.DeleteFunc(slices.Clone(m.variants), func(v string) bool {
+				return !slices.Contains(strings.Split(*tools, ","), v)
+			})
+		}
+		if len(m.variants) == 0 {
 			continue
 		}
 		results := map[string][]result{}
@@ -143,7 +152,13 @@ func once(ctx context.Context, stand, leettest, ghz string, m mode, variant, raw
 		return runLeetTest(ctx, leettest, addr, raw)
 	}
 
-	return runGhz(ctx, ghz, addr, variant == "ghz-async", raw)
+	// ghz-sync is -c 10, ghz-sync50 is ghz's default of 50 workers.
+	workers := "10"
+	if variant == "ghz-sync50" {
+		workers = "50"
+	}
+
+	return runGhz(ctx, ghz, addr, workers, variant == "ghz-async", raw)
 }
 
 func freeAddr(ctx context.Context) (string, error) {
@@ -243,11 +258,11 @@ type ghzReport struct {
 	} `json:"details"`
 }
 
-func runGhz(ctx context.Context, bin, addr string, async bool, raw string) (result, error) {
+func runGhz(ctx context.Context, bin, addr, workers string, async bool, raw string) (result, error) {
 	args := []string{
 		"--insecure", "--call", method, "-d", "{}",
 		"--rps", strconv.Itoa(rps), "-z", duration.String(), "-t", timeout.String(),
-		"--duration-stop", "wait", "--connections", "1", "-c", "10",
+		"--duration-stop", "wait", "--connections", "1", "-c", workers,
 		"-O", "json", "-o", raw + ".json",
 	}
 	if async {

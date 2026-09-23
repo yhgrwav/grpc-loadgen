@@ -6,11 +6,12 @@ question is narrow: when the server stalls or slows down, does the report show i
 In short:
 
 - **When the server behaves**, both tools report the same latencies (mode A).
-- **When the server freezes for 2 seconds** (mode B1), ghz in its default synchronous mode
-  (`-c 10`) reports p99 of 10.8ms. LeetTest reports 1.71s. ghz with `--async` also reports 1.71s.
-- **When the server is slower than the load needs** (mode B2), ghz in its default synchronous mode
-  (`-c 10`) sends 2980 of the 6000 requested calls. Its latencies are correct for the calls it
-  sent, but that is half the requested load.
+- **When the server freezes for 2 seconds** (mode B1), ghz in synchronous mode (the default)
+  reports p99 of 10.8ms with `-c 10` and 12ms with the default `-c 50`. LeetTest reports 1.71s.
+  ghz with `--async` also reports 1.71s.
+- **When the server is slower than the load needs** (mode B2), ghz in synchronous mode (the
+  default) with `-c 10` sends 2980 of the 6000 requested calls. Its latencies are correct for the
+  calls it sent, but that is half the requested load. With the default `-c 50` it sends all 6000.
 
 This is not a bug in ghz. The synchronous mode runs a fixed number of workers. Each worker waits
 for its call to finish before starting the next one: a closed model, by design. When the server
@@ -39,12 +40,12 @@ Load in every run:
 The ghz flags are:
 
 ```
-ghz --insecure --call grpc.health.v1.Health/Check -d {} --rps 200 -z 30s -t 5s \
+ghz --insecure --call grpc.health.v1.Health/Check -d '{}' --rps 200 -z 30s -t 5s \
     --duration-stop wait --connections 1 -c 10 [--async]
 ```
 
-`-c 10` is the ghz default. `--duration-stop wait` lets calls still in flight at 30s finish and be
-counted.
+Synchronous ghz runs with `-c 10` and with ghz's default `-c 50`. `--duration-stop wait` lets calls
+still in flight at 30s finish and be counted.
 
 Every tool ran 5 times in every mode, and each run got a fresh stand. The run order rotates, so
 no tool always runs first. The tables show the median of the 5 runs, with the minimum and maximum
@@ -66,15 +67,17 @@ Environment:
 |---|---|---|---|---|---|---|---|
 | LeetTest | 6000 [6000–6000] | 0 | 10.6ms [10.5–10.6] | 11.2ms [11.1–11.2] | 514ms [510–516] | 1.71s [1.71–1.72] | not reported |
 | ghz, sync (`-c 10`) | 5999 [5999–6002] | 0 | 10.2ms [10.1–10.2] | 10.5ms [10.4–10.6] | 10.6ms [10.6–10.7] | 10.8ms [10.8–10.9] | 10 [10–10] |
+| ghz, sync (`-c 50`, default) | 5999 [5999–6000] | 0 | 10.2ms [10.2–10.3] | 10.8ms [10.7–10.8] | 11.1ms [10.9–11.1] | 12.0ms [11.7–12.5] | 50 [50–50] |
 | ghz, `--async` | 5999 [5999–6000] | 0 | 10.2ms [10.2–10.3] | 10.7ms [10.7–10.7] | 514ms [510–515] | 1.71s [1.71–1.72] | 203 [202–203] |
 
 Over 2 seconds at 200 RPS, about 400 calls were due. With `--async`, ghz counts 203 calls over 1s:
 the ones due in the first half of the freeze wait longer than a second. In synchronous mode, 10
-calls are over 1s, one per worker. The workers stood still during the freeze. When it ended,
-ghz sent the missed calls at once to catch up, and those calls met a server that was already
+calls are over 1s with `-c 10` and 50 with `-c 50`, one per worker. That is 0.17% and 0.83%
+of the calls, too few to reach p99. The workers stood still during the freeze. When it ended, ghz
+sent the missed calls at once to catch up, and those calls met a server that was already
 fast again. Their wait before sending is not part of the latency ghz reports.
 
-The number of calls sent is the same in all three rows, so the count does not reveal the stall.
+The number of calls sent is the same in all rows, so the count does not reveal the stall.
 
 ### B2: a server slower than the load needs
 
@@ -82,13 +85,16 @@ The number of calls sent is the same in all three rows, so the count does not re
 |---|---|---|---|---|---|---|
 | LeetTest | 6000 [6000–6000] | 0 | 101ms [101–101] | 101ms [101–101] | 101ms [101–101] | 102ms [102–102] |
 | ghz, sync (`-c 10`) | 2980 [2980–2980] | 0 | 100.6ms [100.5–100.6] | 101.1ms [101.1–101.2] | 101.3ms [101.2–101.5] | 102ms [101.8–102.8] |
+| ghz, sync (`-c 50`, default) | 6000 [5999–6003] | 0 | 100.3ms [100.3–100.3] | 100.7ms [100.7–100.7] | 101ms [101–101] | 101.5ms [101.5–101.5] |
 
-10 workers × 1 call per 100ms is 100 calls per second, half of the 200 requested. The latencies
+Synchronous ghz sends at most c / latency calls per second, where c is the number of workers.
+With `-c 10` and 100ms that is 100 calls per second, half of the 200 requested. The latencies
 are right; the load is not. Reading only the latency columns, this run looks like a server
 that handles 200 RPS at 101ms. The server handled 100 RPS.
 
-ghz with `--async`, or with a larger `-c`, sends the full load. This mode shows only what the
-default does.
+With the default `-c 50` the ceiling is 500 calls per second, and the full load goes out. The
+same ceiling applies to any c once the server slows down enough: at `-c 50` it is reached at
+250ms.
 
 ### A: control
 
@@ -98,10 +104,11 @@ default does.
 | ghz, sync (`-c 10`) | 6000 [5999–6001] | 0 | 10.2ms [10.2–10.3] | 10.5ms [10.5–10.5] | 10.5ms [10.5–10.5] | 10.7ms [10.7–10.8] |
 | ghz, `--async` | 6001 [5999–6002] | 0 | 10.2ms [10.2–10.2] | 10.5ms [10.5–10.5] | 10.5ms [10.5–10.6] | 10.7ms [10.7–10.8] |
 
-All three agree within about 0.5ms. LeetTest reads slightly higher because it measures from the
-moment a call was scheduled, while ghz measures from the moment the call starts. The difference
-is the client's own delay before sending. It is kept on purpose: the user of a service waits
-that time too.
+All three agree within 0.6ms. LeetTest reads 0.4–0.6ms higher; the cause is not measured here.
+LeetTest measures from the moment a call was scheduled, while ghz measures from the moment the
+call starts, so LeetTest includes the generator's own delay before sending. LeetTest counts it on
+purpose: if the generator falls behind, the latency shows it instead of hiding it. The start lag
+is also reported separately.
 
 ## Reproduce
 
@@ -111,12 +118,13 @@ Install ghz, then run from the repository root:
 go run ./test/compare-ghz -ghz /path/to/ghz
 ```
 
-The script builds the stand and LeetTest and runs every mode 5 times, which takes about 20
+The script builds the stand and LeetTest and runs every mode 5 times, which takes about 25
 minutes. It prints this page's tables and writes them, with every run's raw output, to
 `test/compare-ghz/out/`. Useful flags:
 
 - `-runs N` sets the number of runs;
-- `-modes B1` runs only the listed modes.
+- `-modes B1` runs only the listed modes;
+- `-variants ghz-sync50` runs only the listed tools.
 
 Numbers will differ on another machine. The pattern should not: in B1, ghz in synchronous mode
 misses the freeze, while LeetTest and ghz with `--async` both show it.
