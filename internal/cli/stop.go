@@ -44,6 +44,7 @@ type Stopper struct {
 	presses  int
 	timer    *time.Timer
 	finished bool
+	leave    func()
 }
 
 func NewStopper(stop, abort, exit func(), grace time.Duration) *Stopper {
@@ -51,6 +52,10 @@ func NewStopper(stop, abort, exit func(), grace time.Duration) *Stopper {
 }
 
 func (s *Stopper) Press() StopStage {
+	if s.leaving() {
+		return StageNone
+	}
+
 	s.mu.Lock()
 	if s.finished {
 		s.mu.Unlock()
@@ -91,11 +96,35 @@ func (s *Stopper) Finish() {
 // Returned says the run has returned and the view shows its final screen:
 // from then on a stop request calls leave, which closes the view, so the
 // report is printed instead of lost.
-func (s *Stopper) Returned(leave func()) {}
+func (s *Stopper) Returned(leave func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.leave = leave
+}
+
+// leaving calls leave if the run has returned; true means the request is
+// handled.
+func (s *Stopper) leaving() bool {
+	s.mu.Lock()
+	leave := s.leave
+	s.mu.Unlock()
+
+	if leave == nil {
+		return false
+	}
+	leave()
+
+	return true
+}
 
 // Abort is SIGTERM: it raises the stage to the abort and never past it, so an
 // abort already under way still gets to print its report.
 func (s *Stopper) Abort() StopStage {
+	if s.leaving() {
+		return StageNone
+	}
+
 	s.mu.Lock()
 	if s.finished || s.presses >= int(StageAbort) {
 		s.mu.Unlock()

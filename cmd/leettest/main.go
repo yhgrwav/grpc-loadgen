@@ -324,7 +324,13 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	if interactive {
 		program := cli.NewProgram(target, cli.ServiceLabel(cfg, *configPath), eng, cfg.Load.Warmup, settings, s)
 		view.Store(program)
-		runErr = cli.RunLive(program, start, abort)
+		runErr = cli.RunLive(program, func() error {
+			err := start()
+			// A signal on the final screen closes it: the report still prints.
+			s.Returned(program.Quit)
+
+			return err
+		}, abort)
 	} else if runErr = cli.RunPlain(stderr, target, eng, start); runErr != nil &&
 		!errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
