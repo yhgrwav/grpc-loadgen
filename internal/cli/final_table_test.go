@@ -27,6 +27,11 @@ import (
 
 // A report whose every table row and column carries a value no other cell
 // repeats, so a cell found on the screen is that cell and not a neighbour.
+// It is also the ordinary numbers the 64-column boundary is set on: counts of
+// 1000, 150, 100 and 50, a rate of 97, latencies of 11ms to 34ms. None is
+// wider than its column's floor, so the seven columns take their floors:
+// 5 + 6 + 6 + 4x6 plus a space each is 48, and a 64-column terminal leaves
+// 56 inside the frame: 8 for the name.
 func tableReport() engine.Report {
 	return engine.Report{
 		// 1000 sent over 12s is 83/s; the rate over the sending window is 97.
@@ -246,5 +251,63 @@ func TestFinalScreenPutsTheNameOnItsOwnLineBelow64Columns(t *testing.T) {
 				t.Errorf("want the name and all seven numbers on one line:\n%s", strings.Join(lines, "\n"))
 			}
 		})
+	}
+}
+
+// rowsAfter returns the n lines after the method's name line, as fields.
+func rowsAfter(t *testing.T, screen, name string, n int) [][]string {
+	t.Helper()
+
+	lines := strings.Split(screen, "\n")
+	for i, line := range lines {
+		if f := strings.Fields(line); len(f) == 1 && f[0] == name && i+n < len(lines) {
+			out := make([][]string, n)
+			for j := range n {
+				out[j] = strings.Fields(lines[i+1+j])
+			}
+
+			return out
+		}
+	}
+	t.Fatalf("no line with %q alone and %d after it:\n%s", name, n, screen)
+
+	return nil
+}
+
+// Ground: boundary — when not even the seven numbers fit one line, the counts
+// and the latencies take a line each; with the widest values every column is
+// 8: 3x8 + 2 = 26 and 4x8 + 3 = 35, both within the 52 a 60-column terminal
+// leaves.
+func TestFinalScreenSplitsTheNumbersWhenTheyDoNotFitOneLine(t *testing.T) {
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+	m.done, m.report = true, widestReport()
+
+	rows := rowsAfter(t, m.finalReport(contentWidth(minWidth)), shortMethod("/wallet.v1.WalletService/GetBalanceWithAVeryLongNameIndeed"), 2)
+	if len(rows[0]) != 3 || len(rows[1]) != 4 {
+		t.Errorf("want 3 counts, then 4 latencies; got %v", rows)
+	}
+	for _, cell := range rows[1] {
+		if cell != ">999m59s" {
+			t.Errorf("latency %q, want >999m59s", cell)
+		}
+	}
+}
+
+// Ground: contract — Russian heads the sent column with "отпр.", so the
+// ordinary numbers keep all seven cells at 60 columns.
+func TestFinalScreenInRussianKeepsEveryNumberAt60Columns(t *testing.T) {
+	m := testModel(t)
+	m.text = NewText(LangRU)
+	m.Update(tea.WindowSizeMsg{Width: minWidth, Height: 40})
+	m.done, m.report = true, tableReport()
+
+	screen := m.finalReport(contentWidth(minWidth))
+	row := rowsAfter(t, screen, shortMethod("pkg.Svc/One"), 1)[0]
+	if got := strings.Join(row, " "); got != "1000 150 97 11ms 12ms 13ms 14ms" {
+		t.Errorf("numbers %q, want all seven", got)
+	}
+	if !strings.Contains(screen, "отпр.") || strings.Contains(screen, "отправлено ") {
+		t.Errorf("the sent column is not headed отпр.:\n%s", screen)
 	}
 }
