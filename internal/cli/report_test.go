@@ -301,6 +301,25 @@ func TestPrintReportStatesARateRangeAndNoSilenceClauseWithoutOne(t *testing.T) {
 	}
 }
 
+// Both lines are about one method: a blank line between them would read as two
+// separate findings, and the screen, which wraps each note on its own, would
+// split them too.
+func TestPrintReportKeepsAMethodsUnsentTimeoutsWithItsSilence(t *testing.T) {
+	var out strings.Builder
+	PrintReport(&out, "localhost:50051", engine.Report{
+		Duration: 3 * time.Second,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 150, TimedOut: 146, UnsentTimedOut: 4,
+			RPSLow: 50, RPSHigh: 50, Timeout: 300 * time.Millisecond,
+		}},
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "within 300ms.\na.B/One: 4 calls timed out before going out") {
+		t.Errorf("the method's two lines are not one block:\n%s", text)
+	}
+}
+
 func TestPrintReportNamesStartLagForWhatItMeasures(t *testing.T) {
 	report := engine.Report{
 		Duration:    time.Second,
