@@ -86,7 +86,7 @@ var liveStates = []screenState{
 func widest(m *model) {
 	s := &m.snapshot
 	s.Sent, s.Failed = widestCount, widestCount
-	s.InFlight = widestCount
+	s.InFlight, s.NotSent = widestCount, widestCount
 	s.RPS = 9_999_999
 	s.P50, s.P90, s.P99 = widestBound, widestBound, widestBound
 
@@ -121,7 +121,7 @@ func widestReport() engine.Report {
 	}
 
 	return engine.Report{
-		Sent: widestCount, Failed: widestCount, Duration: 999*time.Minute + 59*time.Second,
+		Sent: widestCount, Failed: widestCount, NotSent: widestCount, Duration: 999*time.Minute + 59*time.Second,
 		Methods: []engine.MethodReport{method, method},
 	}
 }

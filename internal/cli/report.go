@@ -28,11 +28,14 @@ import (
 // PrintReport writes the finished run to w as plain text.
 func PrintReport(w io.Writer, target string, report engine.Report) {
 	fmt.Fprintf(w, "run finished: %s in %s\n", target, formatDuration(report.Duration))
-	if report.Aborted > 0 {
-		fmt.Fprintf(w, "sent %d, failed %d, aborted %d\n\n", report.Sent, report.Failed, report.Aborted)
-	} else {
-		fmt.Fprintf(w, "sent %d, failed %d\n\n", report.Sent, report.Failed)
+	fmt.Fprintf(w, "sent %d, failed %d", report.Sent, report.Failed)
+	if report.NotSent > 0 {
+		fmt.Fprintf(w, ", not sent %d", report.NotSent)
 	}
+	if report.Aborted > 0 {
+		fmt.Fprintf(w, ", aborted %d", report.Aborted)
+	}
+	fmt.Fprint(w, "\n\n")
 
 	fmt.Fprintf(w, "%-44s %8s %8s %9s %9s %9s %9s %9s\n",
 		"method", "sent", "failed", "sent/s", "p50", "p90", "p95", "p99")

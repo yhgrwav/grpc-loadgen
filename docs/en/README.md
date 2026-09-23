@@ -148,7 +148,7 @@ In a terminal the run is full-screen: RPS, requests in flight, errors and percen
 to stop. Without a terminal (in CI, with redirected output) — a progress line every second:
 
 ```
-32.0s  sent 25600  rps 800  in-flight 47  failed 51  p99 43ms
+32.0s  sent 25600  rps 800  in-flight 47  failed 51  not-sent 0  p99 43ms
 ```
 
 At the end — a report per method: sent, failed, RPS, p50/p90/p95/p99. Requests cut off by the

@@ -155,7 +155,7 @@ $ leettest -c leettest.yaml
 прогресса раз в секунду:
 
 ```
-32.0s  sent 25600  rps 800  in-flight 47  failed 51  p99 43ms
+32.0s  sent 25600  rps 800  in-flight 47  failed 51  not-sent 0  p99 43ms
 ```
 
 В конце — отчёт по каждому методу: отправлено, отказов, `sent/s`, p50/p90/p95/p99. `sent/s` — это

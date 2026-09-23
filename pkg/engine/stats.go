@@ -24,10 +24,13 @@ import (
 )
 
 type Snapshot struct {
-	Elapsed  time.Duration
-	Total    time.Duration
-	Sent     int
-	Failed   int
+	Elapsed time.Duration
+	Total   time.Duration
+	Sent    int
+	Failed  int
+	// NotSent counts calls that timed out before going out: absent from Sent
+	// and Failed, which are about the target.
+	NotSent  int
 	InFlight int
 	RPS      float64
 	P50      metrics.Quantile
@@ -136,9 +139,12 @@ type Report struct {
 	Duration time.Duration
 	// Warmup is the leading span of the run whose calls are on Seconds but not
 	// in the totals: a call is warmup by the moment it was scheduled for.
-	Warmup  time.Duration
-	Sent    int
-	Failed  int
+	Warmup time.Duration
+	Sent   int
+	Failed int
+	// NotSent counts calls that timed out before going out: absent from Sent
+	// and Failed, which are about the target.
+	NotSent int
 	Methods []MethodReport
 	// Aborted counts calls cut off by an abort of the run. They are no fault
 	// of the target, so they are not in Failed; each is censored at the abort.
@@ -174,6 +180,7 @@ type Stats struct {
 	warmup         time.Duration
 	sent           int
 	failed         int
+	notSent        int
 	aborted        int
 	reserve        int
 	byMethod       map[string]*methodStats
@@ -287,6 +294,25 @@ func (s *Stats) Record(r Result) {
 		return
 	}
 
+	if lag := r.QueueTime(); lag >= 0 {
+		s.startLag.Record(lag)
+		s.startLagMax = max(s.startLagMax, lag)
+	}
+
+	if r.Category == CategoryTimeout && !r.Deadline.IsZero() {
+		s.lateCancelMax = max(s.lateCancelMax, r.DoneAt.Sub(r.Deadline))
+	}
+
+	// A call that never went out tells nothing about the target: it is in
+	// none of the counts or distributions that are about it.
+	if r.NotSent {
+		s.notSent++
+		method.unsentOut++
+		s.mu.Unlock()
+
+		return
+	}
+
 	s.sent++
 	failed := r.Category != CategorySuccess && r.Category != CategoryAborted
 	if failed {
@@ -301,20 +327,8 @@ func (s *Stats) Record(r Result) {
 		method.failed++
 	}
 
-	if lag := r.QueueTime(); lag >= 0 {
-		s.startLag.Record(lag)
-		s.startLagMax = max(s.startLagMax, lag)
-	}
-
 	if r.Category == CategoryTimeout {
-		if r.NotSent {
-			method.unsentOut++
-		} else {
-			method.timedOut++
-		}
-		if !r.Deadline.IsZero() {
-			s.lateCancelMax = max(s.lateCancelMax, r.DoneAt.Sub(r.Deadline))
-		}
+		method.timedOut++
 	}
 
 	// A call that never reached the target has no latency to record: a refused
@@ -435,6 +449,7 @@ func (s *Stats) SnapshotInto(dst *Snapshot, buf *LiveBuffer, percentiles bool) {
 	}
 
 	elapsed, sent, failed := s.elapsed(), s.sent, s.failed
+	dst.NotSent = s.notSent
 	measured := s.sendingWindow(elapsed)
 
 	if len(dst.Methods) != len(buf.names) {
@@ -509,7 +524,7 @@ func (s *Stats) Report() Report {
 	// The timelines are copied only here, once a run is over, never for the
 	// snapshots the interface takes several times a second.
 	s.mu.Lock()
-	aborted, warmup := s.aborted, s.warmup
+	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
 		entry := MethodReport{
@@ -537,6 +552,7 @@ func (s *Stats) Report() Report {
 		Warmup:   warmup,
 		Sent:     sent,
 		Failed:   failed,
+		NotSent:  notSent,
 		Aborted:  aborted,
 
 		StartLagP99:   startLag.Percentile(0.99),
@@ -545,7 +561,7 @@ func (s *Stats) Report() Report {
 	}
 
 	for _, v := range views {
-		if v.rejected.Count() > 0 && int(v.rejected.Count()) == v.sent {
+		if v.sent > 0 && int(v.rejected.Count()) == v.sent {
 			report.RequestRejected = true
 		}
 		entry := MethodReport{

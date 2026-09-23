@@ -412,3 +412,7 @@ func (t Text) TooNarrow(minimum int) string {
 		LangZH: "窗口不足 " + n + " 列，请加宽",
 	})
 }
+
+func (t Text) NotSent() string {
+	return t.get(phrase{LangRU: "не отправлено", LangEN: "not sent", LangDE: "nicht gesendet", LangZH: "未发送"})
+}

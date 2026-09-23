@@ -146,7 +146,7 @@ Im Terminal läuft der Lauf im Vollbild: RPS, laufende Anfragen, Fehler und Perz
 hält an. Ohne Terminal (in CI, bei umgeleiteter Ausgabe) — eine Fortschrittszeile pro Sekunde:
 
 ```
-32.0s  sent 25600  rps 800  in-flight 47  failed 51  p99 43ms
+32.0s  sent 25600  rps 800  in-flight 47  failed 51  not-sent 0  p99 43ms
 ```
 
 Am Ende ein Bericht je Methode: gesendet, fehlgeschlagen, RPS, p50/p90/p95/p99. Durch den Timeout
