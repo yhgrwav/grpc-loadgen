@@ -16,6 +16,8 @@ package config_test
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,4 +152,72 @@ func TestLoadValidate(t *testing.T) {
 func withMethod(call config.Call, method string) config.Call {
 	call.Method = method
 	return call
+}
+
+const oneCall = `
+app:
+  target:
+    ip: localhost
+    port: 50051
+load:
+  warmup: %s
+  calls:
+    - method: wallet.v1.WalletService/GetBalance
+      rps: %s
+      duration: 10s
+`
+
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
+func TestParseRejectsFractionalRPS(t *testing.T) {
+	for _, rps := range []string{"10.5", "10.0", "1e3", "0.9"} {
+		t.Run(rps, func(t *testing.T) {
+			_, err := config.Parse(fmt.Appendf(nil, oneCall, "0s", rps))
+
+			if !errors.Is(err, config.ErrFractionalRPS) {
+				t.Fatalf("error = %v, want %v: a silently truncated rate is load nobody asked for", err, config.ErrFractionalRPS)
+			}
+			if !strings.Contains(err.Error(), rps) {
+				t.Errorf("error %q does not quote the value %q", err, rps)
+			}
+		})
+	}
+}
+
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
+func TestParseKeepsWholeRPS(t *testing.T) {
+	cfg, err := config.Parse(fmt.Appendf(nil, oneCall, "0s", "800"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := cfg.Load.Calls[0].RPS; got != 800 {
+		t.Errorf("rps = %v, want 800", got)
+	}
+}
+
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
+func TestValidateRejectsWarmupThatLeavesNothingMeasured(t *testing.T) {
+	for _, warmup := range []string{"10s", "11s"} {
+		t.Run(warmup, func(t *testing.T) {
+			_, err := config.Parse(fmt.Appendf(nil, oneCall, warmup, "10"))
+
+			if !errors.Is(err, config.ErrWarmupCoversTheCall) {
+				t.Fatalf("error = %v, want %v", err, config.ErrWarmupCoversTheCall)
+			}
+			if !strings.Contains(err.Error(), "wallet.v1.WalletService/GetBalance") {
+				t.Errorf("error %q does not name the call it covers", err)
+			}
+		})
+	}
+}
+
+// Ground: contract — pkg/config is a library API; callers get this without our CLI.
+func TestValidateNamesTheMethodOfABadCall(t *testing.T) {
+	_, err := config.Parse(fmt.Appendf(nil, oneCall, "0s", "0"))
+
+	if !errors.Is(err, config.ErrInvalidRPS) {
+		t.Fatalf("error = %v, want %v", err, config.ErrInvalidRPS)
+	}
+	if !strings.Contains(err.Error(), "wallet.v1.WalletService/GetBalance") {
+		t.Errorf("error %q says which call is wrong only by its number", err)
+	}
 }
