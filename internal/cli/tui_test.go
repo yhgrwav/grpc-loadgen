@@ -505,7 +505,7 @@ func TestFinalScreenCarriesEveryVerdictOfTheTextReport(t *testing.T) {
 	var text strings.Builder
 	PrintReport(&text, "localhost:50051", RunReport{Report: report})
 
-	for _, note := range reportNotes(report) {
+	for _, note := range reportNotes(report, "") {
 		want := strings.Fields(note)[0]
 		if !strings.Contains(text.String(), want) {
 			t.Fatalf("the text report lost %q: the test no longer compares the two", want)

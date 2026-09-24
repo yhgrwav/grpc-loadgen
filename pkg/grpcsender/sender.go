@@ -68,6 +68,10 @@ type Options struct {
 	// Metadata is sent with every call, such as authorization or x-api-key.
 	// Keys must already be lowercase; nil adds nothing to a call.
 	Metadata map[string]string
+	// MaxResponseBytes raises or lowers the largest reply a call accepts;
+	// 0 keeps grpc-go's default of 4 MiB. A larger reply fails the call as
+	// the request's fault.
+	MaxResponseBytes int
 	// DialOptions are passed through for cases the fields above do not cover,
 	// such as custom credentials or an in-process dialer in tests. Custom
 	// transport credentials replace the sender's own, which read the stream
@@ -148,6 +152,9 @@ func (s *Sender) Connect(ctx context.Context) error {
 		// Per-RPC credentials rather than a context per call: gRPC attaches
 		// them itself, and a run without metadata has nothing in the send path.
 		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(staticMetadata(s.opts.Metadata)))
+	}
+	if s.opts.MaxResponseBytes > 0 {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(s.opts.MaxResponseBytes)))
 	}
 	dialOpts = append(dialOpts, s.opts.DialOptions...)
 

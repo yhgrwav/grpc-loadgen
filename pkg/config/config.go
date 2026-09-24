@@ -24,21 +24,22 @@ import (
 )
 
 var (
-	ErrInvalidIP           = errors.New("got empty IP")
-	ErrInvalidPort         = errors.New("got invalid port")
-	ErrNoCalls             = errors.New("no calls configured")
-	ErrInvalidMethod       = errors.New("method must look like package.Service/Method")
-	ErrInvalidRPS          = errors.New("rps must be positive")
-	ErrInvalidDuration     = errors.New("duration must be positive")
-	ErrInvalidWarmup       = errors.New("warmup must not be negative")
-	ErrEmptyName           = errors.New("name must not be empty: leave it out to use the service or file name")
-	ErrDuplicateMethod     = errors.New("method appears in more than one call: the report is per method, keep one call for it")
-	ErrFractionalRPS       = errors.New("rps must be a whole number of requests")
-	ErrWarmupCoversTheCall = errors.New("warmup must be shorter than the call: otherwise nothing of it is measured")
-	ErrInvalidMetadata     = errors.New("invalid metadata")
-	ErrTLSFilesWithoutTLS  = errors.New("ca, cert, key and server_name need TLS: remove them or set app.tls: true")
-	ErrCertWithoutKey      = errors.New("cert and key go together: set both or neither")
-	ErrInvalidTimeout      = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
+	ErrInvalidIP              = errors.New("got empty IP")
+	ErrInvalidPort            = errors.New("got invalid port")
+	ErrNoCalls                = errors.New("no calls configured")
+	ErrInvalidMethod          = errors.New("method must look like package.Service/Method")
+	ErrInvalidRPS             = errors.New("rps must be positive")
+	ErrInvalidDuration        = errors.New("duration must be positive")
+	ErrInvalidWarmup          = errors.New("warmup must not be negative")
+	ErrEmptyName              = errors.New("name must not be empty: leave it out to use the service or file name")
+	ErrDuplicateMethod        = errors.New("method appears in more than one call: the report is per method, keep one call for it")
+	ErrFractionalRPS          = errors.New("rps must be a whole number of requests")
+	ErrWarmupCoversTheCall    = errors.New("warmup must be shorter than the call: otherwise nothing of it is measured")
+	ErrInvalidMetadata        = errors.New("invalid metadata")
+	ErrTLSFilesWithoutTLS     = errors.New("ca, cert, key and server_name need TLS: remove them or set app.tls: true")
+	ErrCertWithoutKey         = errors.New("cert and key go together: set both or neither")
+	ErrInvalidTimeout         = errors.New("timeout must be positive: without one, requests to a hung target pile up until the in-flight cap ends the run")
+	ErrInvalidMaxResponseSize = errors.New("max_response_size must be a positive size below 2GiB with a unit: B, KB, MB, GB, KiB, MiB or GiB")
 )
 
 type MasterConfig struct {
@@ -68,7 +69,12 @@ type App struct {
 	// carries: keys lowercased, ${NAME} replaced from the environment; nil
 	// when there is none.
 	RawMetadata map[string]string `yaml:"metadata"`
-	Metadata    map[string]string `yaml:"-"`
+	// RawMaxResponseSize is the field as written, such as 16MiB; the unit is
+	// required. MaxResponseBytes is it in bytes, 0 when left out: the
+	// transport's own limit of 4 MiB.
+	RawMaxResponseSize *string           `yaml:"max_response_size"`
+	MaxResponseBytes   int               `yaml:"-"`
+	Metadata           map[string]string `yaml:"-"`
 }
 
 type ConnectionStringTarget struct {

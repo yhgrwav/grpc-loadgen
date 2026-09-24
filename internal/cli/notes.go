@@ -25,7 +25,7 @@ import (
 // what the generator did, and the verdicts. One source for both the text
 // report and the final screen of the live view, so what the screen shows and
 // what the log keeps cannot drift apart.
-func reportNotes(report engine.Report) []string {
+func reportNotes(report engine.Report, maxResponse string) []string {
 	notes := make([]string, 0, 8)
 	add := func(format string, args ...any) {
 		notes = append(notes, strings.TrimRight(fmt.Sprintf(format, args...), "\n"))
@@ -143,11 +143,15 @@ func reportNotes(report engine.Report) []string {
 	}
 
 	if len(rejected) > 0 {
+		limit := "4MiB (the gRPC default; app.max_response_size sets another)"
+		if maxResponse != "" {
+			limit = maxResponse + " (app.max_response_size)"
+		}
 		add("The \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
 			"request is wrong — no such method, a bad argument, a body that does not match\n"+
-			"the schema — or a message did not fit: a reply rejected by the client's 4MB limit,\n"+
+			"the schema — or a message did not fit: a reply over the client's limit, %s,\n"+
 			"or a request refused as larger than accepted, by the target or a proxy in front of it.\n"+
-			"Check the config for %s.", strings.Join(rejected, ", "))
+			"Check the config for %s.", limit, strings.Join(rejected, ", "))
 	}
 
 	if report.RequestRejected {
