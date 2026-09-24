@@ -26,6 +26,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -577,7 +578,7 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 }
 
 // vanishedTarget returns a sender that connected to a live target which then
-// went away: calls still go out, and nothing is there to answer them.
+// went away, and has seen it go: calls fail before anything is written.
 func vanishedTarget(t *testing.T) *Sender {
 	t.Helper()
 
@@ -602,6 +603,14 @@ func vanishedTarget(t *testing.T) *Sender {
 
 	srv.Stop()
 	_ = lis.Close()
+
+	// Sent before the client has seen the drop, a call is written to the dead
+	// transport and ends cut off, not unreachable.
+	for sender.conn.GetState() == connectivity.Ready {
+		if !sender.conn.WaitForStateChange(bounded(t), connectivity.Ready) {
+			t.Fatal("the client never saw the connection drop")
+		}
+	}
 
 	return sender
 }
