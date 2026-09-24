@@ -15,13 +15,18 @@
 package grpcsender
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net"
 	"testing"
 	"time"
 
 	"golang.org/x/net/http2"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
@@ -73,13 +78,17 @@ func TestCategorize_OutcomeAgreesWithTheCodesSource(t *testing.T) {
 	sizeCut := status.Error(codes.ResourceExhausted, "grpc: received message larger than max (5 vs. 4)")
 
 	for code := codes.Canceled; code <= codes.Unauthenticated; code++ {
-		for _, err := range []error{status.Error(code, "x"), sizeCut} {
-			if err == sizeCut && code != codes.ResourceExhausted {
+		for _, size := range []bool{false, true} {
+			if size && code != codes.ResourceExhausted {
 				continue
+			}
+			err := status.Error(code, "x")
+			if size {
+				err = sizeCut
 			}
 			for _, answered := range []bool{true, false} {
 				for _, wentOut := range []bool{true, false} {
-					name := fmt.Sprintf("%v/answered=%v/wentOut=%v/size=%v", code, answered, wentOut, err == sizeCut)
+					name := fmt.Sprintf("%v/answered=%v/wentOut=%v/size=%v", code, answered, wentOut, size)
 					got := categorize(err, answered, wentOut)
 
 					switch got {
@@ -95,11 +104,93 @@ func TestCategorize_OutcomeAgreesWithTheCodesSource(t *testing.T) {
 					if got == engine.CategoryUnreachable && wentOut {
 						t.Errorf("%s: unreachable, but the request went out", name)
 					}
-					if !answered && wentOut && code != codes.DeadlineExceeded && err != sizeCut && got != engine.CategoryCutOff {
+					if !answered && wentOut && code != codes.DeadlineExceeded && !size && got != engine.CategoryCutOff {
 						t.Errorf("%s: %v, want cut off: went out, no status came back", name, got)
 					}
 				}
 			}
 		}
+	}
+}
+
+// refusingAfterPayload refuses streams with REFUSED_STREAM once their DATA has
+// arrived, so the attempt's OutPayload has fired. The first connection refuses
+// its first stream; with once set it then hangs up and the listener is gone,
+// so the transparent retry fails before writing anything. Without once every
+// stream is refused.
+func refusingAfterPayload(t *testing.T, once bool) *Sender {
+	t.Helper()
+
+	lis := bufconn.Listen(1024 * 1024)
+	t.Cleanup(func() { _ = lis.Close() })
+
+	go func() {
+		conn, err := lis.Accept()
+		if err != nil {
+			return
+		}
+		if once {
+			_ = lis.Close()
+		}
+		defer conn.Close()
+
+		preface := make([]byte, len(http2.ClientPreface))
+		if _, err := io.ReadFull(conn, preface); err != nil {
+			return
+		}
+		fr := http2.NewFramer(conn, conn)
+		if err := fr.WriteSettings(); err != nil {
+			return
+		}
+		for {
+			f, err := fr.ReadFrame()
+			if err != nil {
+				return
+			}
+			switch f := f.(type) {
+			case *http2.SettingsFrame:
+				if !f.IsAck() {
+					_ = fr.WriteSettingsAck()
+				}
+			case *http2.DataFrame:
+				_ = fr.WriteRSTStream(f.StreamID, http2.ErrCodeRefusedStream)
+				if once {
+					return
+				}
+			}
+		}
+	}()
+
+	sender := New(Options{Target: "passthrough:///bufnet", DialOptions: []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+	}})
+	t.Cleanup(func() { _ = sender.Close() })
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	return sender
+}
+
+// As the state in #75, the last attempt decides whether the call went out: the
+// first went out and was refused unprocessed, the retry never got written.
+// A sticky "went out" would say the target may have processed a call that
+// REFUSED_STREAM guarantees it did not.
+func TestSend_WentOutIsTheLastAttempts(t *testing.T) {
+	out := sendWithin(t, refusingAfterPayload(t, true), time.Second)
+
+	if out.Category != engine.CategoryUnreachable {
+		t.Errorf("category = %v (code %s), want unreachable: the retry went nowhere", out.Category, out.Code)
+	}
+}
+
+// REFUSED_STREAM on the last attempt means unprocessed, yet the call is cut off
+// with "may have processed": the safe side, a user checks for duplicates rather
+// than assumes none. Telling it apart needs the status text; that is tech debt.
+func TestSend_RefusedOnTheLastAttemptIsCutOff(t *testing.T) {
+	out := sendWithin(t, refusingAfterPayload(t, false), time.Second)
+
+	if out.Category != engine.CategoryCutOff {
+		t.Errorf("category = %v (code %s, %v), want cut off", out.Category, out.Code, out.Err)
 	}
 }

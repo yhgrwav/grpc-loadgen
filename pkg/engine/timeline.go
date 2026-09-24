@@ -22,7 +22,8 @@ import "time"
 type Second struct {
 	Begun     int
 	Succeeded int
-	// TargetFailed is the target's refusals: server faults and overload.
+	// TargetFailed is error statuses that came back: server faults and
+	// overload, from the target or a proxy in front of it.
 	TargetFailed int
 	// TimedOut is calls that went out and got no answer within the timeout.
 	TimedOut int
@@ -35,7 +36,9 @@ type Second struct {
 	UnsentLate  int
 	UnsentQuota int
 	Unanswered  int
-	Aborted     int
+	// CutOff is calls that went out and got no status back.
+	CutOff  int
+	Aborted int
 	// Unclassified is calls the sender left without a category: a defect of
 	// the sender, not an observation about the target.
 	Unclassified int
@@ -64,9 +67,9 @@ type second struct {
 	// the target, how many went out and got nothing within their timeout.
 	planned, answered, plannedTimedOut int64
 
-	unsentLate, unsentQuota, unanswered, aborted, unknown int64
-	lagCalls, observedCalls                               int64
-	lagSum, lagMax, observedLag, transportWait, service   time.Duration
+	unsentLate, unsentQuota, unanswered, cutOff, aborted, unknown int64
+	lagCalls, observedCalls                                       int64
+	lagSum, lagMax, observedLag, transportWait, service           time.Duration
 }
 
 // timeline never grows while recording: growing means copying it under the
@@ -150,6 +153,8 @@ func (t *timeline) record(start time.Time, r Result) {
 		s.requestFailed++
 	case CategoryUnreachable:
 		s.unanswered++
+	case CategoryCutOff:
+		s.cutOff++
 	case CategoryAborted:
 		s.aborted++
 	case CategoryUnknown:
@@ -189,7 +194,7 @@ func (t *timeline) export() []Second {
 	for i := range t.secs[:t.used] {
 		s := &t.secs[i]
 		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.unsentLate -
-			s.unsentQuota - s.unanswered - s.aborted - s.unknown
+			s.unsentQuota - s.unanswered - s.cutOff - s.aborted - s.unknown
 		out[i] = Second{
 			Begun:            int(s.begun),
 			Succeeded:        int(s.succeeded),
@@ -199,6 +204,7 @@ func (t *timeline) export() []Second {
 			UnsentLate:       int(s.unsentLate),
 			UnsentQuota:      int(s.unsentQuota),
 			Unanswered:       int(s.unanswered),
+			CutOff:           int(s.cutOff),
 			Aborted:          int(s.aborted),
 			Unclassified:     int(s.unknown),
 			InFlight:         int(inFlight),

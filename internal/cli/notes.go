@@ -31,7 +31,7 @@ func reportNotes(report engine.Report) []string {
 		notes = append(notes, strings.TrimRight(fmt.Sprintf(format, args...), "\n"))
 	}
 
-	censored, unanswered, unclassified, outside, invalid, refused := 0, 0, 0, 0, 0, 0
+	censored, unanswered, cutOff, unclassified, outside, invalid, refused := 0, 0, 0, 0, 0, 0, 0
 	rejected := make([]string, 0, len(report.Methods))
 	outright := make([]string, 0, len(report.Methods))
 	for i := range report.Methods {
@@ -39,6 +39,7 @@ func reportNotes(report engine.Report) []string {
 		censored += m.Censored
 		invalid += m.Invalid
 		unanswered += m.Unanswered
+		cutOff += m.CutOff
 		unclassified += m.Unclassified
 		outside += m.OutsideTimeline
 		refused += m.Refusal.Count
@@ -143,7 +144,8 @@ func reportNotes(report engine.Report) []string {
 
 	if refused > 0 {
 		add("A method's percentiles are the time to serve a call: successes, and timeouts\n" +
-			"as lower bounds. The \"refused\" rows are how long the target took to say no.")
+			"as lower bounds. The \"error status\" rows are how long until an error status\n" +
+			"came back, from the target or a proxy in front of it.")
 	}
 
 	// Aborted calls are censored too, but raising the timeout would not show
@@ -175,6 +177,11 @@ func reportNotes(report engine.Report) []string {
 
 	if v := streamVerdict(report); v != "" {
 		notes = append(notes, v)
+	}
+
+	if cutOff > 0 {
+		add("%d calls were cut off after going out: no status came back, and the other end,\n"+
+			"the target or a proxy in front of it, may have processed them.", cutOff)
 	}
 
 	if unanswered > 0 {

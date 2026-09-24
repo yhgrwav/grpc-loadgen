@@ -64,7 +64,7 @@ func PrintReport(w io.Writer, target string, run RunReport) {
 		}
 
 		if r := m.Refusal; r.Count > 0 {
-			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  refused", "", r.Count, "",
+			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  error status", "", r.Count, "",
 				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
 		}
 	}

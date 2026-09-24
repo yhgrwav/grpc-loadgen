@@ -58,7 +58,7 @@ func screenRows(report engine.Report) []tableRow {
 		for _, sub := range []struct {
 			label string
 			r     engine.RefusalLatency
-		}{{"rejected", m.Rejected}, {"refused", m.Refusal}} {
+		}{{"rejected", m.Rejected}, {"error status", m.Refusal}} {
 			if sub.r.Count == 0 {
 				continue
 			}

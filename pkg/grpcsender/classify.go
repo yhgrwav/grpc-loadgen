@@ -30,10 +30,10 @@ import (
 const sizeLimit = "larger than max"
 
 // categorize maps a finished call onto the engine's categories. answered says
-// whether the target sent a status of its own: the same code means different
-// things depending on who produced it.
+// whether a status came back over the wire: the same code means different
+// things depending on who produced it. wentOut says whether the last attempt's
+// request was written to the connection.
 func categorize(err error, answered, wentOut bool) engine.Category {
-	_ = wentOut
 
 	if err == nil {
 		return engine.CategorySuccess
@@ -51,13 +51,18 @@ func categorize(err error, answered, wentOut bool) engine.Category {
 	}
 
 	if !answered {
-		// Nothing came back from the target. A deadline is still a bound on the
-		// latency; anything else means the call never reached anyone.
-		if code == codes.DeadlineExceeded {
+		// No status came back. A deadline is still a bound on the latency. A
+		// request that went out reached the other end, which reset the stream or
+		// dropped the connection: it may have been processed. One that did not
+		// go out reached no one.
+		switch {
+		case code == codes.DeadlineExceeded:
 			return engine.CategoryTimeout
+		case wentOut:
+			return engine.CategoryCutOff
+		default:
+			return engine.CategoryUnreachable
 		}
-
-		return engine.CategoryUnreachable
 	}
 
 	switch code {

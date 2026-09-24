@@ -1108,3 +1108,19 @@ func TestPrintError_WritesTheErrorAsItCame(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }
+
+// Cut off changes no exit code: like unreachable before it, a call that got no
+// status is a failure of the run's numbers, not a verdict on the run.
+func TestRunResult_CutOffCallsKeepTheExitCode(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		report engine.Report
+	}{
+		{"all unreachable", engine.Report{Sent: 10, Failed: 10, Methods: []engine.MethodReport{{Method: "a", Sent: 10, Failed: 10, Unanswered: 10}}}},
+		{"all cut off", engine.Report{Sent: 10, Failed: 10, Methods: []engine.MethodReport{{Method: "a", Sent: 10, Failed: 10, CutOff: 10}}}},
+	} {
+		if err := runResult(c.report, nil); exitCode(err) != 0 {
+			t.Errorf("%s: exit %d (%v), want 0", c.name, exitCode(err), err)
+		}
+	}
+}

@@ -240,3 +240,31 @@ func TestReport_CutOffIsAFailureOfItsOwn(t *testing.T) {
 		t.Errorf("codes %+v, want %+v", m.FailureCodes, want)
 	}
 }
+
+// A cut-off call is no answer: the last answer stays at the last call whose
+// status came back, and the second counts it apart from the target's statuses.
+//
+// Ground: contract — MethodReport.LastAnswerAt and Second.CutOff are public.
+func TestReport_CutOffIsNotAnAnswer(t *testing.T) {
+	stats := NewStats()
+	stats.Reserve(5 * time.Second)
+	start := time.Now()
+	stats.Start(start, 0)
+
+	answered := start.Add(100 * time.Millisecond)
+	stats.Record(Result{Method: "a", ScheduledAt: answered, BegunAt: answered, Deadline: answered.Add(time.Second),
+		Outcome: Outcome{Category: CategoryOverload, Code: "Unavailable", CodeFromTarget: true, SentAt: answered, DoneAt: answered.Add(time.Millisecond)}})
+	cut := start.Add(1500 * time.Millisecond)
+	stats.Record(Result{Method: "a", ScheduledAt: cut, BegunAt: cut, Deadline: cut.Add(time.Second),
+		Outcome: Outcome{Category: CategoryCutOff, Code: "Internal", SentAt: cut, DoneAt: cut.Add(time.Millisecond)}})
+	stats.EndSending(cut)
+	stats.Finish(cut.Add(time.Second))
+
+	m := stats.Report().Methods[0]
+	if m.LastAnswerAt == nil || *m.LastAnswerAt != 100*time.Millisecond {
+		t.Errorf("last answer at %v, want 100ms: the cut-off call at 1.5s got no status", m.LastAnswerAt)
+	}
+	if len(m.Seconds) < 2 || m.Seconds[1].CutOff != 1 || m.Seconds[1].TargetFailed != 0 {
+		t.Errorf("seconds %+v: want the cut-off call in second 1 as CutOff, not TargetFailed", m.Seconds)
+	}
+}
