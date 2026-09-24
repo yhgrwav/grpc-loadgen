@@ -39,6 +39,14 @@ import (
 func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n int), hangUp ...bool) *Sender {
 	t.Helper()
 
+	return rawSender(t, func(conn net.Conn) { serveRaw(conn, onHeaders, len(hangUp) > 0 && hangUp[0]) })
+}
+
+// rawSender connects a sender to a listener whose every connection goes to
+// serve.
+func rawSender(t *testing.T, serve func(net.Conn)) *Sender {
+	t.Helper()
+
 	lis := bufconn.Listen(1024 * 1024)
 	t.Cleanup(func() { _ = lis.Close() })
 
@@ -48,7 +56,7 @@ func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n i
 			if err != nil {
 				return
 			}
-			go serveRaw(conn, onHeaders, len(hangUp) > 0 && hangUp[0])
+			go serve(conn)
 		}
 	}()
 
@@ -64,6 +72,23 @@ func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n i
 }
 
 func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n int), hangUp bool) {
+	var onData func(*http2.Framer, uint32) bool
+	if hangUp {
+		onData = func(*http2.Framer, uint32) bool { return true }
+	}
+	serveRawData(conn, onHeaders, onData)
+}
+
+// rawTargetOnData is rawTarget with the request's DATA handed to onData; the
+// connection closes when it returns true. A stream reset on HEADERS alone may
+// come before the client has written the request.
+func rawTargetOnData(t *testing.T, onData func(fr *http2.Framer, stream uint32) bool) *Sender {
+	t.Helper()
+
+	return rawSender(t, func(conn net.Conn) { serveRawData(conn, func(*http2.Framer, uint32, int) {}, onData) })
+}
+
+func serveRawData(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n int), onData func(*http2.Framer, uint32) bool) {
 	defer conn.Close()
 
 	preface := make([]byte, len(http2.ClientPreface))
@@ -94,7 +119,7 @@ func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n i
 			n++
 			onHeaders(fr, f.StreamID, n)
 		case *http2.DataFrame:
-			if hangUp {
+			if onData != nil && onData(fr, f.StreamID) {
 				return
 			}
 		}
