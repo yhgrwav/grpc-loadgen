@@ -99,6 +99,31 @@ func TestStagesDoNotDriftApart(t *testing.T) {
 	}
 }
 
+// Ground: boundary — a stage whose length is not a multiple of its interval: 3 rps for 500ms
+// sends at 0 and 333ms, and the next stage starts at 500ms, not at the third interval (1s) nor
+// right after the last call.
+func TestNextStageStartsWhereThePreviousEnds(t *testing.T) {
+	s := NewScheduler(Call{Method: "a.B/C", Stages: []Stage{
+		{StartRPS: 3, TargetRPS: 3, Duration: 500 * time.Millisecond},
+		{StartRPS: 100, TargetRPS: 100, Duration: 20 * time.Millisecond},
+	}})
+
+	got, err := collect(context.Background(), t, s)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if len(got) != 4 {
+		t.Fatalf("got %d requests, want 2 + 2", len(got))
+	}
+	if at := got[1].ScheduledAt.Sub(got[0].ScheduledAt); at != time.Second/3 {
+		t.Errorf("second call at %s, want %s", at, time.Second/3)
+	}
+	if at := got[2].ScheduledAt.Sub(got[0].ScheduledAt); at != 500*time.Millisecond {
+		t.Errorf("second stage starts at %s, want 500ms", at)
+	}
+}
+
 // Ground: boundary — rounding of nanoseconds per interval must not accumulate; arrivals at the
 // stand carry scheduling jitter.
 func TestScheduledTimeDoesNotAccumulateRounding(t *testing.T) {
