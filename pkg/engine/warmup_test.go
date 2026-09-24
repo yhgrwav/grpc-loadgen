@@ -154,3 +154,102 @@ func TestStop_DuringTheWarmupKeepsItsCalls(t *testing.T) {
 		t.Error("not incomplete: a stopped run exits 3")
 	}
 }
+
+// Timed out after waiting most of the deadline before going out: the target
+// had 50ms of a 1s timeout; one sent 800ms late had 200ms. Counted, so the no-answer line can say so.
+//
+// Ground: contract — MethodReport.TimedOutAfterWait is public.
+func TestReport_CountsTimeoutsThatWentOutLate(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	rec := func(waited time.Duration) {
+		sched := start.Add(10 * time.Millisecond)
+		stats.Record(Result{Method: "a", ScheduledAt: sched, BegunAt: sched, Deadline: sched.Add(time.Second),
+			Outcome: Outcome{Category: CategoryTimeout, Code: "DeadlineExceeded", SentAt: sched.Add(waited), DoneAt: sched.Add(time.Second)}})
+	}
+	rec(950 * time.Millisecond)
+	rec(800 * time.Millisecond)
+	rec(time.Millisecond)
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	if m := stats.Report().Methods[0]; m.TimedOut != 3 || m.TimedOutAfterWait != 2 {
+		t.Errorf("timed out %d, after a wait %d; want 3 and 2", m.TimedOut, m.TimedOutAfterWait)
+	}
+}
+
+// A deadline that ran out before the call went out is NotSent: it is in
+// UnsentTimedOut, not in TimedOut, so not in TimedOutAfterWait either — the
+// no-answer line is about calls the target had.
+//
+// Ground: contract — MethodReport.TimedOutAfterWait is public.
+func TestReport_ADeadlinePastBeforeSendingIsNotATimeoutAfterWait(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	sched := start.Add(10 * time.Millisecond)
+	stats.Record(Result{Method: "a", ScheduledAt: sched, BegunAt: sched.Add(time.Second), Deadline: sched.Add(time.Second),
+		Outcome: Outcome{Category: CategoryTimeout, Code: "DeadlineExceeded", NotSent: true,
+			SentAt: sched.Add(time.Second), DoneAt: sched.Add(time.Second)}})
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	m := stats.Report().Methods[0]
+	if m.UnsentTimedOut != 1 || m.TimedOut != 0 || m.TimedOutAfterWait != 0 {
+		t.Errorf("unsent %d, timed out %d, after a wait %d; want 1, 0, 0", m.UnsentTimedOut, m.TimedOut, m.TimedOutAfterWait)
+	}
+}
+
+// Every cause is counted over one set: measured calls, sent or not, that
+// waited over the floor for it. A generator 200ms behind on calls that all
+// went out still counts.
+//
+// Ground: contract — Report.GeneratorCauseCalls and siblings are public.
+func TestReport_CountsEachCauseOverOneSet(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	ms := func(n float64) time.Duration { return time.Duration(n * float64(time.Millisecond)) }
+	sched := start.Add(10 * time.Millisecond)
+	rec := func(lag time.Duration, o Outcome) {
+		begun := sched.Add(lag)
+		if o.SentAt.IsZero() {
+			o.SentAt = begun.Add(o.ConnWait + o.StreamWait)
+		}
+		o.DoneAt = o.SentAt.Add(ms(1))
+		if o.Category == 0 {
+			o.Category = CategorySuccess
+		}
+		stats.Record(Result{Method: "a", ScheduledAt: sched, BegunAt: begun, Deadline: sched.Add(time.Second), Outcome: o})
+	}
+
+	rec(ms(200), Outcome{})                                       // generator, sent
+	rec(0, Outcome{ConnWait: ms(5)})                              // connection, sent
+	rec(0, Outcome{StreamWait: ms(5)})                            // stream, sent
+	rec(ms(3), Outcome{ConnWait: ms(3), StreamWait: ms(3)})       // all three
+	rec(ms(0.5), Outcome{ConnWait: ms(0.5), StreamWait: ms(0.5)}) // none: under the floor
+	unsent := func(on Blocker) Outcome {
+		return Outcome{Category: CategoryTimeout, Code: "DeadlineExceeded", NotSent: true, NotSentOn: on, SentAt: sched.Add(time.Second)}
+	}
+	rec(0, unsent(BlockedOnConnection))
+	// Kept back by a stream after 5ms on the connection: the stream only.
+	onStream := unsent(BlockedOnStream)
+	onStream.ConnWait = ms(5)
+	rec(0, onStream)
+	rec(0, unsent(BlockedOnGenerator))
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	r := stats.Report()
+	if r.GeneratorCauseCalls != 3 || r.ConnectionCauseCalls != 3 || r.StreamCauseCalls != 3 {
+		t.Errorf("generator %d, connection %d, stream %d; want 3, 3, 3", r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls)
+	}
+	// The cli fixtures rely on it.
+	if r.StreamCauseCalls != r.StreamWaited+r.NotSentStream {
+		t.Errorf("stream cause %d != waited %d + not sent %d", r.StreamCauseCalls, r.StreamWaited, r.NotSentStream)
+	}
+}

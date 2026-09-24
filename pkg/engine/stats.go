@@ -154,8 +154,13 @@ type MethodReport struct {
 	// TimedOut counts calls that went out and got no answer within their
 	// timeout; UnsentTimedOut, timeouts of calls that never went out, which
 	// say nothing about the target.
-	TimedOut       int
-	UnsentTimedOut int
+	TimedOut int
+	// TimedOutAfterWait counts the TimedOut calls that went out with less
+	// than half their timeout left: the target had the smaller part of it.
+	// A deadline that ran out before sending is not here: that call is
+	// NotSent, in UnsentTimedOut.
+	TimedOutAfterWait int
+	UnsentTimedOut    int
 	// SilentFrom is the first second, by planned time and counting warmup,
 	// from which to the end of the schedule no call got an answer: neither a
 	// success nor a status from the target. Nil if there is none.
@@ -237,6 +242,16 @@ type Report struct {
 	// longer than StreamWaitFloor; StreamWaitP99 is over those calls.
 	StreamWaited  int
 	StreamWaitP99 metrics.Quantile
+	// GeneratorCauseCalls, ConnectionCauseCalls and StreamCauseCalls count the
+	// measured calls, sent or not, that waited over StreamWaitFloor for each
+	// cause: start lag behind the schedule, a connection that was not ready, a
+	// free stream. An unsent call counts only for the cause that kept it back,
+	// so StreamCauseCalls is StreamWaited + NotSentStream. A sent call can
+	// count for several causes. They rank the causes; they do not decide
+	// whether there is a verdict.
+	GeneratorCauseCalls  int
+	ConnectionCauseCalls int
+	StreamCauseCalls     int
 	// Connections is what the sender said about its connections; nil when it
 	// does not tell.
 	Connections *Connections
@@ -278,6 +293,9 @@ type Stats struct {
 	notSentStream     int
 	notSentConnection int
 	streamWait        *metrics.Latencies
+	// waited counts calls over the floor for each cause: generator,
+	// connection, stream.
+	waited [3]int
 }
 
 type methodStats struct {
@@ -287,8 +305,10 @@ type methodStats struct {
 	cutOff     int
 	unknown    int
 	timedOut   int
-	unsentOut  int
-	latency    *metrics.Latencies
+	// timedOutLate counts timeouts sent with less than half the deadline left.
+	timedOutLate int
+	unsentOut    int
+	latency      *metrics.Latencies
 	// served is latency with each call's stream wait taken out.
 	served   *metrics.Latencies
 	refusal  *metrics.Latencies
@@ -410,17 +430,24 @@ func (s *Stats) Record(r Result) {
 
 	// A call that never went out tells nothing about the target: it is in
 	// none of the counts or distributions that are about it.
+	gen, conn, stream := r.QueueTime() > StreamWaitFloor, r.ConnWait > StreamWaitFloor, r.StreamWait > StreamWaitFloor
 	if r.NotSent {
 		s.notSent++
 		method.unsentOut++
+		// Only the cause that kept it back: its other waits are cut short.
+		gen, conn, stream = false, false, false
 		switch {
 		case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
 			s.notSentLate++
+			gen = true
 		case r.NotSentOn == BlockedOnStream:
 			s.notSentStream++
+			stream = true
 		default:
 			s.notSentConnection++
+			conn = true
 		}
+		s.countWaits(gen, conn, stream)
 		s.mu.Unlock()
 
 		return
@@ -446,12 +473,16 @@ func (s *Stats) Record(r Result) {
 		}
 	}
 
-	if r.StreamWait > StreamWaitFloor {
+	if stream {
 		s.streamWait.Record(r.StreamWait)
 	}
+	s.countWaits(gen, conn, stream)
 
 	if r.Category == CategoryTimeout {
 		method.timedOut++
+		if !r.Deadline.IsZero() && r.Deadline.Sub(r.SentAt) < r.Deadline.Sub(r.ScheduledAt)/2 {
+			method.timedOutLate++
+		}
 	}
 
 	// A call that never reached the target has no latency to record: a refused
@@ -662,14 +693,16 @@ func (s *Stats) Report() Report {
 	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
 	warmupSent, warmupFailed := s.warmupSent, s.warmupFailed
 	late, stream, connection := s.notSentLate, s.notSentStream, s.notSentConnection
+	waited := s.waited
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
 		entry := MethodReport{
-			Seconds:         method.timeline.export(),
-			OutsideTimeline: method.timeline.outside,
-			InvalidLag:      method.timeline.invalidLag,
-			TimedOut:        method.timedOut,
-			UnsentTimedOut:  method.unsentOut,
+			Seconds:           method.timeline.export(),
+			OutsideTimeline:   method.timeline.outside,
+			InvalidLag:        method.timeline.invalidLag,
+			TimedOut:          method.timedOut,
+			TimedOutAfterWait: method.timedOutLate,
+			UnsentTimedOut:    method.unsentOut,
 		}
 		if from, ok := method.timeline.silentFrom(); ok {
 			entry.SilentFrom = &from
@@ -700,11 +733,14 @@ func (s *Stats) Report() Report {
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
 
-		NotSentLate:       late,
-		NotSentStream:     stream,
-		NotSentConnection: connection,
-		StreamWaited:      int(streamWait.Count()),
-		StreamWaitP99:     streamWait.Percentile(0.99),
+		NotSentLate:          late,
+		NotSentStream:        stream,
+		NotSentConnection:    connection,
+		StreamWaited:         int(streamWait.Count()),
+		StreamWaitP99:        streamWait.Percentile(0.99),
+		GeneratorCauseCalls:  waited[0],
+		ConnectionCauseCalls: waited[1],
+		StreamCauseCalls:     waited[2],
 	}
 
 	for _, v := range views {
@@ -733,13 +769,14 @@ func (s *Stats) Report() Report {
 			Refusal:              refusalOf(v.refusal),
 			Rejected:             refusalOf(v.rejected),
 
-			Seconds:         timelines[v.name].Seconds,
-			OutsideTimeline: timelines[v.name].OutsideTimeline,
-			InvalidLag:      timelines[v.name].InvalidLag,
-			TimedOut:        timelines[v.name].TimedOut,
-			UnsentTimedOut:  timelines[v.name].UnsentTimedOut,
-			SilentFrom:      timelines[v.name].SilentFrom,
-			LastAnswerAt:    timelines[v.name].LastAnswerAt,
+			Seconds:           timelines[v.name].Seconds,
+			OutsideTimeline:   timelines[v.name].OutsideTimeline,
+			InvalidLag:        timelines[v.name].InvalidLag,
+			TimedOut:          timelines[v.name].TimedOut,
+			TimedOutAfterWait: timelines[v.name].TimedOutAfterWait,
+			UnsentTimedOut:    timelines[v.name].UnsentTimedOut,
+			SilentFrom:        timelines[v.name].SilentFrom,
+			LastAnswerAt:      timelines[v.name].LastAnswerAt,
 		}
 		if measured > 0 {
 			entry.RPS = float64(v.sent) / measured.Seconds()
@@ -786,7 +823,16 @@ func (s *Stats) elapsed() time.Duration {
 	return s.endedAt.Sub(s.startedAt)
 }
 
-// StreamWaitFloor is the stream wait below which a call is not counted as
-// having waited. A hypothesis: a stream granted at once still takes a few
+// countWaits adds a measured call to each cause it waited for. Callers hold mu.
+func (s *Stats) countWaits(gen, conn, stream bool) {
+	for i, w := range [3]bool{gen, conn, stream} {
+		if w {
+			s.waited[i]++
+		}
+	}
+}
+
+// StreamWaitFloor is the wait below which a call is not counted as having
+// waited — for a stream, and for the generator and the connection alike. A hypothesis: a stream granted at once still takes a few
 // microseconds between picking the connection and writing headers.
 const StreamWaitFloor = time.Millisecond
