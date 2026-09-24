@@ -103,7 +103,7 @@ func TestVerdict_CausesThatMoveP99OnlyTogether(t *testing.T) {
 	r := reportOf(t, calls)
 
 	v := verdictOf(t, r)
-	if !strings.Contains(v, "causes, largest first: generator late 1; waited for a stream 1; connection not ready 1.") {
+	if !strings.Contains(v, "causes in the p99 tail, largest first: generator late 1; waited for a stream 1; connection not ready 1.") {
 		t.Errorf("not every cause listed:\n%s", v)
 	}
 }

@@ -22,10 +22,10 @@ import (
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
-// streamLimited reports the methods whose printed p99 changes when the stream
-// wait is taken out, and whether the run is limited by streams: some printed
-// p99 moves, or calls never went out for want of a stream.
-func streamLimited(report engine.Report) (moved []*engine.MethodReport, limited bool) {
+// clientWaitsMoved reports the methods whose printed p99 changes when every
+// client-side wait is taken out — start lag, connection, stream — and whether
+// that or calls never sent make a case for a verdict.
+func clientWaitsMoved(report engine.Report) (moved []*engine.MethodReport, limited bool) {
 	for i := range report.Methods {
 		m := &report.Methods[i]
 		if m.P99WithoutClientWaits.Defined && formatQuantile(m.P99) != formatQuantile(m.P99WithoutClientWaits) {
@@ -33,7 +33,7 @@ func streamLimited(report engine.Report) (moved []*engine.MethodReport, limited 
 		}
 	}
 
-	return moved, len(moved) > 0 || report.NotSentStream > 0
+	return moved, len(moved) > 0 || report.NotSent > 0
 }
 
 func plural(n int, word string) string {
@@ -44,11 +44,12 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// cause is one reason calls waited, with the calls, sent or not, that waited
-// over the floor for it.
+// cause is one reason calls waited: tail counts the calls that waited over
+// the floor for it among those that set p99, plus the unsent it kept back; n
+// counts them over the whole run.
 type cause struct {
-	n    int
-	what string
+	tail, n int
+	what    string
 }
 
 const (
@@ -57,31 +58,30 @@ const (
 	causeConnection = "connection not ready"
 )
 
-// rankedCauses lists the causes with calls, largest first; a tie keeps the
-// order generator, stream, connection.
+// rankedCauses lists the causes present in the tail, largest there first; a
+// tie keeps the order generator, stream, connection. A cause common over the
+// run but absent from the tail did not make p99.
 func rankedCauses(report engine.Report) []cause {
 	var out []cause
 	for _, c := range []cause{
-		{report.GeneratorCauseCalls, causeGenerator},
-		{report.StreamCauseCalls, causeStream},
-		{report.ConnectionCauseCalls, causeConnection},
+		{report.GeneratorTailCalls, report.GeneratorCauseCalls, causeGenerator},
+		{report.StreamTailCalls, report.StreamCauseCalls, causeStream},
+		{report.ConnectionTailCalls, report.ConnectionCauseCalls, causeConnection},
 	} {
-		if c.n > 0 {
+		if c.tail > 0 {
 			out = append(out, c)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b cause) int { return b.n - a.n })
+	slices.SortStableFunc(out, func(a, b cause) int { return b.tail - a.tail })
 
 	return out
 }
 
-// verdictCause is the cause that names the verdict, or "" when there is none.
-// Whether there is one is decided as before the ranking: streams moved a
-// printed p99 or kept calls back, or calls went unsent for the generator or
-// the connection. The counts only choose the heading.
+// verdictCause is the cause that names the verdict. There is one when the
+// waits moved a printed p99 or calls went unsent, and some cause is in the
+// tail: a move below the floor has nothing to name, and stays a note.
 func verdictCause(report engine.Report) (cause, bool) {
-	_, limited := streamLimited(report)
-	if !limited && report.NotSentLate == 0 && report.NotSentConnection == 0 {
+	if _, limited := clientWaitsMoved(report); !limited {
 		return cause{}, false
 	}
 	ranked := rankedCauses(report)
@@ -114,22 +114,24 @@ func streamVerdict(report engine.Report) string {
 	}
 
 	// One cause has nothing to rank.
-	var parts []string
-	if ranked := rankedCauses(report); len(ranked) > 1 {
+	ranked := rankedCauses(report)
+	if len(ranked) > 1 {
+		var parts []string
 		for _, c := range ranked {
-			parts = append(parts, fmt.Sprintf("%s %d", c.what, c.n))
+			parts = append(parts, fmt.Sprintf("%s %d", c.what, c.tail))
 		}
-	}
-	if len(parts) > 0 {
-		fmt.Fprintf(&b, "\ncauses, largest first: %s.", strings.Join(parts, "; "))
+		fmt.Fprintf(&b, "\ncauses in the p99 tail, largest first: %s.", strings.Join(parts, "; "))
 	}
 
-	moved, limited := streamLimited(report)
+	moved, _ := clientWaitsMoved(report)
 	if len(moved) > 0 {
 		fmt.Fprintf(&b, "\nThe printed p99 includes the wait for %d of %d methods.", len(moved), len(report.Methods))
 	}
 
-	if conns := report.Connections; limited && conns != nil && conns.LimitAnnounced {
+	// A call that waited for a stream means the limit was reached; without one
+	// the limit says nothing about this run.
+	streamCause := slices.ContainsFunc(ranked, func(c cause) bool { return c.what == causeStream })
+	if conns := report.Connections; streamCause && conns != nil && conns.LimitAnnounced {
 		inFlight := conns.Open * int(conns.LastLimit)
 		fmt.Fprintf(&b, " The target was not tested\nabove %s in flight.", plural(inFlight, "call"))
 	}
@@ -233,15 +235,29 @@ func streamNotes(report engine.Report) []string {
 		notes = append(notes, fmt.Sprintf("not sent %d: %s.", report.NotSent, strings.Join(reasons, ", ")))
 	}
 
-	moved, limited := streamLimited(report)
+	moved, limited := clientWaitsMoved(report)
 	for _, m := range moved {
-		notes = append(notes, fmt.Sprintf("%s: p99 without the stream wait is %s.",
+		notes = append(notes, fmt.Sprintf("%s: p99 without client-side waits (generator, connection, stream) is %s.",
 			displayMethod(m.Method), formatQuantile(m.P99WithoutClientWaits)))
 	}
 
-	if !limited && report.StreamWaited > 0 {
-		notes = append(notes, fmt.Sprintf("%d of %d sent calls waited for a stream (p99 %s); p99 unchanged.",
-			report.StreamWaited, report.Sent, formatQuantile(report.StreamWaitP99)))
+	const unmoved = "client-side waits (generator, connection, stream) did not move p99."
+	switch {
+	case limited:
+	case report.StreamWaited > 0:
+		notes = append(notes, fmt.Sprintf("%d of %d sent calls waited for a stream (p99 %s); %s",
+			report.StreamWaited, report.Sent, formatQuantile(report.StreamWaitP99), unmoved))
+	case report.GeneratorCauseCalls > 0 || report.ConnectionCauseCalls > 0:
+		var waited []string
+		for _, c := range []cause{
+			{n: report.GeneratorCauseCalls, what: causeGenerator},
+			{n: report.ConnectionCauseCalls, what: causeConnection},
+		} {
+			if c.n > 0 {
+				waited = append(waited, fmt.Sprintf("%s %d", c.what, c.n))
+			}
+		}
+		notes = append(notes, fmt.Sprintf("calls that waited over 1ms: %s; %s", strings.Join(waited, ", "), unmoved))
 	}
 
 	return notes

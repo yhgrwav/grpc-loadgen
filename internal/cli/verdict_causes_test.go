@@ -30,6 +30,7 @@ func ledgerShaped() engine.Report {
 	r.NotSentLate, r.NotSentConnection, r.NotSentStream = 28839, 24372, 0
 	r.NotSent = r.NotSentLate + r.NotSentConnection
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 28839, 24372, 213
+	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 28839, 24372, 213
 	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 128, LastLimit: 128}
 
 	return r
@@ -55,7 +56,7 @@ func TestVerdict_NamesTheLargestCauseAndListsTheRest(t *testing.T) {
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind") {
 		t.Errorf("heading does not name the generator:\n%s", v)
 	}
-	if !strings.Contains(v, "causes, largest first: generator late 28839; connection not ready 24372; waited for a stream 213") {
+	if !strings.Contains(v, "causes in the p99 tail, largest first: generator late 28839; connection not ready 24372; waited for a stream 213") {
 		t.Errorf("causes not listed largest first:\n%s", v)
 	}
 	if s := shortStreamVerdict(ledgerShaped()); !strings.Contains(s, "generator") {
@@ -70,6 +71,7 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 10, 500, 0
 	r.NotSent = 510
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 10, 500, 0
+	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 10, 500, 0
 	r.Methods[0].P99WithoutClientWaits = r.Methods[0].P99
 
 	v := verdictOf(t, r)
@@ -90,12 +92,13 @@ func TestVerdict_ATieIsBrokenByAFixedOrder(t *testing.T) {
 	r.NotSentLate, r.NotSentConnection = 100, 100
 	r.NotSent = 200
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 100, 100, 100
+	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 100, 100, 100
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind") {
 		t.Errorf("heading:\n%s", v)
 	}
-	if !strings.Contains(v, "causes, largest first: generator late 100; waited for a stream 100; connection not ready 100") {
+	if !strings.Contains(v, "causes in the p99 tail, largest first: generator late 100; waited for a stream 100; connection not ready 100") {
 		t.Errorf("tie order:\n%s", v)
 	}
 }
@@ -117,6 +120,7 @@ func TestNotes_NoAnswerLineSaysHowManyWentOutLate(t *testing.T) {
 func TestVerdict_AGeneratorBehindOnSentCallsOutranksStreams(t *testing.T) {
 	r := oneStream()
 	r.GeneratorCauseCalls, r.StreamCauseCalls = 50, 48
+	r.GeneratorTailCalls, r.StreamTailCalls = 50, 48
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind for 50 calls") {
@@ -135,7 +139,7 @@ func TestVerdict_StreamWaitThatMovedNothingMakesNoVerdict(t *testing.T) {
 	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
 		t.Errorf("a verdict without a moved p99 or unsent calls:\n%s", notes)
 	}
-	if !strings.Contains(notes, "5 of 50 sent calls waited for a stream (p99 2.00ms); p99 unchanged.") {
+	if !strings.Contains(notes, "5 of 50 sent calls waited for a stream (p99 2.00ms); client-side waits (generator, connection, stream) did not move p99.") {
 		t.Errorf("the p99-unchanged note is gone:\n%s", notes)
 	}
 	if s := shortStreamVerdict(r); s != "" {

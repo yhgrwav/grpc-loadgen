@@ -457,6 +457,7 @@ func verdictCases() []struct {
 			}
 			m.report.Methods[0].P99WithoutClientWaits = exact(5)
 			m.report.StreamWaited, m.report.StreamCauseCalls, m.report.StreamWaitP99 = 900, 900, exact(9)
+			m.report.StreamTailCalls = 900
 			m.report.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1}
 		}},
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {
