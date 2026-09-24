@@ -15,6 +15,7 @@
 package main
 
 import (
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -35,6 +36,18 @@ func TestRun_VersionPrintsAndExitsWithoutAConfig(t *testing.T) {
 	}
 	if res.stderr != "" {
 		t.Errorf("stderr = %q, want nothing", res.stderr)
+	}
+}
+
+// -version is answered before any check: a config path that does not exist,
+// exit code 1 without the flag, does not stop it.
+func TestRun_VersionIsCheckedBeforeTheConfig(t *testing.T) {
+	res := runCLI(t.Context(), t, 5*time.Second, "-version", "-c", filepath.Join(t.TempDir(), "missing.yaml"))
+	if res.err != nil {
+		t.Fatalf("run: %v", res.err)
+	}
+	if !strings.HasPrefix(res.stdout, "leettest ") {
+		t.Errorf("stdout = %q, want \"leettest <version>\"", res.stdout)
 	}
 }
 
