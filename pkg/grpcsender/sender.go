@@ -330,7 +330,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	}
 
 	times := call.read()
-	category := categorize(err, times.answered)
+	category := categorize(err, times.answered, !times.sentAt.IsZero())
 	sentAt, doneAt, notSent := timestamps(times, category)
 
 	outcome := engine.Outcome{

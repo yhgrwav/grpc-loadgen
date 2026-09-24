@@ -128,6 +128,9 @@ type MethodReport struct {
 	// Unanswered counts calls that never reached the target, so they are absent
 	// from the distribution rather than recorded as very fast replies.
 	Unanswered int
+	// CutOff counts calls that went out and got no status back: counted as
+	// failed, absent from every latency, and not an answer.
+	CutOff int
 	// Unclassified counts calls the sender left without a category: a defect
 	// of the sender, kept apart so it does not pass for an unreachable target.
 	// They are absent from the distribution too.
@@ -270,6 +273,7 @@ type methodStats struct {
 	sent       int
 	failed     int
 	unanswered int
+	cutOff     int
 	unknown    int
 	timedOut   int
 	unsentOut  int
@@ -435,11 +439,14 @@ func (s *Stats) Record(r Result) {
 
 	// A call that never reached the target has no latency to record: a refused
 	// connection comes back in microseconds and would pull both the median and
-	// the tail down while the target is in fact unreachable.
-	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable
+	// the tail down while the target is in fact unreachable. A cut-off call has
+	// no status to time either.
+	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable || r.Category == CategoryCutOff
 	switch r.Category {
 	case CategoryUnreachable:
 		method.unanswered++
+	case CategoryCutOff:
+		method.cutOff++
 	case CategoryUnknown:
 		method.unknown++
 	}
@@ -479,6 +486,7 @@ type methodView struct {
 	sent       int
 	failed     int
 	unanswered int
+	cutOff     int
 	unknown    int
 	lastAnswer time.Duration
 	dist       *metrics.Snapshot
@@ -504,7 +512,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
-			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
+			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered, cutOff: method.cutOff,
 			unknown: method.unknown, lastAnswer: method.lastAnswer, codes: failureCodes(method.codes),
 		})
 		sources = append(sources, method)
@@ -689,6 +697,7 @@ func (s *Stats) Report() Report {
 			Censored:     int(v.dist.CensoredCount()),
 			Invalid:      int(v.dist.InvalidCount()),
 			Unanswered:   v.unanswered,
+			CutOff:       v.cutOff,
 			Unclassified: v.unknown,
 			Min:          v.dist.Percentile(0),
 			P50:          v.dist.Percentile(0.50),

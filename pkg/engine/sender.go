@@ -31,8 +31,10 @@ const (
 	CategoryClientFault
 	CategoryServerFault
 	CategoryTimeout
-	// CategoryOverload means the target rejected the call for lack of
-	// capacity, not because of anything wrong with the request itself.
+	// CategoryOverload means an error status came back for lack of capacity,
+	// not because of anything wrong with the request itself. The status may
+	// come from a proxy in front of the target: nginx answers 14 when it has no
+	// live upstream.
 	CategoryOverload
 	// CategoryUnreachable means the call never reached the target and no reply
 	// was coming: the connection was refused, dropped, or never established.
@@ -44,6 +46,11 @@ const (
 	// It is no fault of the target: the call is known only to have lasted at
 	// least until the abort, and is recorded as censored at that moment.
 	CategoryAborted
+	// CategoryCutOff means the request went out and no status came back: the
+	// other end, the target or a proxy, reset the stream or dropped the
+	// connection. It may have been processed. There is no status to time, so
+	// it carries no latency, and it does not count as an answer.
+	CategoryCutOff
 )
 
 func (c Category) String() string {
@@ -62,6 +69,8 @@ func (c Category) String() string {
 		return "unreachable"
 	case CategoryAborted:
 		return "aborted"
+	case CategoryCutOff:
+		return "cut off"
 	default:
 		return "unknown"
 	}

@@ -198,12 +198,12 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 
 	var row string
 	for line := range strings.Lines(text) {
-		if strings.Contains(line, "refused") && strings.Contains(line, "990") {
+		if strings.Contains(line, "error status") && strings.Contains(line, "990") {
 			row = line
 		}
 	}
 	if row == "" || !strings.Contains(row, "2.00ms") || !strings.Contains(row, "3.00ms") {
-		t.Errorf("want a refused row with 990 calls, p50 2ms and p99 3ms:\n%s", text)
+		t.Errorf("want an error status row with 990 calls, p50 2ms and p99 3ms:\n%s", text)
 	}
 	if !strings.Contains(text, "time to serve") {
 		t.Errorf("the report must say the method's percentiles are the time to serve:\n%s", text)
@@ -212,8 +212,8 @@ func TestPrintReportTimesRefusalsOnTheirOwnRow(t *testing.T) {
 	out.Reset()
 	report.Methods[0].Refusal = engine.RefusalLatency{}
 	PrintReport(&out, "localhost:50051", RunReport{Report: report})
-	if strings.Contains(out.String(), "refused") {
-		t.Errorf("no refusals, no refused row:\n%s", out.String())
+	if strings.Contains(out.String(), "error status") {
+		t.Errorf("no error statuses, no error status row:\n%s", out.String())
 	}
 }
 
