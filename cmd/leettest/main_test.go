@@ -556,6 +556,32 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 	}
 }
 
+// The margin is explained once, and that once names both of its parts: said
+// twice it reads as two reserves, and the engine's line alone left the edge
+// slot out of a number that holds it.
+func TestRun_OverBudgetErrorExplainsTheMarginOnce(t *testing.T) {
+	for _, c := range []struct{ name, cap string }{
+		{"a timeout fits", "10"},
+		{"no timeout fits", "3"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := runCLI(t.Context(), t, 3*time.Second,
+				"-max-in-flight", c.cap, "-c", writeConfig(t, closedPort(t), checkMethod, plaintext))
+			if res.err == nil {
+				t.Fatal("run succeeded, want the in-flight budget to reject the config")
+			}
+
+			text := strings.Join(strings.Fields(res.err.Error()), " ")
+			if n := strings.Count(text, "past their deadline"); n != 1 {
+				t.Errorf("the late release is explained %d times, want once:\n%s", n, res.err)
+			}
+			if !strings.Contains(text, "window's edge") {
+				t.Errorf("the margin leaves out the slot for the call on the window's edge:\n%s", res.err)
+			}
+		})
+	}
+}
+
 func TestExampleConfigFitsTheDefaultInFlightCap(t *testing.T) {
 	cfg, err := config.LoadFile(filepath.Join("..", "..", "examples", "leettest.yaml"))
 	if err != nil {

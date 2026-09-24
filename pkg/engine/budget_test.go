@@ -17,6 +17,7 @@ package engine
 import (
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +56,23 @@ func TestNew_RejectsCallsThatOutgrowTheCapWhenTheTargetHangs(t *testing.T) {
 	// slot release.
 	if budget.Need != 20_101 || budget.Cap != 5000 || budget.PeakRPS != 1000 {
 		t.Errorf("budget = %+v, want Need 20101, Cap 5000, PeakRPS 1000", *budget)
+	}
+}
+
+// Ground: contract — InFlightBudgetError is public and its text is what a library caller shows:
+// the reserve it names (101 here) holds the edge slot as well as the late release, and the text
+// must say both or the number reads as late release alone.
+func TestInFlightBudgetError_NamesBothPartsOfTheReserve(t *testing.T) {
+	err := newWithCap(5000, budgetCall("a", 1000, 20*time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	text := err.Error()
+	for _, want := range []string{"plus 101", "window's edge", "100ms past their deadline"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q lacks %q", text, want)
+		}
 	}
 }
 
