@@ -378,13 +378,13 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	if !strings.Contains(text, "rejected") {
 		t.Errorf("no rejected row:\n%s", text)
 	}
-	for _, want := range []string{"invalid run", "a.B/One", "client's 4MB limit", "larger than it accepts"} {
+	for _, want := range []string{"invalid run", "a.B/One", "client's 4MB limit", "larger than accepted"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("verdict does not say %q:\n%s", want, text)
 		}
 
 		// The two causes are told apart: a reply the client cut off, and a request
-		// the target refused. The target's own limit is unknown to us, so no number
+		// refused by the target or a proxy. The other end's own limit is unknown to us, so no number
 		// is put on it.
 		if strings.Contains(text, "cut off") || strings.Contains(text, "truncat") {
 			t.Errorf("the report suggests a partial reply arrived; grpc-go rejects it whole:\n%s", text)
