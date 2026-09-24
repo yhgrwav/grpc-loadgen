@@ -128,6 +128,8 @@ type MethodReport struct {
 	// Unanswered counts calls that never reached the target, so they are absent
 	// from the distribution rather than recorded as very fast replies.
 	Unanswered int
+	// CutOff: stub for the spec.
+	CutOff int
 	// Unclassified counts calls the sender left without a category: a defect
 	// of the sender, kept apart so it does not pass for an unreachable target.
 	// They are absent from the distribution too.

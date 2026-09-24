@@ -206,3 +206,37 @@ func TestReport_CallsCancelledByTheStopHaveNoCode(t *testing.T) {
 		t.Errorf("FailureCodes = %+v, want %+v: a call cancelled by the stop has no code", got, want)
 	}
 }
+
+// A cut-off call went out and got no status: a failure with no latency to
+// speak of, counted apart from both the service time and the error statuses,
+// and never under the target's codes.
+//
+// Ground: contract — MethodReport.CutOff is public.
+func TestReport_CutOffIsAFailureOfItsOwn(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	at := start
+	for range 4 {
+		stats.Record(Result{Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+			Outcome: Outcome{Category: CategoryCutOff, Code: "Internal", SentAt: at, DoneAt: at.Add(3 * time.Millisecond)}})
+		at = at.Add(time.Millisecond)
+	}
+	stats.EndSending(at)
+	stats.Finish(at.Add(time.Second))
+
+	m := stats.Report().Methods[0]
+	if m.Failed != 4 || m.CutOff != 4 {
+		t.Errorf("failed %d, cut off %d, want 4 and 4", m.Failed, m.CutOff)
+	}
+	if m.Unanswered != 0 {
+		t.Errorf("unanswered %d: a cut-off call reached the other end", m.Unanswered)
+	}
+	if m.Refusal.Count != 0 || m.Rejected.Count != 0 {
+		t.Errorf("refusal %d, rejected %d: no status came back to time", m.Refusal.Count, m.Rejected.Count)
+	}
+	if want := []CodeCount{{Code: "Internal", Count: 4}}; !slices.Equal(m.FailureCodes, want) {
+		t.Errorf("codes %+v, want %+v", m.FailureCodes, want)
+	}
+}

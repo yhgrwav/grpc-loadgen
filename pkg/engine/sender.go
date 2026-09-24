@@ -44,6 +44,8 @@ const (
 	// It is no fault of the target: the call is known only to have lasted at
 	// least until the abort, and is recorded as censored at that moment.
 	CategoryAborted
+	// CategoryCutOff: stub for the spec.
+	CategoryCutOff
 )
 
 func (c Category) String() string {
@@ -62,6 +64,8 @@ func (c Category) String() string {
 		return "unreachable"
 	case CategoryAborted:
 		return "aborted"
+	case CategoryCutOff:
+		return "cut off"
 	default:
 		return "unknown"
 	}

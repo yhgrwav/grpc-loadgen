@@ -34,7 +34,8 @@ import (
 
 // rawTarget serves raw HTTP/2 and hands each request's HEADERS to onHeaders,
 // numbered from 1: the test decides what the other end does with the stream.
-func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n int)) *Sender {
+// hangUp, when set, closes the connection right after onHeaders.
+func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n int), hangUp ...bool) *Sender {
 	t.Helper()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -46,7 +47,7 @@ func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n i
 			if err != nil {
 				return
 			}
-			go serveRaw(conn, onHeaders)
+			go serveRaw(conn, onHeaders, len(hangUp) > 0 && hangUp[0])
 		}
 	}()
 
@@ -61,7 +62,7 @@ func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n i
 	return sender
 }
 
-func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n int)) {
+func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n int), hangUp bool) {
 	defer conn.Close()
 
 	preface := make([]byte, len(http2.ClientPreface))
@@ -91,6 +92,9 @@ func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n i
 		case *http2.HeadersFrame:
 			n++
 			onHeaders(fr, f.StreamID, n)
+			if hangUp {
+				return
+			}
 		}
 	}
 }

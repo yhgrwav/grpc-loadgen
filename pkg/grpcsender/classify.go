@@ -32,7 +32,9 @@ const sizeLimit = "larger than max"
 // categorize maps a finished call onto the engine's categories. answered says
 // whether the target sent a status of its own: the same code means different
 // things depending on who produced it.
-func categorize(err error, answered bool) engine.Category {
+func categorize(err error, answered, wentOut bool) engine.Category {
+	_ = wentOut
+
 	if err == nil {
 		return engine.CategorySuccess
 	}
