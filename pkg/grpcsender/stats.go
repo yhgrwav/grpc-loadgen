@@ -101,9 +101,13 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 
 			break
 		}
-		// grpc-go retries a stream the target never read, so nothing of the
-		// earlier attempt went out. The call keeps waiting since its start;
-		// the wait for a stream starts again with this attempt.
+		// grpc-go retries transparently only a first attempt that had no
+		// stream or one the target never processed (v1.84.0 stream.go:807,
+		// :816): not written, refused (RST_STREAM REFUSED_STREAM) or past a
+		// GOAWAY (internal/transport/http2_client.go:822, :1302, :1448). So
+		// nothing of the earlier attempt reached the target, and what counts is
+		// this attempt's. Other retries are off: see Connect. The call keeps
+		// waiting since its start; the wait for a stream starts again here.
 		call.times.pickedAt = v.BeginTime
 		call.times.headerAt = time.Time{}
 		call.times.sentAt = time.Time{}

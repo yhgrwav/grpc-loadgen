@@ -16,10 +16,17 @@ package grpcsender
 
 import (
 	"context"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
@@ -43,7 +50,7 @@ func newAttempts() (*attempts, *Sender) {
 		h:    handler{streams: s.streams},
 		ctx:  context.WithValue(context.Background(), callKey{}, call),
 		call: call,
-		t0:   time.Now(),
+		t0:   time.Now().Add(-time.Second),
 	}, s
 }
 
@@ -157,4 +164,77 @@ func TestRetry_TheWaitForAStreamStartsAtTheRetry(t *testing.T) {
 	if got := a.call.read().waitFrom(); !got.Equal(a.at(40)) {
 		t.Errorf("wait from %v, want the retry's 40ms", got.Sub(a.t0))
 	}
+}
+
+// Ground: concurrency — as above. Whether the connection was full is asked over the wait of the
+// attempt that sent the headers: the first attempt met a full connection, the retry did not, so
+// the call did not wait for a stream.
+func TestRetry_FullnessIsAskedOverTheRetrysOwnWait(t *testing.T) {
+	a, s := newAttempts()
+	s.tracker.announced(handshake{limit: 1, announced: true})
+
+	s.streams.opened(a.at(0)) // another call holds the only stream
+	a.begin(0, false)
+	a.header()
+	a.end(5)
+	s.streams.closed(a.at(10))
+	a.begin(20, true)
+	a.header()
+	a.end(30)
+
+	times := a.call.read()
+	if times.streamFull || times.streamWait() != 0 {
+		t.Errorf("full %v, wait %v: the retry never met a full connection", times.streamFull, times.streamWait())
+	}
+	if n := s.OpenStreams(); n != 0 {
+		t.Errorf("open streams %d, want 0", n)
+	}
+}
+
+// Ground: signal grpc-go v1.84.0 — stream.go:819 retries by a service config retryPolicy unless
+// retries are disabled; such a retry may follow an attempt the target served. The target here
+// fails the first call with UNAVAILABLE under a policy that would retry it: it must see one call.
+func TestSend_AServiceConfigRetryPolicyIsNotApplied(t *testing.T) {
+	target := &failingOnce{}
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(srv, target)
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	sender := New(Options{Target: "passthrough:///bufnet", DialOptions: []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithDefaultServiceConfig(`{"methodConfig": [{
+		"name": [{"service": "grpc.health.v1.Health"}],
+		"retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.01s", "maxBackoff": "0.01s",
+			"backoffMultiplier": 1, "retryableStatusCodes": ["UNAVAILABLE"]}}]}`),
+	}})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if n := target.calls.Load(); n != 1 {
+		t.Errorf("the target saw %d calls, want 1: the policy retried", n)
+	}
+}
+
+type failingOnce struct {
+	grpc_health_v1.UnimplementedHealthServer
+
+	calls atomic.Int32
+}
+
+func (f *failingOnce) Check(context.Context, *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	if f.calls.Add(1) == 1 {
+		return nil, status.Error(codes.Unavailable, "first call fails")
+	}
+
+	return &grpc_health_v1.HealthCheckResponse{}, nil
 }

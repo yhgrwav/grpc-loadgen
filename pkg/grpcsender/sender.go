@@ -113,6 +113,10 @@ func (s *Sender) Connect(ctx context.Context) error {
 	dialOpts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker}),
 		grpc.WithStatsHandler(handler{streams: s.streams}),
+		// A retry by a service config policy may follow an attempt the target
+		// served, and would count one call for several. Transparent retries
+		// stay: they follow only attempts the target never processed.
+		grpc.WithDisableRetry(),
 	}, s.opts.DialOptions...)
 
 	conn, err := grpc.NewClient(s.opts.Target, dialOpts...)
