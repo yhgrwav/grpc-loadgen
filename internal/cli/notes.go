@@ -132,14 +132,14 @@ func reportNotes(report engine.Report) []string {
 		add("The \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
 			"request is wrong — no such method, a bad argument, a body that does not match\n"+
 			"the schema — or a message did not fit: a reply rejected by the client's 4MB limit,\n"+
-			"or a request the target refused as larger than it accepts. Check the config for\n"+
-			"%s.", strings.Join(rejected, ", "))
+			"or a request refused as larger than accepted, by the target or a proxy in front of it.\n"+
+			"Check the config for %s.", strings.Join(rejected, ", "))
 	}
 
 	if report.RequestRejected {
-		add("invalid run: every measured call of %s came back as a request the target\n"+
-			"will not serve. Nothing about the load was tested there; fix the request and run\n"+
-			"again.", strings.Join(outright, ", "))
+		add("invalid run: every measured call of %s came back as a request that will not\n"+
+			"be served, by the target or a proxy in front of it. Nothing about the load was\n"+
+			"tested there; fix the request and run again.", strings.Join(outright, ", "))
 	}
 
 	if refused > 0 {
