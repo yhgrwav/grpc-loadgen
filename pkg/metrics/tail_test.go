@@ -47,3 +47,25 @@ func TestSnapshot_CountAtOrAboveCountsTheTailOfAPercentile(t *testing.T) {
 		}
 	}
 }
+
+// The threshold is p99 as the histogram holds it, not as printed: 3.010s
+// prints "3.01s", and calls at 3.000s — below the real p99 — stay out. Calls
+// in p99's own bucket all count: HDR gives p99 as its bucket's upper bound,
+// and a bucket counts when its upper bound reaches the threshold.
+//
+// Ground: boundary — a bucket compared by its lower bound would drop the whole
+// tail when every tail call has the same latency.
+func TestSnapshot_CountAtOrAboveTakesP99sOwnBucketAndNothingBelow(t *testing.T) {
+	l := NewLatencies()
+	for range 98 {
+		l.Record(3000 * time.Millisecond)
+	}
+	l.Record(3010 * time.Millisecond)
+	l.Record(3010 * time.Millisecond)
+	s := l.Snapshot()
+
+	p99 := s.Percentile(0.99)
+	if got := s.CountAtOrAbove(p99.Value); got != 2 {
+		t.Errorf("tail of p99 %v = %d calls, want the 2 at 3.010s", p99.Value, got)
+	}
+}
