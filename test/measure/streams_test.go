@@ -118,9 +118,9 @@ func TestReport_OneStreamIsWhereTheLatencyGoes(t *testing.T) {
 		t.Errorf("%d of %d sent calls timed out, want at least 80%%: all but the first two in steady state",
 			method.TimedOut, method.Sent)
 	}
-	if !method.P99WithoutStreamWait.Defined || method.P99WithoutStreamWait.Value >= method.P99.Value-50*time.Millisecond {
+	if !method.P99WithoutClientWaits.Defined || method.P99WithoutClientWaits.Value >= method.P99.Value-50*time.Millisecond {
 		t.Errorf("p99 %v, without the stream wait %+v: want the wait, ~130ms, out of it",
-			method.P99.Value, method.P99WithoutStreamWait)
+			method.P99.Value, method.P99WithoutClientWaits)
 	}
 }
 

@@ -118,6 +118,22 @@ func (s *Snapshot) Percentile(p float64) Quantile {
 	return percentile(s, p)
 }
 
+// CountAtOrAbove counts the observations, censored ones included, whose
+// bucket reaches d: a value within d's bucket counts. With d a Percentile of
+// the same distribution, that is the calls that make up its tail.
+func (s *Snapshot) CountAtOrAbove(d time.Duration) int64 {
+	cum := s.combinedCumBars()
+	if len(cum) == 0 {
+		return 0
+	}
+	below := sort.Search(len(cum), func(i int) bool { return cum[i].upperNanos >= int64(d) })
+	if below == 0 {
+		return cum[len(cum)-1].cumCount
+	}
+
+	return cum[len(cum)-1].cumCount - cum[below-1].cumCount
+}
+
 func (s *Snapshot) counts() (measured, censored int64) { return s.measuredN, s.censoredN }
 func (s *Snapshot) thresholds() (lo, hi int64)         { return s.censoredMin, s.censoredMax }
 func (s *Snapshot) measuredAt(rank int64) int64        { return valueAtRank(s.measuredCumBars(), rank) }

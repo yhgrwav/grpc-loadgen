@@ -162,8 +162,8 @@ func TestStats_P99WithoutStreamWaitTakesTheWaitOut(t *testing.T) {
 		t.Fatalf("p99 %+v, want ~300ms", m.P99)
 	}
 	// The top of 100ms's HDR bucket.
-	if want := 100007935 * time.Nanosecond; !m.P99WithoutStreamWait.Defined || m.P99WithoutStreamWait.Value != want {
-		t.Errorf("p99 without stream wait %+v, want %v: 100ms", m.P99WithoutStreamWait, want)
+	if want := 100007935 * time.Nanosecond; !m.P99WithoutClientWaits.Defined || m.P99WithoutClientWaits.Value != want {
+		t.Errorf("p99 without stream wait %+v, want %v: 100ms", m.P99WithoutClientWaits, want)
 	}
 }
 
@@ -193,8 +193,8 @@ func TestStats_P99WithoutStreamWaitOfTimeoutsStaysCensored(t *testing.T) {
 	if !m.P99.Defined || m.P99.Exact {
 		t.Fatalf("p99 %+v, want censored at the timeout", m.P99)
 	}
-	if !m.P99WithoutStreamWait.Defined || m.P99WithoutStreamWait.Exact {
-		t.Errorf("p99 without stream wait %+v, want censored: the target never answered", m.P99WithoutStreamWait)
+	if !m.P99WithoutClientWaits.Defined || m.P99WithoutClientWaits.Exact {
+		t.Errorf("p99 without stream wait %+v, want censored: the target never answered", m.P99WithoutClientWaits)
 	}
 }
 

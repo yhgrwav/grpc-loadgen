@@ -1,0 +1,168 @@
+// Copyright 2026 yhgrwav
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cli
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/yhgrwav/leettest/pkg/engine"
+)
+
+// waitCall is one successful call: how long it waited on each client-side
+// cause, and how long the target had it after that.
+type waitCall struct {
+	lag, conn, stream, served time.Duration
+}
+
+// reportOf runs the calls through the engine's own statistics, so the
+// verdict is tested on what the engine reports, not on a hand-made fixture.
+func reportOf(t *testing.T, calls []waitCall) engine.Report {
+	t.Helper()
+
+	stats := engine.NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	sched := start.Add(10 * time.Millisecond)
+	for _, c := range calls {
+		begun := sched.Add(c.lag)
+		sent := begun.Add(c.conn + c.stream)
+		stats.Record(engine.Result{Method: "pkg.Svc/Do", ScheduledAt: sched, BegunAt: begun, Deadline: sched.Add(time.Second),
+			Outcome: engine.Outcome{Category: engine.CategorySuccess, ConnWait: c.conn, StreamWait: c.stream,
+				SentAt: sent, DoneAt: sent.Add(c.served)}})
+	}
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	return stats.Report()
+}
+
+func times(n int, c waitCall) []waitCall {
+	out := make([]waitCall, n)
+	for i := range out {
+		out[i] = c
+	}
+
+	return out
+}
+
+const ms = time.Millisecond
+
+// The connection dropped and 200 calls waited 50ms each for it, then all went
+// out: p99 is 52ms, of which the target had 2. Nothing was unsent, and the
+// stream wait moved nothing, so before this the report said "p99 unchanged".
+func TestVerdict_SentCallsThatWaitedForTheConnectionMoveP99(t *testing.T) {
+	r := reportOf(t, times(200, waitCall{conn: 50 * ms, served: 2 * ms}))
+	notes := strings.Join(reportNotes(r), "\n\n")
+
+	v := verdictOf(t, r)
+	if !strings.HasPrefix(v, "the connection to the target was not ready for 200 calls") {
+		t.Errorf("heading:\n%s", v)
+	}
+	if strings.Contains(notes, "limited by the run") {
+		t.Errorf("a connection not ready reads as the run's limit:\n%s", notes)
+	}
+	if !strings.Contains(notes, "pkg.Svc/Do: p99 without client-side waits (generator, connection, stream) is 2.00ms.") {
+		t.Errorf("the note does not say what was taken out:\n%s", notes)
+	}
+}
+
+// The generator fell 20ms behind on every call, and all went out.
+func TestVerdict_SentCallsTheGeneratorStartedLateMoveP99(t *testing.T) {
+	r := reportOf(t, times(200, waitCall{lag: 20 * ms, served: 2 * ms}))
+
+	v := verdictOf(t, r)
+	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind for 200 calls") {
+		t.Errorf("heading:\n%s", v)
+	}
+}
+
+// Three tail calls, each held 50ms by a different cause. Taking out any one
+// cause leaves two at 52ms, and p99 of 100 calls stays 52ms; taking out all
+// three brings it to 2ms. Only the one comparison sees it.
+func TestVerdict_CausesThatMoveP99OnlyTogether(t *testing.T) {
+	calls := times(97, waitCall{served: 2 * ms})
+	calls = append(calls,
+		waitCall{lag: 50 * ms, served: 2 * ms},
+		waitCall{conn: 50 * ms, served: 2 * ms},
+		waitCall{stream: 50 * ms, served: 2 * ms})
+	r := reportOf(t, calls)
+
+	v := verdictOf(t, r)
+	if !strings.Contains(v, "causes in the p99 tail, largest first: generator late 1; waited for a stream 1; connection not ready 1.") {
+		t.Errorf("not every cause listed:\n%s", v)
+	}
+}
+
+// 10 000 calls waited 2ms for a stream and moved nothing: 3.002s prints as
+// 3.00s. 200 calls waited 500ms for the connection and moved p99 to 3.50s.
+// The heading names the cause of the tail, not the commonest wait; N stays the
+// run's count. The tail is the calls at or above the printed p99: calls above
+// p99 without waits would take in all 10 000.
+func TestVerdict_TheTailNotTheRunRanksTheCauses(t *testing.T) {
+	calls := times(10000, waitCall{stream: 2 * ms, served: 3 * time.Second})
+	calls = append(calls, times(200, waitCall{conn: 500 * ms, served: 3 * time.Second})...)
+	r := reportOf(t, calls)
+
+	v := verdictOf(t, r)
+	if !strings.HasPrefix(v, "the connection to the target was not ready for 200 calls") {
+		t.Errorf("heading:\n%s", v)
+	}
+}
+
+// p99 2.00ms, its tail waited 0.8ms for a stream each: under the 1ms floor, so
+// every count is 0. p99 without the waits is 1.20ms and the printed number
+// moved, but no cause is there to name: a note with both numbers, no verdict.
+func TestVerdict_AMoveWithNoCauseOverTheFloorIsNoVerdict(t *testing.T) {
+	calls := times(98, waitCall{served: 1200 * time.Microsecond})
+	calls = append(calls, times(2, waitCall{stream: 800 * time.Microsecond, served: 1200 * time.Microsecond})...)
+	r := reportOf(t, calls)
+
+	notes := strings.Join(reportNotes(r), "\n\n")
+	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
+		t.Errorf("a verdict with every count at 0:\n%s", notes)
+	}
+	if !strings.Contains(notes, "pkg.Svc/Do: p99 without client-side waits (generator, connection, stream) is 1.20ms.") {
+		t.Errorf("the note with the number is gone:\n%s", notes)
+	}
+	if s := shortStreamVerdict(r); s != "" {
+		t.Errorf("short verdict %q", s)
+	}
+}
+
+// The in-flight line is about the stream limit: a verdict from the connection
+// alone does not print it.
+func TestVerdict_NoInFlightLineWithoutAStreamCause(t *testing.T) {
+	r := reportOf(t, times(200, waitCall{conn: 50 * ms, served: 2 * ms}))
+	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 100, LastLimit: 100}
+
+	if v := verdictOf(t, r); strings.Contains(v, "in flight") {
+		t.Errorf("the stream limit's line under a connection verdict:\n%s", v)
+	}
+}
+
+// Waits that moved no printed p99 are a note, and it says which waits it
+// compared, not just that p99 did not change.
+func TestNotes_ClientWaitsThatMovedNothingSayWhatWasCompared(t *testing.T) {
+	// 2ms of 3s: at three significant figures p99 prints 3.00s either way.
+	r := reportOf(t, times(100, waitCall{conn: 2 * ms, served: 3 * time.Second}))
+
+	notes := strings.Join(reportNotes(r), "\n\n")
+	if !strings.Contains(notes, "client-side waits (generator, connection, stream) did not move p99.") {
+		t.Errorf("the note does not name what it compared:\n%s", notes)
+	}
+}

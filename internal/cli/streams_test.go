@@ -33,13 +33,13 @@ func oneStream() engine.Report {
 
 	return engine.Report{
 		Duration: 5 * time.Second, Planned: 5 * time.Second, Sent: 50, Failed: 48,
-		StreamWaited: 48, StreamWaitP99: exact(130), StreamCauseCalls: 48,
+		StreamWaited: 48, StreamWaitP99: exact(130), StreamCauseCalls: 48, StreamTailCalls: 48,
 		Connections: &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1},
 		Methods: []engine.MethodReport{{
 			Method: "grpc.health.v1.Health/Check", Sent: 50, Failed: 48, TimedOut: 48,
 			Latencies: 50, Censored: 48, Timeout: 230 * time.Millisecond, RPSLow: 10, RPSHigh: 10,
 			P50: censoredAt(230), P90: censoredAt(230), P95: censoredAt(230), P99: censoredAt(230),
-			P99WithoutStreamWait: censoredAt(100),
+			P99WithoutClientWaits: censoredAt(100),
 		}},
 	}
 }
@@ -81,14 +81,14 @@ func TestNotes_AWaitThatChangesNoPrintedNumberIsOnlyANote(t *testing.T) {
 		Value: 1200 * time.Microsecond, Exact: true, Defined: true,
 	}
 	m := &report.Methods[0]
-	m.Sent, m.P99, m.P99WithoutStreamWait = 10000, exact(300), exact(300)
+	m.Sent, m.P99, m.P99WithoutClientWaits = 10000, exact(300), exact(300)
 
 	notes := reportNotes(report)
 
 	if v, ok := noteStarting(notes, "limited by"); ok {
 		t.Errorf("a verdict though no printed number changes:\n%s", v)
 	}
-	const want = "500 of 10000 sent calls waited for a stream (p99 1.20ms); p99 unchanged."
+	const want = "500 of 10000 sent calls waited for a stream (p99 1.20ms); client-side waits (generator, connection, stream) did not move p99."
 	if _, ok := noteStarting(notes, want); !ok {
 		t.Errorf("no %q in:\n%s", want, strings.Join(notes, "\n\n"))
 	}
@@ -100,7 +100,8 @@ func TestNotes_UnsentForAStreamIsAVerdictEvenWithTheSameP99(t *testing.T) {
 	report := oneStream()
 	report.NotSent, report.NotSentStream = 2, 2
 	report.StreamCauseCalls += 2
-	report.Methods[0].P99WithoutStreamWait = report.Methods[0].P99
+	report.StreamTailCalls += 2
+	report.Methods[0].P99WithoutClientWaits = report.Methods[0].P99
 
 	v, ok := noteStarting(reportNotes(report), "limited by")
 	if !ok {
@@ -231,7 +232,7 @@ func TestNotes_TheVerdictCountsMethodsAndEachMovedOneGetsANote(t *testing.T) {
 	report.Methods[0].Method = "pkg.Svc/Put"
 	report.Methods = append(report.Methods, engine.MethodReport{
 		Method: "pkg.Svc/Get", Sent: 50, Latencies: 50, Timeout: time.Second,
-		P50: exact(10), P90: exact(11), P95: exact(11), P99: exact(12), P99WithoutStreamWait: exact(12),
+		P50: exact(10), P90: exact(11), P95: exact(11), P99: exact(12), P99WithoutClientWaits: exact(12),
 	})
 
 	notes := reportNotes(report)
@@ -247,7 +248,7 @@ func TestNotes_TheVerdictCountsMethodsAndEachMovedOneGetsANote(t *testing.T) {
 		t.Errorf("the verdict names one method's p99 for the whole run:\n%s", v)
 	}
 
-	const put = "pkg.Svc/Put: p99 without the stream wait is >100ms."
+	const put = "pkg.Svc/Put: p99 without client-side waits (generator, connection, stream) is >100ms."
 	if _, ok := noteStarting(notes, put); !ok {
 		t.Errorf("no %q in:\n%s", put, strings.Join(notes, "\n\n"))
 	}

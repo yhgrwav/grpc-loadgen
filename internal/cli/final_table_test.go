@@ -453,10 +453,11 @@ func verdictCases() []struct {
 		}},
 		{"stream limit", "limited by 1 connection: target allows 1 stream", "not tested above", func(m *model) {
 			for i := range m.report.Methods {
-				m.report.Methods[i].P99WithoutStreamWait = m.report.Methods[i].P99
+				m.report.Methods[i].P99WithoutClientWaits = m.report.Methods[i].P99
 			}
-			m.report.Methods[0].P99WithoutStreamWait = exact(5)
+			m.report.Methods[0].P99WithoutClientWaits = exact(5)
 			m.report.StreamWaited, m.report.StreamCauseCalls, m.report.StreamWaitP99 = 900, 900, exact(9)
+			m.report.StreamTailCalls = 900
 			m.report.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1}
 		}},
 		{"failed", "run failed: connection lost", "rpc error", func(m *model) {

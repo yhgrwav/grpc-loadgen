@@ -110,9 +110,12 @@ type MethodReport struct {
 	P95    metrics.Quantile
 	P99    metrics.Quantile
 	Max    metrics.Quantile
-	// P99WithoutStreamWait is P99 of the same calls with each one's stream
-	// wait taken out: the time the target had them.
-	P99WithoutStreamWait metrics.Quantile
+	// P99WithoutClientWaits is P99 of the same calls with each one's
+	// client-side waits taken out — start lag, the wait for a connection and
+	// for a stream: the time the target had them. After a resolver wait
+	// ConnWait also holds the caller's interceptors, so this can read a little
+	// low.
+	P99WithoutClientWaits metrics.Quantile
 	// FailureCodes counts the failed calls by the transport's own code, such
 	// as Unavailable, and by whether it came back over the wire or the client
 	// set it: the category says whose fault a failure is, the code is what the
@@ -252,6 +255,13 @@ type Report struct {
 	GeneratorCauseCalls  int
 	ConnectionCauseCalls int
 	StreamCauseCalls     int
+	// GeneratorTailCalls, ConnectionTailCalls and StreamTailCalls count the
+	// same, but only among the calls that set each method's printed p99 — at
+	// or above it — plus the unsent calls kept back by the cause. They say
+	// which cause made the tail, and name the verdict.
+	GeneratorTailCalls  int
+	ConnectionTailCalls int
+	StreamTailCalls     int
 	// Connections is what the sender said about its connections; nil when it
 	// does not tell.
 	Connections *Connections
@@ -309,8 +319,13 @@ type methodStats struct {
 	timedOutLate int
 	unsentOut    int
 	latency      *metrics.Latencies
-	// served is latency with each call's stream wait taken out.
-	served   *metrics.Latencies
+	// served is latency with each call's client-side waits taken out: start
+	// lag, the wait for a connection and for a stream.
+	served *metrics.Latencies
+	// waited is the latency of the calls that waited over StreamWaitFloor for
+	// each cause — generator, connection, stream — to count them in the tail;
+	// nil until one does.
+	waited   [3]*metrics.Latencies
 	refusal  *metrics.Latencies
 	rejected *metrics.Latencies
 	timeline timeline
@@ -499,26 +514,57 @@ func (s *Stats) Record(r Result) {
 		method.unknown++
 	}
 
+	var waited [3]*metrics.Latencies
+	if !unanswered {
+		for i, w := range [3]bool{gen, conn, stream} {
+			if !w {
+				continue
+			}
+			if method.waited[i] == nil {
+				method.waited[i] = metrics.NewLatencies()
+			}
+			waited[i] = method.waited[i]
+		}
+	}
+
 	s.mu.Unlock()
 
 	if unanswered {
 		return
 	}
 
+	// The three waits follow one another before the request goes out, so they
+	// never add up past the latency; if they do, the arithmetic is wrong and
+	// the difference is held at zero rather than recorded as negative.
+	clientWait := max(0, r.QueueTime()) + r.ConnWait + r.StreamWait
+
 	// An abandoned call is known only to have lasted at least as long as its
 	// deadline, so it is recorded as a bound rather than as a measurement.
 	if r.Category == CategoryTimeout || r.Category == CategoryAborted {
 		threshold := r.CensorThreshold()
 		method.latency.RecordCensored(threshold)
-		method.served.RecordCensored(max(0, threshold-r.StreamWait))
+		method.served.RecordCensored(max(0, threshold-clientWait))
+		for _, w := range waited {
+			if w != nil {
+				w.RecordCensored(threshold)
+			}
+		}
 
 		return
+	}
+
+	if r.Category == CategorySuccess {
+		for _, w := range waited {
+			if w != nil {
+				w.Record(r.Latency())
+			}
+		}
 	}
 
 	switch r.Category {
 	case CategorySuccess:
 		method.latency.Record(r.Latency())
-		method.served.Record(r.Latency() - r.StreamWait)
+		method.served.Record(max(0, r.Latency()-clientWait))
 	case CategoryServerFault, CategoryOverload:
 		method.refusal.Record(r.Latency())
 	case CategoryClientFault:
@@ -541,6 +587,7 @@ type methodView struct {
 	served     *metrics.Snapshot
 	refusal    *metrics.Snapshot
 	rejected   *metrics.Snapshot
+	waited     [3]*metrics.Snapshot
 	codes      []CodeCount
 }
 
@@ -572,6 +619,11 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 		out[i].served = src.served.Snapshot()
 		out[i].refusal = src.refusal.Snapshot()
 		out[i].rejected = src.rejected.Snapshot()
+		for c, w := range src.waited {
+			if w != nil {
+				out[i].waited[c] = w.Snapshot()
+			}
+		}
 	}
 
 	slices.SortFunc(out, func(a, b methodView) int { return strings.Compare(a.name, b.name) })
@@ -743,7 +795,9 @@ func (s *Stats) Report() Report {
 		StreamCauseCalls:     waited[2],
 	}
 
-	for _, v := range views {
+	var tail [3]int
+	for i := range views {
+		v := &views[i]
 		if v.sent > 0 && int(v.rejected.Count()) == v.sent {
 			report.RequestRejected = true
 		}
@@ -764,10 +818,10 @@ func (s *Stats) Report() Report {
 			P99:          v.dist.Percentile(0.99),
 			Max:          v.dist.Percentile(1),
 
-			P99WithoutStreamWait: v.served.Percentile(0.99),
-			FailureCodes:         v.codes,
-			Refusal:              refusalOf(v.refusal),
-			Rejected:             refusalOf(v.rejected),
+			P99WithoutClientWaits: v.served.Percentile(0.99),
+			FailureCodes:          v.codes,
+			Refusal:               refusalOf(v.refusal),
+			Rejected:              refusalOf(v.rejected),
 
 			Seconds:           timelines[v.name].Seconds,
 			OutsideTimeline:   timelines[v.name].OutsideTimeline,
@@ -782,8 +836,22 @@ func (s *Stats) Report() Report {
 			entry.RPS = float64(v.sent) / measured.Seconds()
 		}
 
+		// The tail is the calls at or above the printed p99: the ones that set
+		// it. Calls just above p99 without the waits are not all among them.
+		if entry.P99.Defined {
+			for c, w := range v.waited {
+				if w != nil {
+					tail[c] += int(w.CountAtOrAbove(entry.P99.Value))
+				}
+			}
+		}
+
 		report.Methods = append(report.Methods, entry)
 	}
+
+	report.GeneratorTailCalls = tail[0] + late
+	report.ConnectionTailCalls = tail[1] + connection
+	report.StreamTailCalls = tail[2] + stream
 
 	return report
 }
