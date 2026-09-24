@@ -97,6 +97,13 @@ type Outcome struct {
 	// for one that did not it is a lower bound — the attempt the deadline cut
 	// short never reported its wait. The gap between one attempt failing and
 	// the next beginning is in neither.
+	//
+	// Each attempt counts from its own start, except the first after a wait
+	// for the resolver, which counts from the moment the call was handed to
+	// the transport. That first stretch then also holds whatever the caller's
+	// own interceptors spent: an overstatement. Without a resolver wait the
+	// stretch before the attempt starts is the transport's own work — 0.5 to
+	// 2.2 ms measured under -race on two CPUs — and is not counted.
 	ConnWait time.Duration
 	DoneAt   time.Time
 	Category Category
