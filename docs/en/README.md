@@ -121,7 +121,8 @@ app:
 `Bearer ${TOKEN}`. A variable that is not set or set empty is an error before the start, naming
 it. Otherwise `Bearer ` would go out without a token, and the run would show 100% failures as the
 target's fault. To write `${` literally, double the dollar: `$${`. A single `$` stays as written.
-There is no flag for headers, so the token never lands in `ps` or in the shell history. The tool
+Substitution works only in `app.metadata`: in `data`, `target` and every other field `${NAME}`
+goes out as written. There is no flag for headers, so the token never lands in `ps` or in the shell history. The tool
 prints header values nowhere: not in the report, not during the run, not in errors.
 
 **Headers.** Names are lowercased, as HTTP/2 carries them anyway. A config error before the
@@ -173,6 +174,11 @@ in it — an unknown field, a wrong type, a method that does not exist — shows
 method and field names, before the first request. No `data` — an empty message goes out, and such
 a method needs no reflection.
 
+**One body per method.** Every call of a method goes out with the same `data`. For a write with an
+idempotency key this means the first call creates the record and every later one takes the repeat
+path: the target returns the answer it already stored. That path is what gets measured, not
+creating the record. Different data for each call is planned.
+
 Value rules are the standard JSON rules for protobuf (`protojson`):
 
 - a field name as in the `.proto` (`wallet_id`) or in its JSON form (`walletId`);
@@ -203,6 +209,12 @@ $ leettest -c leettest.yaml
 
 Before the start the tool connects to the service. An unreachable address is an error at once,
 with the address and the reason, without a run and without a report.
+
+**Where to run.** Put the generator next to the target: in the same network, on the same machine
+or in the same cluster. Everything between them goes into the latency and looks like the target's
+time. On our stand at 1000 RPS, the generator on the host through Docker Desktop port forwarding
+showed p99 38 ms, and inside the Docker network 2 ms: the same target, and the first time we
+measured Docker's network, not it.
 
 | Flag | What it does |
 |---|---|
@@ -304,8 +316,8 @@ that did print a report is always `3`.
 
 ## Not yet
 
-Ramp-up from zero to the target RPS, pass/fail thresholds and a JSON report for CI, a breakdown of
-failures by code in the report, export to Prometheus.
+Ramp-up from zero to the target RPS, pass/fail thresholds and a JSON report for CI, export to
+Prometheus.
 
 ## Going deeper
 
