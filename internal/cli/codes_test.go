@@ -48,3 +48,32 @@ func TestPrintReport_NoFailuresNoCodesLine(t *testing.T) {
 		t.Errorf("a codes line with nothing failed:\n%s", text)
 	}
 }
+
+// Codes the client made are never printed as the target's answer.
+func TestPrintReport_SeparatesTheTargetsCodesFromTheClients(t *testing.T) {
+	text := printCodes([]engine.CodeCount{
+		{Code: "Unavailable", Count: 12, FromTarget: true},
+		{Code: "DeadlineExceeded", Count: 3, FromTarget: false},
+	}, 15)
+
+	for _, want := range []string{
+		"a.B/One codes sent by the target: Unavailable 12",
+		"a.B/One codes made by the client, no answer came: DeadlineExceeded 3",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// Only client-made codes: no line claims the target sent anything.
+func TestPrintReport_OnlyClientCodesClaimNothingOfTheTarget(t *testing.T) {
+	text := printCodes([]engine.CodeCount{{Code: "DeadlineExceeded", Count: 3}}, 3)
+
+	if strings.Contains(text, "sent by the target") {
+		t.Errorf("a target line for codes the client made:\n%s", text)
+	}
+	if !strings.Contains(text, "made by the client, no answer came: DeadlineExceeded 3") {
+		t.Errorf("no client line:\n%s", text)
+	}
+}

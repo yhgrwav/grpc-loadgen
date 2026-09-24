@@ -106,3 +106,38 @@ func TestReport_FailureCodesIncludeTimeoutsAndUnreachable(t *testing.T) {
 		t.Errorf("failure codes %v, want %v", got, want)
 	}
 }
+
+// The same code from two sources is two entries: one the target sent, one the
+// client made. Summed together they would put the client's timeouts on the target.
+//
+// Ground: contract — engine.CodeCount.FromTarget is public.
+func TestReport_FailureCodesKeepWhoMadeTheCode(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	at := start
+	rec := func(code string, fromTarget bool, n int) {
+		for range n {
+			stats.Record(Result{Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+				Outcome: Outcome{Category: CategoryTimeout, Code: code, CodeFromTarget: fromTarget,
+					SentAt: at, DoneAt: at.Add(time.Second)}})
+			at = at.Add(time.Millisecond)
+		}
+	}
+	rec("DeadlineExceeded", false, 5)
+	rec("DeadlineExceeded", true, 2)
+	rec("Unavailable", true, 3)
+
+	stats.EndSending(at)
+	stats.Finish(at.Add(time.Second))
+
+	want := []CodeCount{
+		{Code: "Unavailable", Count: 3, FromTarget: true},
+		{Code: "DeadlineExceeded", Count: 2, FromTarget: true},
+		{Code: "DeadlineExceeded", Count: 5, FromTarget: false},
+	}
+	if got := stats.Report().Methods[0].FailureCodes; !slices.Equal(got, want) {
+		t.Errorf("FailureCodes = %+v\nwant %+v: the target's codes first, then the client's, each by count", got, want)
+	}
+}
