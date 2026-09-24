@@ -18,6 +18,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -224,7 +227,11 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		target = cli.FakeTarget
 		sender = engine.FakeSender{Delay: *fakeDelay, Jitter: *fakeJitter, FailRatio: *fakeFail}
 	} else {
-		grpcSender = grpcsender.New(grpcsender.Options{Target: target, TLS: cfg.App.UseTLS})
+		var senderOpts grpcsender.Options
+		if senderOpts, err = senderOptions(&cfg.App); err != nil {
+			return err
+		}
+		grpcSender = grpcsender.New(senderOpts)
 		sender = grpcSender
 	}
 
@@ -393,6 +400,58 @@ func withBudgetAdvice(err error) error {
 		"to %s past their deadline)", err, fits, budget.Need, engine.ReleaseMargin)
 }
 
+// senderOptions reads the certificate files the config names, before any
+// connection: a wrong path is a config error, not a failed handshake.
+func senderOptions(app *config.App) (grpcsender.Options, error) {
+	opts := grpcsender.Options{
+		Target:     string(app.Address),
+		TLS:        app.UseTLS,
+		Metadata:   app.Metadata,
+		ServerName: app.ServerName,
+	}
+
+	if app.CA != "" {
+		raw, err := os.ReadFile(app.CA)
+		if err != nil {
+			return opts, fmt.Errorf("app.ca: %w", err)
+		}
+
+		opts.RootCAs = x509.NewCertPool()
+		if !opts.RootCAs.AppendCertsFromPEM(raw) {
+			return opts, fmt.Errorf("app.ca: %s holds no PEM certificate", app.CA)
+		}
+	}
+
+	if app.Cert != "" {
+		if err := refuseEncryptedKey(app.Key); err != nil {
+			return opts, err
+		}
+
+		cert, err := tls.LoadX509KeyPair(app.Cert, app.Key)
+		if err != nil {
+			return opts, fmt.Errorf("app.cert %s, app.key %s: %w", app.Cert, app.Key, err)
+		}
+		opts.Certificates = []tls.Certificate{cert}
+	}
+
+	return opts, nil
+}
+
+// refuseEncryptedKey names a password-protected key for what it is; the
+// parser would only say it cannot parse it. A file it cannot read is left to
+// the loader, which names it.
+func refuseEncryptedKey(path string) error {
+	raw, _ := os.ReadFile(path)
+
+	for block, rest := pem.Decode(raw); block != nil; block, rest = pem.Decode(rest) {
+		if strings.Contains(block.Type, "ENCRYPTED") || strings.Contains(block.Headers["Proc-Type"], "ENCRYPTED") {
+			return fmt.Errorf("app.key %s: encrypted keys are not supported; decrypt it first", path)
+		}
+	}
+
+	return nil
+}
+
 // connect reaches the target before the run, so an unreachable one is an error
 // with its address rather than a report full of failures.
 func connect(ctx context.Context, stderr io.Writer, sender *grpcsender.Sender, app *config.App,
@@ -410,9 +469,25 @@ func connect(ctx context.Context, stderr io.Writer, sender *grpcsender.Sender, a
 
 	err := sender.Connect(ctx)
 
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+
+	// The hints read the errors' text: crypto/tls and grpc-go give these
+	// cases no type of their own that survives the connection error.
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, grpcsender.ErrClosedAfterHandshake):
+		return fmt.Errorf("%w (%s)", err, mode)
+	case app.UseTLS && (strings.Contains(text, "certificate is valid for") || strings.Contains(text, "doesn't contain any IP SANs")):
+		return fmt.Errorf("%w\nThe target's certificate does not name %s; if it names another host, set app.server_name to it",
+			err, app.Address)
+	case app.UseTLS && strings.Contains(text, "does not look like a TLS handshake"):
+		return fmt.Errorf("%w\nThe target does not speak TLS; set app.tls: false", err)
+	case !app.UseTLS && strings.Contains(text, "server preface"):
+		return fmt.Errorf("%w\nTLS is off (app.tls: false), and the target closed the connection; if it uses TLS, set app.tls: true", err)
 	case app.UseTLS && app.TLS == nil:
 		// The commonest first-run failure: a plaintext local service and TLS on
 		// by default, which the handshake error alone does not explain.

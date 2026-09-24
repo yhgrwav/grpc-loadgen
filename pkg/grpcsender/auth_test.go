@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -210,8 +211,12 @@ func TestTLS_TargetRefusingTheClientFailsConnect(t *testing.T) {
 	s := New(opts)
 	t.Cleanup(func() { _ = s.Close() })
 
-	if err := s.Connect(bounded(t)); err == nil {
+	err := s.Connect(bounded(t))
+	if err == nil {
 		t.Fatal("connect succeeded without the certificate the target requires")
+	}
+	if !errors.Is(err, ErrClosedAfterHandshake) {
+		t.Errorf("err = %v, want ErrClosedAfterHandshake", err)
 	}
 }
 
@@ -319,7 +324,7 @@ func TestTLS_ServerNameLeavesTheAuthorityAlone(t *testing.T) {
 	}
 
 	if got := target.seen.Load(); got == nil || *got != "127.0.0.1:443" {
-		t.Errorf(":authority = %v, want the target's address 127.0.0.1:443", got)
+		t.Errorf(":authority = %q, want the target's address 127.0.0.1:443", deref(got))
 	}
 }
 
@@ -338,4 +343,12 @@ func (a *authorityTarget) Check(ctx context.Context, _ *grpc_health_v1.HealthChe
 	}
 
 	return &grpc_health_v1.HealthCheckResponse{}, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<none>"
+	}
+
+	return *s
 }

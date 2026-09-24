@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -75,6 +77,16 @@ type Unchecked struct {
 // it needs no schema to run.
 //
 // calls are the engine calls built from cfg, in the same order.
+// ErrCredentialsRejected is a method check the target refused as
+// Unauthenticated or PermissionDenied.
+var ErrCredentialsRejected = errors.New("target rejected credentials")
+
+func credentialsRejected(err error) bool {
+	code := status.Code(err)
+
+	return err != nil && (code == codes.Unauthenticated || code == codes.PermissionDenied)
+}
+
 func AttachData(
 	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
 	calls []engine.Call,
@@ -88,6 +100,14 @@ func AttachData(
 
 		switch {
 
+		// Credentials of the config's own, refused, refuse the run too: every
+		// call carries the same metadata. Without metadata a refused check only
+		// leaves the method unchecked, below. Only the code is named; the
+		// target's message may echo what was sent.
+		case len(cfg.App.Metadata) > 0 && credentialsRejected(resolveErr):
+			errs = append(errs, fmt.Errorf("%s: %w (%s)", call.Method, ErrCredentialsRejected, status.Code(resolveErr)))
+
+			continue
 		case resolveErr == nil:
 		// A method with no data needs no schema, so a resolver that could not
 		// answer only costs the check, not the run. Which it was matters: a
