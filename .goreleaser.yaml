@@ -1,6 +1,10 @@
 # Release build: binaries for the tag, pushed by .github/workflows/release.yml.
 version: 2
 
+# Otherwise taken from the git remote: a clone under another name ships
+# grpc-loadgen_*.tar.gz.
+project_name: leettest
+
 builds:
   - id: leettest
     main: ./cmd/leettest
