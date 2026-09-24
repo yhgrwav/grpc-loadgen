@@ -110,9 +110,9 @@ type MethodReport struct {
 	P95    metrics.Quantile
 	P99    metrics.Quantile
 	Max    metrics.Quantile
-	// P99WithoutStreamWait is P99 of the same calls with each one's stream
+	// P99WithoutClientWaits is P99 of the same calls with each one's stream
 	// wait taken out: the time the target had them.
-	P99WithoutStreamWait metrics.Quantile
+	P99WithoutClientWaits metrics.Quantile
 	// FailureCodes counts the failed calls by the transport's own code, such
 	// as Unavailable, and by whether it came back over the wire or the client
 	// set it: the category says whose fault a failure is, the code is what the
@@ -764,10 +764,10 @@ func (s *Stats) Report() Report {
 			P99:          v.dist.Percentile(0.99),
 			Max:          v.dist.Percentile(1),
 
-			P99WithoutStreamWait: v.served.Percentile(0.99),
-			FailureCodes:         v.codes,
-			Refusal:              refusalOf(v.refusal),
-			Rejected:             refusalOf(v.rejected),
+			P99WithoutClientWaits: v.served.Percentile(0.99),
+			FailureCodes:          v.codes,
+			Refusal:               refusalOf(v.refusal),
+			Rejected:              refusalOf(v.rejected),
 
 			Seconds:           timelines[v.name].Seconds,
 			OutsideTimeline:   timelines[v.name].OutsideTimeline,

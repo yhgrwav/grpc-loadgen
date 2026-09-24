@@ -28,7 +28,7 @@ import (
 func streamLimited(report engine.Report) (moved []*engine.MethodReport, limited bool) {
 	for i := range report.Methods {
 		m := &report.Methods[i]
-		if m.P99WithoutStreamWait.Defined && formatQuantile(m.P99) != formatQuantile(m.P99WithoutStreamWait) {
+		if m.P99WithoutClientWaits.Defined && formatQuantile(m.P99) != formatQuantile(m.P99WithoutClientWaits) {
 			moved = append(moved, m)
 		}
 	}
@@ -236,7 +236,7 @@ func streamNotes(report engine.Report) []string {
 	moved, limited := streamLimited(report)
 	for _, m := range moved {
 		notes = append(notes, fmt.Sprintf("%s: p99 without the stream wait is %s.",
-			displayMethod(m.Method), formatQuantile(m.P99WithoutStreamWait)))
+			displayMethod(m.Method), formatQuantile(m.P99WithoutClientWaits)))
 	}
 
 	if !limited && report.StreamWaited > 0 {

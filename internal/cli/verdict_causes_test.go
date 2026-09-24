@@ -70,7 +70,7 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 10, 500, 0
 	r.NotSent = 510
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 10, 500, 0
-	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
+	r.Methods[0].P99WithoutClientWaits = r.Methods[0].P99
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "the connection to the target was not ready for 500 calls") {
@@ -129,7 +129,7 @@ func TestVerdict_AGeneratorBehindOnSentCallsOutranksStreams(t *testing.T) {
 func TestVerdict_StreamWaitThatMovedNothingMakesNoVerdict(t *testing.T) {
 	r := oneStream()
 	r.StreamWaited, r.StreamCauseCalls, r.StreamWaitP99 = 5, 5, exact(2)
-	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
+	r.Methods[0].P99WithoutClientWaits = r.Methods[0].P99
 
 	notes := strings.Join(reportNotes(r), "\n\n")
 	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
