@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -281,7 +282,7 @@ func TestSend_ACallWithAFreeStreamDidNotWait(t *testing.T) {
 func TestSend_UnsentWhileReconnectingIsBlockedOnTheConnection(t *testing.T) {
 	target := dropping(t)
 
-	target.drop()
+	target.drop(t)
 
 	req := request(time.Now())
 	req.Deadline = req.ScheduledAt.Add(100 * time.Millisecond)
@@ -470,13 +471,23 @@ func dropping(t *testing.T) *droppingTarget {
 	return d
 }
 
-// drop cuts the connection and holds the next dial until open.
-func (d *droppingTarget) drop() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+// drop cuts the connection, holds the next dial until open, and returns once
+// the client has seen the connection go: sent earlier, a call could still pick
+// the dying transport and fail at once.
+func (d *droppingTarget) drop(t *testing.T) {
+	t.Helper()
 
+	d.mu.Lock()
 	d.gate = make(chan struct{})
 	_ = d.conn.Close()
+	d.mu.Unlock()
+
+	conn := d.sender.conn
+	for conn.GetState() == connectivity.Ready {
+		if !conn.WaitForStateChange(bounded(t), connectivity.Ready) {
+			t.Fatal("the client never saw the connection drop")
+		}
+	}
 }
 
 func (d *droppingTarget) open() {
