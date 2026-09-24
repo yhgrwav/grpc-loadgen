@@ -110,8 +110,11 @@ type MethodReport struct {
 	P95    metrics.Quantile
 	P99    metrics.Quantile
 	Max    metrics.Quantile
-	// P99WithoutClientWaits is P99 of the same calls with each one's stream
-	// wait taken out: the time the target had them.
+	// P99WithoutClientWaits is P99 of the same calls with each one's
+	// client-side waits taken out — start lag, the wait for a connection and
+	// for a stream: the time the target had them. After a resolver wait
+	// ConnWait also holds the caller's interceptors, so this can read a little
+	// low.
 	P99WithoutClientWaits metrics.Quantile
 	// FailureCodes counts the failed calls by the transport's own code, such
 	// as Unavailable, and by whether it came back over the wire or the client
