@@ -32,7 +32,7 @@ func reportNotes(report engine.Report) []string {
 	}
 
 	// Sent leaves the warmup out; this line holds it, so the two add up to
-	// what the target saw.
+	// every call that went out.
 	if report.Warmup > 0 {
 		failed := ""
 		if report.WarmupFailed > 0 {
