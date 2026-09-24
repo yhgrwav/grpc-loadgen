@@ -29,6 +29,7 @@ func ledgerShaped() engine.Report {
 	r.Sent, r.StreamWaited = 196788, 213
 	r.NotSentLate, r.NotSentConnection, r.NotSentStream = 28839, 24372, 0
 	r.NotSent = r.NotSentLate + r.NotSentConnection
+	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 28839, 24372, 213
 	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 128, LastLimit: 128}
 
 	return r
@@ -38,7 +39,7 @@ func verdictOf(t *testing.T, r engine.Report) string {
 	t.Helper()
 
 	for _, n := range reportNotes(r) {
-		if strings.HasPrefix(n, "limited by") || strings.HasPrefix(n, "the connection was not ready") {
+		if strings.HasPrefix(n, "limited by") || strings.HasPrefix(n, "the connection to the target was not ready") {
 			return n
 		}
 	}
@@ -68,10 +69,11 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	r := ledgerShaped()
 	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 10, 500, 0
 	r.NotSent = 510
+	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 10, 500, 0
 	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
 
 	v := verdictOf(t, r)
-	if !strings.HasPrefix(v, "the connection was not ready for 500 calls") {
+	if !strings.HasPrefix(v, "the connection to the target was not ready for 500 calls") {
 		t.Errorf("heading:\n%s", v)
 	}
 	if strings.Contains(strings.Join(reportNotes(r), "\n"), "limited by the run") {
@@ -85,8 +87,9 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 // Equal causes: a fixed order decides — generator, stream, connection.
 func TestVerdict_ATieIsBrokenByAFixedOrder(t *testing.T) {
 	r := ledgerShaped()
-	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 100, 100, 100
+	r.NotSentLate, r.NotSentConnection = 100, 100
 	r.NotSent = 200
+	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 100, 100, 100
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind") {
@@ -105,5 +108,37 @@ func TestNotes_NoAnswerLineSaysHowManyWentOutLate(t *testing.T) {
 
 	if text := strings.Join(reportNotes(r), "\n"); !strings.Contains(text, "30 of them went out with less than half the timeout left") {
 		t.Errorf("no count of late-sent timeouts:\n%s", text)
+	}
+}
+
+// A generator 200ms behind on every call, all of which went out, while 48
+// waited for a stream and moved p99: counted over the same set, the generator
+// is the larger cause and names the heading.
+func TestVerdict_AGeneratorBehindOnSentCallsOutranksStreams(t *testing.T) {
+	r := oneStream()
+	r.WaitedGenerator, r.WaitedStream = 50, 48
+
+	v := verdictOf(t, r)
+	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind for 50 calls") {
+		t.Errorf("heading:\n%s", v)
+	}
+}
+
+// Five calls waited 2ms for a stream and no printed p99 moved: the streams
+// only rank causes, they do not make a verdict. The accepted note stays.
+func TestVerdict_StreamWaitThatMovedNothingMakesNoVerdict(t *testing.T) {
+	r := oneStream()
+	r.StreamWaited, r.WaitedStream, r.StreamWaitP99 = 5, 5, exact(2)
+	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
+
+	notes := strings.Join(reportNotes(r), "\n\n")
+	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
+		t.Errorf("a verdict without a moved p99 or unsent calls:\n%s", notes)
+	}
+	if !strings.Contains(notes, "5 of 50 sent calls waited for a stream (p99 2.00ms); p99 unchanged.") {
+		t.Errorf("the p99-unchanged note is gone:\n%s", notes)
+	}
+	if s := shortStreamVerdict(r); s != "" {
+		t.Errorf("short verdict %q", s)
 	}
 }

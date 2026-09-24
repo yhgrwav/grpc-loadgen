@@ -239,6 +239,15 @@ type Report struct {
 	// longer than StreamWaitFloor; StreamWaitP99 is over those calls.
 	StreamWaited  int
 	StreamWaitP99 metrics.Quantile
+	// WaitedGenerator, WaitedConnection and WaitedStream count the measured
+	// calls, sent or not, that waited over StreamWaitFloor for each cause:
+	// start lag behind the schedule, a connection that was not ready, a free
+	// stream. An unsent call counts for the cause that kept it back. A call
+	// can count for several causes. They rank the causes; they do not decide
+	// whether there is a verdict.
+	WaitedGenerator  int
+	WaitedConnection int
+	WaitedStream     int
 	// Connections is what the sender said about its connections; nil when it
 	// does not tell.
 	Connections *Connections
