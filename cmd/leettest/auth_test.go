@@ -494,3 +494,19 @@ func TestRun_EncryptedKeyIsRefusedByName(t *testing.T) {
 		})
 	}
 }
+
+// app.ca replaces the system roots: the pool holds the file's certificates
+// and nothing else.
+func TestSenderOptions_OwnCAReplacesTheSystemRoots(t *testing.T) {
+	dir := t.TempDir()
+	server := writePair(t, dir, "server", localCert())
+
+	opts, err := senderOptions(&config.App{UseTLS: true, CA: filepath.Join(dir, "server.pem")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if opts.RootCAs == nil || !opts.RootCAs.Equal(server.pool) {
+		t.Error("the root pool is not exactly the certificates of app.ca")
+	}
+}

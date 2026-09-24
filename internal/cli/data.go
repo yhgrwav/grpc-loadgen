@@ -78,14 +78,8 @@ type Unchecked struct {
 //
 // calls are the engine calls built from cfg, in the same order.
 // ErrCredentialsRejected is a method check the target refused as
-// Unauthenticated or PermissionDenied.
+// Unauthenticated while the config sent metadata.
 var ErrCredentialsRejected = errors.New("target rejected credentials")
-
-func credentialsRejected(err error) bool {
-	code := status.Code(err)
-
-	return err != nil && (code == codes.Unauthenticated || code == codes.PermissionDenied)
-}
 
 func AttachData(
 	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
@@ -100,12 +94,13 @@ func AttachData(
 
 		switch {
 
-		// Credentials of the config's own, refused, refuse the run too: every
-		// call carries the same metadata. Without metadata a refused check only
-		// leaves the method unchecked, below. Only the code is named; the
-		// target's message may echo what was sent.
-		case len(cfg.App.Metadata) > 0 && credentialsRejected(resolveErr):
-			errs = append(errs, fmt.Errorf("%s: %w (%s)", call.Method, ErrCredentialsRejected, status.Code(resolveErr)))
+		// The metadata sent was refused: every call carries it, so the run
+		// would only show a config mistake as the target's result. Only the
+		// code is named; the target's message may echo what was sent.
+		// PermissionDenied is not this: the credentials were accepted and may
+		// serve the calls while not reaching reflection.
+		case len(cfg.App.Metadata) > 0 && status.Code(resolveErr) == codes.Unauthenticated:
+			errs = append(errs, fmt.Errorf("%s: %w (%s)", call.Method, ErrCredentialsRejected, codes.Unauthenticated))
 
 			continue
 		case resolveErr == nil:
@@ -114,6 +109,9 @@ func AttachData(
 		// target that never enabled reflection is not the same as one that
 		// asked for credentials or did not answer in time.
 		case call.Data == nil && !errors.Is(resolveErr, descriptor.ErrMethodNotFound):
+			if status.Code(resolveErr) == codes.Unauthenticated {
+				resolveErr = fmt.Errorf("target requires credentials; app.metadata is not set: %w", resolveErr)
+			}
 			unchecked = append(unchecked, Unchecked{Method: call.Method, Err: resolveErr})
 
 			continue
