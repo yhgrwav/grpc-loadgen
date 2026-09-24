@@ -102,6 +102,15 @@ func (c *connTracker) connected() {
 	c.handshakes++
 }
 
+// handshookSilently reports a handshake that passed with no SETTINGS read
+// after it.
+func (c *connTracker) handshookSilently() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.handshakes > 0 && c.heard == 0
+}
+
 func (c *connTracker) announced(h handshake) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -161,11 +170,20 @@ type trackingCreds struct {
 	credentials.TransportCredentials
 
 	tracker *connTracker
+	// serverName replaces the authority the handshake checks the certificate
+	// against and sends as SNI. grpc-go derives both from the authority alone
+	// (v1.84.0 credentials/tls.go:121), while :authority is set apart from
+	// the handshake, so it stays the target's address.
+	serverName string
 }
 
 func (c trackingCreds) ClientHandshake(ctx context.Context, authority string, raw net.Conn) (
 	net.Conn, credentials.AuthInfo, error,
 ) {
+	if c.serverName != "" {
+		authority = c.serverName
+	}
+
 	conn, info, err := c.TransportCredentials.ClientHandshake(ctx, authority, raw)
 	if err != nil {
 		return conn, info, err
@@ -177,7 +195,7 @@ func (c trackingCreds) ClientHandshake(ctx context.Context, authority string, ra
 }
 
 func (c trackingCreds) Clone() credentials.TransportCredentials {
-	return trackingCreds{TransportCredentials: c.TransportCredentials.Clone(), tracker: c.tracker}
+	return trackingCreds{TransportCredentials: c.TransportCredentials.Clone(), tracker: c.tracker, serverName: c.serverName}
 }
 
 // readyWindow remembers when the connection last became ready and last

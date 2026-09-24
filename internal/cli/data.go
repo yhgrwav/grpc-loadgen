@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -75,6 +77,10 @@ type Unchecked struct {
 // it needs no schema to run.
 //
 // calls are the engine calls built from cfg, in the same order.
+// ErrCredentialsRejected is a method check the target refused as
+// Unauthenticated while the config sent metadata.
+var ErrCredentialsRejected = errors.New("target rejected credentials")
+
 func AttachData(
 	ctx context.Context, resolver descriptor.Resolver, cfg *config.MasterConfig,
 	calls []engine.Call,
@@ -88,12 +94,24 @@ func AttachData(
 
 		switch {
 
+		// The metadata sent was refused: every call carries it, so the run
+		// would only show a config mistake as the target's result. Only the
+		// code is named; the target's message may echo what was sent.
+		// PermissionDenied is not this: the credentials were accepted and may
+		// serve the calls while not reaching reflection.
+		case len(cfg.App.Metadata) > 0 && status.Code(resolveErr) == codes.Unauthenticated:
+			errs = append(errs, fmt.Errorf("%s: %w (%s)", call.Method, ErrCredentialsRejected, codes.Unauthenticated))
+
+			continue
 		case resolveErr == nil:
 		// A method with no data needs no schema, so a resolver that could not
 		// answer only costs the check, not the run. Which it was matters: a
 		// target that never enabled reflection is not the same as one that
 		// asked for credentials or did not answer in time.
 		case call.Data == nil && !errors.Is(resolveErr, descriptor.ErrMethodNotFound):
+			if status.Code(resolveErr) == codes.Unauthenticated {
+				resolveErr = fmt.Errorf("target requires credentials; app.metadata is not set: %w", resolveErr)
+			}
 			unchecked = append(unchecked, Unchecked{Method: call.Method, Err: resolveErr})
 
 			continue

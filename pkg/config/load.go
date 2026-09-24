@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -32,7 +33,13 @@ func LoadFile(path string) (*MasterConfig, error) {
 		return nil, fmt.Errorf("%w %s: %w", ErrReadConfig, path, err)
 	}
 
-	return Parse(raw)
+	cfg, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	cfg.App.relativeTo(filepath.Dir(path))
+
+	return cfg, nil
 }
 
 // Parse reads the config from raw YAML, applies defaults and validates the result.
@@ -58,6 +65,9 @@ func Parse(raw []byte) (*MasterConfig, error) {
 
 func (m *MasterConfig) resolve() error {
 	m.App.ResolveTLS()
+	if err := m.App.resolveMetadata(); err != nil {
+		return err
+	}
 	for i := range m.Load.Calls {
 		m.Load.Calls[i].ResolveTimeout()
 	}
@@ -76,6 +86,9 @@ func (m *MasterConfig) Validate() error {
 
 	if m.Name != nil && strings.TrimSpace(*m.Name) == "" {
 		errs = append(errs, ErrEmptyName)
+	}
+	if err := m.App.validateTLSFiles(); err != nil {
+		errs = append(errs, err)
 	}
 	if err := m.Load.Validate(); err != nil {
 		errs = append(errs, err)

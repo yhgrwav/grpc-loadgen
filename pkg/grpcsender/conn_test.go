@@ -615,13 +615,13 @@ func TestConnections_ReadTheLimitUnderTLS(t *testing.T) {
 	go func() { _ = srv.Serve(lis) }()
 
 	sender := New(Options{
-		Target: "passthrough:///bufnet",
-		TLS:    true,
+		Target:  "passthrough:///bufnet",
+		TLS:     true,
+		RootCAs: pool,
 		DialOptions: []grpc.DialOption{grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		})},
 	})
-	sender.rootCAs = pool
 
 	t.Cleanup(func() {
 		_ = sender.Close()
