@@ -77,7 +77,9 @@ type Options struct {
 	// ignored: the sender keeps one connection to one address, pick_first,
 	// and with several addresses in DNS loads that one backend only. A
 	// config given here with grpc.WithDefaultServiceConfig still applies:
-	// that is the caller's own choice, and the CLI offers none.
+	// that is the caller's own choice, and the CLI offers none. With a load
+	// balancing policy other than pick_first the connection lines and the
+	// "limited by the run" verdict are wrong: they assume one connection.
 	DialOptions []grpc.DialOption
 }
 
