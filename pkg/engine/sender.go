@@ -98,6 +98,8 @@ type Outcome struct {
 	// back. A string rather than a transport type: the engine stays independent
 	// of the protocol.
 	Code string
+	// CodeFromTarget is true when Code came over the wire. Stub for the spec.
+	CodeFromTarget bool
 }
 
 // Sender delivers one call to the target and reports what happened to it.

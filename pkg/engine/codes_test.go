@@ -63,7 +63,7 @@ func TestReport_FailureCodesCountEveryFailedCall(t *testing.T) {
 	stats := failures(t, 10, map[string]int{"Unavailable": 5, "Internal": 2, "Aborted": 2}, CategoryOverload)
 	m := stats.Report().Methods[0]
 
-	want := []CodeCount{{"Unavailable", 5}, {"Aborted", 2}, {"Internal", 2}}
+	want := []CodeCount{{"Unavailable", 5, false}, {"Aborted", 2, false}, {"Internal", 2, false}}
 	if !slices.Equal(m.FailureCodes, want) {
 		t.Errorf("failure codes %v, want %v", m.FailureCodes, want)
 	}
@@ -101,7 +101,7 @@ func TestReport_FailureCodesIncludeTimeoutsAndUnreachable(t *testing.T) {
 	stats.EndSending(at)
 	stats.Finish(at.Add(time.Second))
 
-	want := []CodeCount{{"DeadlineExceeded", 1}, {"Unavailable", 1}}
+	want := []CodeCount{{"DeadlineExceeded", 1, false}, {"Unavailable", 1, false}}
 	if got := stats.Report().Methods[0].FailureCodes; !slices.Equal(got, want) {
 		t.Errorf("failure codes %v, want %v", got, want)
 	}
@@ -139,5 +139,70 @@ func TestReport_FailureCodesKeepWhoMadeTheCode(t *testing.T) {
 	}
 	if got := stats.Report().Methods[0].FailureCodes; !slices.Equal(got, want) {
 		t.Errorf("FailureCodes = %+v\nwant %+v: the target's codes first, then the client's, each by count", got, want)
+	}
+}
+
+// Every failed call with a code is in exactly one group: none lost between the
+// two, none counted in both.
+//
+// Ground: contract — MethodReport.FailureCodes is public.
+func TestReport_FailureCodesOfBothGroupsSumToTheFailures(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	names := []string{"Unavailable", "Internal", "DeadlineExceeded"}
+	methods := []string{"a", "b"}
+	withCode := map[string]int{}
+
+	at := start
+	for i := range 60 {
+		m := methods[i%2]
+		stats.Record(Result{Method: m, ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+			Outcome: Outcome{Category: CategoryOverload, Code: names[i%3], CodeFromTarget: i%4 < 2,
+				SentAt: at, DoneAt: at.Add(time.Millisecond)}})
+		withCode[m]++
+		at = at.Add(time.Millisecond)
+	}
+	stats.EndSending(at)
+	stats.Finish(at.Add(time.Second))
+
+	for _, m := range stats.Report().Methods {
+		sum, target := 0, 0
+		for _, c := range m.FailureCodes {
+			sum += c.Count
+			if c.FromTarget {
+				target += c.Count
+			}
+		}
+		if sum != withCode[m.Method] || sum != m.Failed {
+			t.Errorf("%s: codes sum to %d, %d failed with a code, Failed %d", m.Method, sum, withCode[m.Method], m.Failed)
+		}
+		if target == 0 || target == sum {
+			t.Errorf("%s: %d of %d in the target's group, want both groups filled: %+v", m.Method, target, sum, m.FailureCodes)
+		}
+	}
+}
+
+// Calls cancelled by stopping the run are abandoned, not failed: their Canceled
+// is in no codes line.
+//
+// Ground: contract — MethodReport.FailureCodes is public.
+func TestReport_CallsCancelledByTheStopHaveNoCode(t *testing.T) {
+	stats := NewStats()
+	start := time.Now()
+	stats.Start(start, 0)
+
+	at := start
+	stats.Record(Result{Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+		Outcome: Outcome{Category: CategoryAborted, Code: "Canceled", SentAt: at, DoneAt: at.Add(time.Millisecond)}})
+	stats.Record(Result{Method: "a", ScheduledAt: at, BegunAt: at, Deadline: at.Add(time.Second),
+		Outcome: Outcome{Category: CategoryOverload, Code: "Unavailable", CodeFromTarget: true, SentAt: at, DoneAt: at.Add(time.Millisecond)}})
+	stats.EndSending(at)
+	stats.Finish(at.Add(time.Second))
+
+	got := stats.Report().Methods[0].FailureCodes
+	if want := []CodeCount{{Code: "Unavailable", Count: 1, FromTarget: true}}; !slices.Equal(got, want) {
+		t.Errorf("FailureCodes = %+v, want %+v: a call cancelled by the stop has no code", got, want)
 	}
 }

@@ -52,8 +52,9 @@ type MethodSnapshot struct {
 
 // CodeCount is how many calls failed with one transport code.
 type CodeCount struct {
-	Code  string
-	Count int
+	Code       string
+	Count      int
+	FromTarget bool
 }
 
 // failureCodes lists codes by count, the commonest first, a tie by name; nil

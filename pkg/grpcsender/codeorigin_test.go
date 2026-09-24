@@ -15,65 +15,162 @@
 package grpcsender
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
-// A code is the target's only when a status came over the wire. grpc-go makes up
-// the same codes on the client: Unavailable when nothing answered, DeadlineExceeded
-// at our own deadline. Printed together, a code made here reads as the target's.
-//
-// Ground: contract — engine.Outcome.CodeFromTarget is public.
-func TestSend_TellsACodeTheTargetSentFromOneTheClientMade(t *testing.T) {
-	late := request(time.Now())
-	late.Deadline = time.Now().Add(50 * time.Millisecond)
+// rawTarget serves raw HTTP/2 and hands each request's HEADERS to onHeaders,
+// numbered from 1: the test decides what the other end does with the stream.
+func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n int)) *Sender {
+	t.Helper()
 
-	past := request(time.Now())
-	past.Deadline = time.Now().Add(-time.Millisecond)
+	lis := bufconn.Listen(1024 * 1024)
+	t.Cleanup(func() { _ = lis.Close() })
 
-	served := func(c codes.Code) func(t *testing.T) engine.Outcome {
-		return func(t *testing.T) engine.Outcome {
-			out, err := dialTarget(t, &target{code: c}).Send(bounded(t), request(time.Now()))
+	go func() {
+		for {
+			conn, err := lis.Accept()
 			if err != nil {
-				t.Fatalf("send: %v", err)
+				return
 			}
-			return out
+			go serveRaw(conn, onHeaders)
 		}
+	}()
+
+	sender := New(Options{Target: "passthrough:///bufnet", DialOptions: []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+	}})
+	t.Cleanup(func() { _ = sender.Close() })
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
 	}
 
+	return sender
+}
+
+func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n int)) {
+	defer conn.Close()
+
+	preface := make([]byte, len(http2.ClientPreface))
+	if _, err := io.ReadFull(conn, preface); err != nil {
+		return
+	}
+	fr := http2.NewFramer(conn, conn)
+	if err := fr.WriteSettings(); err != nil {
+		return
+	}
+
+	n := 0
+	for {
+		f, err := fr.ReadFrame()
+		if err != nil {
+			return
+		}
+		switch f := f.(type) {
+		case *http2.SettingsFrame:
+			if !f.IsAck() {
+				_ = fr.WriteSettingsAck()
+			}
+		case *http2.PingFrame:
+			if !f.IsAck() {
+				_ = fr.WritePing(true, f.Data)
+			}
+		case *http2.HeadersFrame:
+			n++
+			onHeaders(fr, f.StreamID, n)
+		}
+	}
+}
+
+// trailersOnly answers a stream with a status and nothing else, as nginx's
+// error_page stub does.
+func trailersOnly(fr *http2.Framer, stream uint32, code codes.Code) {
+	var block bytes.Buffer
+	enc := hpack.NewEncoder(&block)
+	for _, h := range [][2]string{{":status", "200"}, {"content-type", "application/grpc"}, {"grpc-status", strconv.Itoa(int(code))}} {
+		_ = enc.WriteField(hpack.HeaderField{Name: h[0], Value: h[1]})
+	}
+	_ = fr.WriteHeaders(http2.HeadersFrameParam{StreamID: stream, BlockFragment: block.Bytes(), EndStream: true, EndHeaders: true})
+}
+
+// sendWithin sends one call with the given deadline from now; 0 means none.
+func sendWithin(t *testing.T, s *Sender, deadline time.Duration) engine.Outcome {
+	t.Helper()
+
+	req := request(time.Now())
+	if deadline != 0 {
+		req.Deadline = time.Now().Add(deadline)
+	}
+	out, err := s.Send(bounded(t), req)
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	return out
+}
+
+// A code is the target's only when a status came back over the wire. grpc-go
+// sets the same codes itself: Unavailable when nothing answered, Internal for a
+// reset stream, DeadlineExceeded at our own deadline. Printed together, a code
+// set here reads as the target's.
+//
+// Ground: contract — engine.Outcome.CodeFromTarget is public.
+func TestSend_TellsACodeThatCameBackFromOneTheClientSet(t *testing.T) {
 	cases := []struct {
 		name       string
 		send       func(t *testing.T) engine.Outcome
 		code       codes.Code
 		fromTarget bool
 	}{
-		{"target sent Unavailable", served(codes.Unavailable), codes.Unavailable, true},
-		{"target sent DeadlineExceeded", served(codes.DeadlineExceeded), codes.DeadlineExceeded, true},
-		{"nothing answered: client's Unavailable", func(t *testing.T) engine.Outcome {
-			out, err := vanishedTarget(t).Send(bounded(t), request(time.Now()))
-			if err != nil {
-				t.Fatalf("send: %v", err)
-			}
-			return out
+		{"target sent Unavailable", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, dialTarget(t, &target{code: codes.Unavailable}), 0)
+		}, codes.Unavailable, true},
+		// No deadline of ours: the target's DeadlineExceeded cannot race our timer.
+		{"target sent DeadlineExceeded", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, dialTarget(t, &target{code: codes.DeadlineExceeded}), 0)
+		}, codes.DeadlineExceeded, true},
+		{"a proxy's trailers-only status", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, rawTarget(t, func(fr *http2.Framer, id uint32, _ int) { trailersOnly(fr, id, codes.Unavailable) }), 0)
+		}, codes.Unavailable, true},
+		{"nothing answered", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, vanishedTarget(t), 0)
 		}, codes.Unavailable, false},
-		{"our deadline ran out: client's DeadlineExceeded", func(t *testing.T) engine.Outcome {
-			out, err := dialTarget(t, &target{delay: time.Second}).Send(bounded(t), late)
-			if err != nil {
-				t.Fatalf("send: %v", err)
-			}
-			return out
+		// The other end reset the stream: no status came back, grpc-go set the code.
+		{"stream reset with INTERNAL_ERROR", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, rawTarget(t, func(fr *http2.Framer, id uint32, _ int) { _ = fr.WriteRSTStream(id, http2.ErrCodeInternal) }), 0)
+		}, codes.Internal, false},
+		// A target that never answers: only our timer can end the call.
+		{"our deadline ran out", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, rawTarget(t, func(*http2.Framer, uint32, int) {}), 50*time.Millisecond)
 		}, codes.DeadlineExceeded, false},
-		{"deadline already past, never sent", func(t *testing.T) engine.Outcome {
-			out, err := dialTarget(t, &target{}).Send(bounded(t), past)
-			if err != nil {
-				t.Fatalf("send: %v", err)
-			}
-			return out
+		{"deadline past before sending", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, dialTarget(t, &target{}), -time.Millisecond)
 		}, codes.DeadlineExceeded, false},
+		// As the state in #75, the last attempt decides: the first was refused
+		// unprocessed and retried transparently, the retry got a status.
+		{"refused, retried, answered", func(t *testing.T) engine.Outcome {
+			return sendWithin(t, rawTarget(t, func(fr *http2.Framer, id uint32, n int) {
+				if n == 1 {
+					_ = fr.WriteRSTStream(id, http2.ErrCodeRefusedStream)
+
+					return
+				}
+				trailersOnly(fr, id, codes.NotFound)
+			}), 2*time.Second)
+		}, codes.NotFound, true},
 	}
 
 	for _, c := range cases {
