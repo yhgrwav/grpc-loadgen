@@ -91,8 +91,15 @@ type Outcome struct {
 	// StreamWait is how long a call that went out waited for a free stream on
 	// a ready connection: part of its latency the target never saw.
 	StreamWait time.Duration
-	DoneAt     time.Time
-	Category   Category
+	// ConnWait is how long the call waited for a ready connection: name
+	// resolution and picking a transport, summed over its attempts. It does
+	// not overlap StreamWait. For a call that went out it is the whole wait;
+	// for one that did not it is a lower bound — the attempt the deadline cut
+	// short never reported its wait. The gap between one attempt failing and
+	// the next beginning is in neither.
+	ConnWait time.Duration
+	DoneAt   time.Time
+	Category Category
 	// Err is the error as reported by the transport, including any text from
 	// the target. Nil for CategorySuccess, non-nil otherwise. pkg/engine
 	// does not inspect or print it; that is left to the caller.

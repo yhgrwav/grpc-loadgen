@@ -32,6 +32,10 @@ type callTimes struct {
 	// otherwise.
 	begunAt  time.Time
 	pickedAt time.Time
+	// invokedAt is when Send handed the call to grpc-go, before name
+	// resolution. connWait sums each attempt's wait for a connection.
+	invokedAt time.Time
+	connWait  time.Duration
 	// streamFull says every stream the target allows was open at some moment
 	// between the start of the wait for one and the headers going out.
 	streamFull bool
@@ -77,6 +81,8 @@ type handler struct {
 	// streams counts the streams open on the connection. Nil in tests that
 	// feed events by hand.
 	streams *streamGauge
+	// clock stands in for time.Now in tests; nil in a run.
+	clock func() time.Time
 }
 
 func (handler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
