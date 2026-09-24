@@ -39,12 +39,12 @@ func ledgerShaped() engine.Report {
 func verdictOf(t *testing.T, r engine.Report) string {
 	t.Helper()
 
-	for _, n := range reportNotes(r) {
+	for _, n := range reportNotes(r, "") {
 		if strings.HasPrefix(n, "limited by") || strings.HasPrefix(n, "the connection to the target was not ready") {
 			return n
 		}
 	}
-	t.Fatalf("no verdict in:\n%s", strings.Join(reportNotes(r), "\n\n"))
+	t.Fatalf("no verdict in:\n%s", strings.Join(reportNotes(r, ""), "\n\n"))
 
 	return ""
 }
@@ -78,8 +78,8 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	if !strings.HasPrefix(v, "the connection to the target was not ready for 500 calls") {
 		t.Errorf("heading:\n%s", v)
 	}
-	if strings.Contains(strings.Join(reportNotes(r), "\n"), "limited by the run") {
-		t.Errorf("a connection not ready reads as the run's limit:\n%s", strings.Join(reportNotes(r), "\n\n"))
+	if strings.Contains(strings.Join(reportNotes(r, ""), "\n"), "limited by the run") {
+		t.Errorf("a connection not ready reads as the run's limit:\n%s", strings.Join(reportNotes(r, ""), "\n\n"))
 	}
 	if s := shortStreamVerdict(r); strings.Contains(s, "limited by") {
 		t.Errorf("short verdict %q", s)
@@ -109,7 +109,7 @@ func TestNotes_NoAnswerLineSaysHowManyWentOutLate(t *testing.T) {
 	r := oneStream()
 	r.Methods[0].TimedOut, r.Methods[0].TimedOutAfterWait = 48, 30
 
-	if text := strings.Join(reportNotes(r), "\n"); !strings.Contains(text, "30 of them went out with less than half the timeout left") {
+	if text := strings.Join(reportNotes(r, ""), "\n"); !strings.Contains(text, "30 of them went out with less than half the timeout left") {
 		t.Errorf("no count of late-sent timeouts:\n%s", text)
 	}
 }
@@ -135,7 +135,7 @@ func TestVerdict_StreamWaitThatMovedNothingMakesNoVerdict(t *testing.T) {
 	r.StreamWaited, r.StreamCauseCalls, r.StreamWaitP99 = 5, 5, exact(2)
 	r.Methods[0].P99WithoutClientWaits = r.Methods[0].P99
 
-	notes := strings.Join(reportNotes(r), "\n\n")
+	notes := strings.Join(reportNotes(r, ""), "\n\n")
 	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
 		t.Errorf("a verdict without a moved p99 or unsent calls:\n%s", notes)
 	}

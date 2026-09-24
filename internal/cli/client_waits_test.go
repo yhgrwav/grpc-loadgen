@@ -67,7 +67,7 @@ const ms = time.Millisecond
 // stream wait moved nothing, so before this the report said "p99 unchanged".
 func TestVerdict_SentCallsThatWaitedForTheConnectionMoveP99(t *testing.T) {
 	r := reportOf(t, times(200, waitCall{conn: 50 * ms, served: 2 * ms}))
-	notes := strings.Join(reportNotes(r), "\n\n")
+	notes := strings.Join(reportNotes(r, ""), "\n\n")
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "the connection to the target was not ready for 200 calls") {
@@ -132,7 +132,7 @@ func TestVerdict_AMoveWithNoCauseOverTheFloorIsNoVerdict(t *testing.T) {
 	calls = append(calls, times(2, waitCall{stream: 800 * time.Microsecond, served: 1200 * time.Microsecond})...)
 	r := reportOf(t, calls)
 
-	notes := strings.Join(reportNotes(r), "\n\n")
+	notes := strings.Join(reportNotes(r, ""), "\n\n")
 	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
 		t.Errorf("a verdict with every count at 0:\n%s", notes)
 	}
@@ -161,7 +161,7 @@ func TestNotes_ClientWaitsThatMovedNothingSayWhatWasCompared(t *testing.T) {
 	// 2ms of 3s: at three significant figures p99 prints 3.00s either way.
 	r := reportOf(t, times(100, waitCall{conn: 2 * ms, served: 3 * time.Second}))
 
-	notes := strings.Join(reportNotes(r), "\n\n")
+	notes := strings.Join(reportNotes(r, ""), "\n\n")
 	if !strings.Contains(notes, "client-side waits (generator, connection, stream) did not move p99.") {
 		t.Errorf("the note does not name what it compared:\n%s", notes)
 	}

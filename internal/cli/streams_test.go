@@ -63,9 +63,9 @@ func TestNotes_AStreamLimitThatMovesTheP99IsAVerdict(t *testing.T) {
 		"The printed p99 includes the wait for 1 of 1 methods. The target was not tested\n" +
 		"above 1 call in flight."
 
-	got, ok := noteStarting(reportNotes(oneStream()), "limited by")
+	got, ok := noteStarting(reportNotes(oneStream(), ""), "limited by")
 	if !ok {
-		t.Fatalf("no stream verdict in:\n%s", strings.Join(reportNotes(oneStream()), "\n\n"))
+		t.Fatalf("no stream verdict in:\n%s", strings.Join(reportNotes(oneStream(), ""), "\n\n"))
 	}
 	if got != want {
 		t.Errorf("verdict:\n%s\nwant:\n%s", got, want)
@@ -83,7 +83,7 @@ func TestNotes_AWaitThatChangesNoPrintedNumberIsOnlyANote(t *testing.T) {
 	m := &report.Methods[0]
 	m.Sent, m.P99, m.P99WithoutClientWaits = 10000, exact(300), exact(300)
 
-	notes := reportNotes(report)
+	notes := reportNotes(report, "")
 
 	if v, ok := noteStarting(notes, "limited by"); ok {
 		t.Errorf("a verdict though no printed number changes:\n%s", v)
@@ -103,7 +103,7 @@ func TestNotes_UnsentForAStreamIsAVerdictEvenWithTheSameP99(t *testing.T) {
 	report.StreamTailCalls += 2
 	report.Methods[0].P99WithoutClientWaits = report.Methods[0].P99
 
-	v, ok := noteStarting(reportNotes(report), "limited by")
+	v, ok := noteStarting(reportNotes(report, ""), "limited by")
 	if !ok {
 		t.Fatalf("no verdict with 2 calls unsent for want of a stream")
 	}
@@ -118,7 +118,7 @@ func TestNotes_WaitingWithNoLimitAnnouncedDoesNotBlameTheTarget(t *testing.T) {
 	report := oneStream()
 	report.Connections.LimitAnnounced, report.Connections.FirstLimit, report.Connections.LastLimit = false, 0, 0
 
-	v, ok := noteStarting(reportNotes(report), "limited by")
+	v, ok := noteStarting(reportNotes(report, ""), "limited by")
 	if !ok {
 		t.Fatalf("no verdict: the wait moved the p99")
 	}
@@ -136,9 +136,9 @@ func TestNotes_AChangingLimitIsOneBoundedLine(t *testing.T) {
 		Open: 1, Reconnects: 500, LimitAnnounced: true, FirstLimit: 1, LastLimit: 4, LimitChanges: 499,
 	}
 
-	n, ok := noteStarting(reportNotes(report), "connections: 1 (reconnects: 500)")
+	n, ok := noteStarting(reportNotes(report, ""), "connections: 1 (reconnects: 500)")
 	if !ok {
-		t.Fatalf("no connections line in:\n%s", strings.Join(reportNotes(report), "\n\n"))
+		t.Fatalf("no connections line in:\n%s", strings.Join(reportNotes(report, ""), "\n\n"))
 	}
 	if strings.Contains(n, "\n") || len(n) > 100 {
 		t.Errorf("the line is not one bounded line: %q", n)
@@ -167,8 +167,8 @@ func TestNotes_NotSentIsSplitByReason(t *testing.T) {
 			report.NotSentLate, report.NotSentStream, report.NotSentConnection = tt.late, tt.stream, tt.connection
 			report.NotSent = tt.late + tt.stream + tt.connection
 
-			if _, ok := noteStarting(reportNotes(report), tt.want); !ok {
-				t.Errorf("no %q in:\n%s", tt.want, strings.Join(reportNotes(report), "\n\n"))
+			if _, ok := noteStarting(reportNotes(report, ""), tt.want); !ok {
+				t.Errorf("no %q in:\n%s", tt.want, strings.Join(reportNotes(report, ""), "\n\n"))
 			}
 		})
 	}
@@ -214,7 +214,7 @@ func TestNotes_NoConnectionDataNoConnectionLines(t *testing.T) {
 	report := oneStream()
 	report.Connections = nil
 
-	for _, n := range reportNotes(report) {
+	for _, n := range reportNotes(report, "") {
 		for _, claim := range []string{"connections:", "no limit", "announced", "target allows", "MAX_CONCURRENT_STREAMS"} {
 			if strings.Contains(n, claim) {
 				t.Errorf("with no connection data the report says %q:\n%s", claim, n)
@@ -235,7 +235,7 @@ func TestNotes_TheVerdictCountsMethodsAndEachMovedOneGetsANote(t *testing.T) {
 		P50: exact(10), P90: exact(11), P95: exact(11), P99: exact(12), P99WithoutClientWaits: exact(12),
 	})
 
-	notes := reportNotes(report)
+	notes := reportNotes(report, "")
 
 	v, ok := noteStarting(notes, "limited by")
 	if !ok {

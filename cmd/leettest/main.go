@@ -341,7 +341,13 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	start := func() error { return eng.Run(ctx) }
 
 	// One report for the final screen and for stdout.
-	reportOf := func() cli.RunReport { return cli.RunReport{Report: eng.Report(), Unchecked: unchecked} }
+	var maxResponse string
+	if raw := cfg.App.RawMaxResponseSize; raw != nil {
+		maxResponse = strings.TrimSpace(*raw)
+	}
+	reportOf := func() cli.RunReport {
+		return cli.RunReport{Report: eng.Report(), Unchecked: unchecked, MaxResponse: maxResponse}
+	}
 
 	var runErr error
 

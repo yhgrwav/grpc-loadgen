@@ -675,7 +675,7 @@ func (m *model) finalParts(width int) finalParts {
 	// The same words the text report prints: what the target did, what the
 	// generator did, and the verdicts. Two renderings of one report must not
 	// tell the reader different things. The verdicts stand above the table.
-	for _, note := range reportNotes(report) {
+	for _, note := range reportNotes(report, m.maxResponse) {
 		block := strings.Split(m.styles.note.Render(wrapNote(note, width)), "\n")
 		if isVerdict(note) {
 			p.verdicts = append(p.verdicts, block)

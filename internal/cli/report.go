@@ -28,10 +28,12 @@ import (
 )
 
 // RunReport is the engine's report with what only the CLI knows about the
-// run: the methods nothing could be checked against before it.
+// run: the methods nothing could be checked against before it,
+// and the reply size limit as the config wrote it, empty for the gRPC default.
 type RunReport struct {
 	engine.Report
-	Unchecked []Unchecked
+	Unchecked   []Unchecked
+	MaxResponse string
 }
 
 // PrintReport writes the finished run to w as plain text.
@@ -69,7 +71,7 @@ func PrintReport(w io.Writer, target string, run RunReport) {
 		}
 	}
 
-	for _, note := range reportNotes(report) {
+	for _, note := range reportNotes(report, run.MaxResponse) {
 		fmt.Fprintf(w, "\n%s\n", note)
 	}
 	if note := uncheckedNote(run.Unchecked); note != "" {

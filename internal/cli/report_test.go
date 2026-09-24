@@ -395,6 +395,55 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	}
 }
 
+// The rejected note names the limit replies were cut against, written as the
+// config wrote it: 4MB is 4 000 000 bytes, and "4MiB" beside it would be
+// another number.
+func TestPrintReportNamesTheReplyLimitTheRunUsed(t *testing.T) {
+	for _, c := range []struct{ written, want, not string }{
+		{"", "client's limit, 4MiB", ""},
+		{"1MiB", "client's limit, 1MiB", "4MiB"},
+		{"1500000B", "client's limit, 1500000B", "MiB,"},
+		{"4MB", "client's limit, 4MB", "4MiB"},
+	} {
+		var out strings.Builder
+		PrintReport(&out, "localhost:50051", RunReport{MaxResponse: c.written, Report: engine.Report{
+			Duration: time.Second, Sent: 100, Failed: 100, RequestRejected: true,
+			Methods: []engine.MethodReport{{
+				Method: "a.B/One", Sent: 100, Failed: 100, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 100},
+			}},
+		}})
+
+		text := out.String()
+		if !strings.Contains(text, c.want) {
+			t.Errorf("max_response_size %q: no %q in:\n%s", c.written, c.want, text)
+		}
+		if c.not != "" && strings.Contains(text, c.not) {
+			t.Errorf("max_response_size %q: the note says %q:\n%s", c.written, c.not, text)
+		}
+	}
+}
+
+// The final screen and stdout name the same reply limit.
+func TestFinalScreenNamesTheConfiguredReplyLimit(t *testing.T) {
+	m := testModel(t)
+	m.reportOf = func() RunReport {
+		return RunReport{MaxResponse: "1MiB", Report: engine.Report{
+			Duration: time.Second, Sent: 100, Failed: 100, RequestRejected: true,
+			Methods: []engine.MethodReport{{
+				Method: "a.B/One", Sent: 100, Failed: 100, RPS: 100,
+				Rejected: engine.RefusalLatency{Count: 100},
+			}},
+		}}
+	}
+	m.Update(doneMsg{})
+
+	text := strings.Join(strings.Fields(m.View()), " ")
+	if !strings.Contains(text, "client's limit, 1MiB") || strings.Contains(text, "4MiB") {
+		t.Errorf("the final screen does not name the 1MiB limit alone:\n%s", m.View())
+	}
+}
+
 // With three methods and one rejected outright, the verdict is about that
 // method: a share taken over the run would be 33% and no verdict at all.
 func TestPrintReportNamesTheMethodWhoseRequestsAreRejected(t *testing.T) {

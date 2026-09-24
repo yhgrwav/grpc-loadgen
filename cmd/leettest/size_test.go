@@ -117,3 +117,19 @@ func TestRun_MaxResponseSizeLetsALargeReplyThrough(t *testing.T) {
 		})
 	}
 }
+
+// A lowered limit reaches the note: a 2 MiB reply against 1MiB names 1MiB,
+// not the gRPC default.
+func TestRun_TheRejectedNoteNamesTheConfiguredLimit(t *testing.T) {
+	addr := startBigTarget(t, 2<<20)
+
+	res := runCLI(t.Context(), t, 10*time.Second, "-c",
+		writeConfig(t, addr, bigMethod, plaintext+"\n  max_response_size: 1MiB"))
+	if !errors.Is(res.err, ErrInvalidRun) {
+		t.Fatalf("run: %v, want invalid run\nstderr:\n%s", res.err, res.stderr)
+	}
+	text := strings.Join(strings.Fields(res.stdout), " ")
+	if !strings.Contains(text, "client's limit, 1MiB") || strings.Contains(text, "4MiB") {
+		t.Errorf("the note does not name the 1MiB limit alone:\n%s", res.stdout)
+	}
+}
