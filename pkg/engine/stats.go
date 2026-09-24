@@ -154,8 +154,10 @@ type MethodReport struct {
 	// TimedOut counts calls that went out and got no answer within their
 	// timeout; UnsentTimedOut, timeouts of calls that never went out, which
 	// say nothing about the target.
-	TimedOut       int
-	UnsentTimedOut int
+	TimedOut int
+	// TimedOutAfterWait: stub for the spec.
+	TimedOutAfterWait int
+	UnsentTimedOut    int
 	// SilentFrom is the first second, by planned time and counting warmup,
 	// from which to the end of the schedule no call got an answer: neither a
 	// success nor a status from the target. Nil if there is none.
