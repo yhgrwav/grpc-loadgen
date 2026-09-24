@@ -62,9 +62,9 @@ const (
 func rankedCauses(report engine.Report) []cause {
 	var out []cause
 	for _, c := range []cause{
-		{report.WaitedGenerator, causeGenerator},
-		{report.WaitedStream, causeStream},
-		{report.WaitedConnection, causeConnection},
+		{report.GeneratorCauseCalls, causeGenerator},
+		{report.StreamCauseCalls, causeStream},
+		{report.ConnectionCauseCalls, causeConnection},
 	} {
 		if c.n > 0 {
 			out = append(out, c)

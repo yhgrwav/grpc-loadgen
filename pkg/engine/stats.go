@@ -242,15 +242,16 @@ type Report struct {
 	// longer than StreamWaitFloor; StreamWaitP99 is over those calls.
 	StreamWaited  int
 	StreamWaitP99 metrics.Quantile
-	// WaitedGenerator, WaitedConnection and WaitedStream count the measured
-	// calls, sent or not, that waited over StreamWaitFloor for each cause:
-	// start lag behind the schedule, a connection that was not ready, a free
-	// stream. An unsent call counts for the cause that kept it back. A call
-	// can count for several causes. They rank the causes; they do not decide
+	// GeneratorCauseCalls, ConnectionCauseCalls and StreamCauseCalls count the
+	// measured calls, sent or not, that waited over StreamWaitFloor for each
+	// cause: start lag behind the schedule, a connection that was not ready, a
+	// free stream. An unsent call counts only for the cause that kept it back,
+	// so StreamCauseCalls is StreamWaited + NotSentStream. A sent call can
+	// count for several causes. They rank the causes; they do not decide
 	// whether there is a verdict.
-	WaitedGenerator  int
-	WaitedConnection int
-	WaitedStream     int
+	GeneratorCauseCalls  int
+	ConnectionCauseCalls int
+	StreamCauseCalls     int
 	// Connections is what the sender said about its connections; nil when it
 	// does not tell.
 	Connections *Connections
@@ -433,6 +434,8 @@ func (s *Stats) Record(r Result) {
 	if r.NotSent {
 		s.notSent++
 		method.unsentOut++
+		// Only the cause that kept it back: its other waits are cut short.
+		gen, conn, stream = false, false, false
 		switch {
 		case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
 			s.notSentLate++
@@ -735,9 +738,9 @@ func (s *Stats) Report() Report {
 		NotSentConnection: connection,
 		StreamWaited:      int(streamWait.Count()),
 		StreamWaitP99:     streamWait.Percentile(0.99),
-		WaitedGenerator:   waited[0],
-		WaitedConnection:  waited[1],
-		WaitedStream:      waited[2],
+		GeneratorCauseCalls:   waited[0],
+		ConnectionCauseCalls:  waited[1],
+		StreamCauseCalls:      waited[2],
 	}
 
 	for _, v := range views {

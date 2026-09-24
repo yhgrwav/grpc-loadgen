@@ -207,7 +207,7 @@ func TestReport_ADeadlinePastBeforeSendingIsNotATimeoutAfterWait(t *testing.T) {
 // waited over the floor for it. A generator 200ms behind on calls that all
 // went out still counts.
 //
-// Ground: contract — Report.WaitedGenerator and siblings are public.
+// Ground: contract — Report.GeneratorCauseCalls and siblings are public.
 func TestReport_CountsEachCauseOverOneSet(t *testing.T) {
 	stats := NewStats()
 	start := time.Now()
@@ -236,13 +236,20 @@ func TestReport_CountsEachCauseOverOneSet(t *testing.T) {
 		return Outcome{Category: CategoryTimeout, Code: "DeadlineExceeded", NotSent: true, NotSentOn: on, SentAt: sched.Add(time.Second)}
 	}
 	rec(0, unsent(BlockedOnConnection))
-	rec(0, unsent(BlockedOnStream))
+	// Kept back by a stream after 5ms on the connection: the stream only.
+	onStream := unsent(BlockedOnStream)
+	onStream.ConnWait = ms(5)
+	rec(0, onStream)
 	rec(0, unsent(BlockedOnGenerator))
 	stats.EndSending(start.Add(2 * time.Second))
 	stats.Finish(start.Add(2 * time.Second))
 
 	r := stats.Report()
-	if r.WaitedGenerator != 3 || r.WaitedConnection != 3 || r.WaitedStream != 3 {
-		t.Errorf("generator %d, connection %d, stream %d; want 3, 3, 3", r.WaitedGenerator, r.WaitedConnection, r.WaitedStream)
+	if r.GeneratorCauseCalls != 3 || r.ConnectionCauseCalls != 3 || r.StreamCauseCalls != 3 {
+		t.Errorf("generator %d, connection %d, stream %d; want 3, 3, 3", r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls)
+	}
+	// The cli fixtures rely on it.
+	if r.StreamCauseCalls != r.StreamWaited+r.NotSentStream {
+		t.Errorf("stream cause %d != waited %d + not sent %d", r.StreamCauseCalls, r.StreamWaited, r.NotSentStream)
 	}
 }

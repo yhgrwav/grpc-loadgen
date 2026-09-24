@@ -29,7 +29,7 @@ func ledgerShaped() engine.Report {
 	r.Sent, r.StreamWaited = 196788, 213
 	r.NotSentLate, r.NotSentConnection, r.NotSentStream = 28839, 24372, 0
 	r.NotSent = r.NotSentLate + r.NotSentConnection
-	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 28839, 24372, 213
+	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 28839, 24372, 213
 	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 128, LastLimit: 128}
 
 	return r
@@ -69,7 +69,7 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	r := ledgerShaped()
 	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 10, 500, 0
 	r.NotSent = 510
-	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 10, 500, 0
+	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 10, 500, 0
 	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
 
 	v := verdictOf(t, r)
@@ -89,7 +89,7 @@ func TestVerdict_ATieIsBrokenByAFixedOrder(t *testing.T) {
 	r := ledgerShaped()
 	r.NotSentLate, r.NotSentConnection = 100, 100
 	r.NotSent = 200
-	r.WaitedGenerator, r.WaitedConnection, r.WaitedStream = 100, 100, 100
+	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 100, 100, 100
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind") {
@@ -116,7 +116,7 @@ func TestNotes_NoAnswerLineSaysHowManyWentOutLate(t *testing.T) {
 // is the larger cause and names the heading.
 func TestVerdict_AGeneratorBehindOnSentCallsOutranksStreams(t *testing.T) {
 	r := oneStream()
-	r.WaitedGenerator, r.WaitedStream = 50, 48
+	r.GeneratorCauseCalls, r.StreamCauseCalls = 50, 48
 
 	v := verdictOf(t, r)
 	if !strings.HasPrefix(v, "limited by the run, not the target: the generator fell behind for 50 calls") {
@@ -128,7 +128,7 @@ func TestVerdict_AGeneratorBehindOnSentCallsOutranksStreams(t *testing.T) {
 // only rank causes, they do not make a verdict. The accepted note stays.
 func TestVerdict_StreamWaitThatMovedNothingMakesNoVerdict(t *testing.T) {
 	r := oneStream()
-	r.StreamWaited, r.WaitedStream, r.StreamWaitP99 = 5, 5, exact(2)
+	r.StreamWaited, r.StreamCauseCalls, r.StreamWaitP99 = 5, 5, exact(2)
 	r.Methods[0].P99WithoutStreamWait = r.Methods[0].P99
 
 	notes := strings.Join(reportNotes(r), "\n\n")
