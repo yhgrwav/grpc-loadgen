@@ -88,6 +88,31 @@ func reportNotes(report engine.Report) []string {
 		}
 	}
 
+	// The category says whose fault a failure is; the code is what the
+	// target's logs call it. A code the client set is kept apart: next to the
+	// target's it would read as the target's answer.
+	var codeLines []string
+	for i := range report.Methods {
+		m := &report.Methods[i]
+		for _, group := range []struct {
+			fromTarget bool
+			label      string
+		}{{true, "codes sent by the target"}, {false, "codes set by the client, no status came back"}} {
+			var codes []string
+			for _, c := range m.FailureCodes {
+				if c.FromTarget == group.fromTarget {
+					codes = append(codes, fmt.Sprintf("%s %d", c.Code, c.Count))
+				}
+			}
+			if len(codes) > 0 {
+				codeLines = append(codeLines, fmt.Sprintf("%s %s: %s", displayMethod(m.Method), group.label, strings.Join(codes, ", ")))
+			}
+		}
+	}
+	if len(codeLines) > 0 {
+		notes = append(notes, "failed calls by gRPC code:\n"+strings.Join(codeLines, "\n"))
+	}
+
 	notes = append(notes, streamNotes(report)...)
 
 	// What the generator did. Named for what it measures: a generator late to

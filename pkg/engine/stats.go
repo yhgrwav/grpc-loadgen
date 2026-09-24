@@ -50,6 +50,51 @@ type MethodSnapshot struct {
 	P99       metrics.Quantile
 }
 
+// CodeCount is how many calls failed with one transport code from one source.
+type CodeCount struct {
+	Code  string
+	Count int
+	// FromTarget is true for a code that came back over the wire, false for one
+	// the client's transport set. The same code from both is two entries.
+	FromTarget bool
+}
+
+type codeKey struct {
+	code       string
+	fromTarget bool
+}
+
+// failureCodes lists the codes that came back first, then those the client
+// set, each by count, the commonest first, a tie by name; nil when nothing
+// failed.
+func failureCodes(codes map[codeKey]int) []CodeCount {
+	if len(codes) == 0 {
+		return nil
+	}
+
+	out := make([]CodeCount, 0, len(codes))
+	for k, n := range codes {
+		out = append(out, CodeCount{Code: k.code, Count: n, FromTarget: k.fromTarget})
+	}
+
+	slices.SortFunc(out, func(a, b CodeCount) int {
+		if a.FromTarget != b.FromTarget {
+			if a.FromTarget {
+				return -1
+			}
+
+			return 1
+		}
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+
+		return strings.Compare(a.Code, b.Code)
+	})
+
+	return out
+}
+
 type MethodReport struct {
 	Method string
 	Sent   int
@@ -64,6 +109,11 @@ type MethodReport struct {
 	// P99WithoutStreamWait is P99 of the same calls with each one's stream
 	// wait taken out: the time the target had them.
 	P99WithoutStreamWait metrics.Quantile
+	// FailureCodes counts the failed calls by the transport's own code, such
+	// as Unavailable, and by whether it came back over the wire or the client
+	// set it: the category says whose fault a failure is, the code is what the
+	// target's logs call it. A call whose transport gives no code is not listed.
+	FailureCodes []CodeCount
 	// The percentiles above are the service time: successes, with timeouts and
 	// aborted calls as lower bounds of it. Refusals — the target answering it
 	// will not serve — are a different quantity, often far faster, and are in
@@ -229,6 +279,9 @@ type methodStats struct {
 	refusal  *metrics.Latencies
 	rejected *metrics.Latencies
 	timeline timeline
+	// codes counts failed calls by the transport's code and its source; nil
+	// until one fails.
+	codes map[codeKey]int
 	// lastAnswer is the latest scheduled moment among the calls the target
 	// answered, as an offset from the start of the run; -1 until one is.
 	lastAnswer time.Duration
@@ -364,6 +417,12 @@ func (s *Stats) Record(r Result) {
 	method.sent++
 	if failed {
 		method.failed++
+		if r.Code != "" {
+			if method.codes == nil {
+				method.codes = make(map[codeKey]int)
+			}
+			method.codes[codeKey{r.Code, r.CodeFromTarget}]++
+		}
 	}
 
 	if r.StreamWait > StreamWaitFloor {
@@ -426,6 +485,7 @@ type methodView struct {
 	served     *metrics.Snapshot
 	refusal    *metrics.Snapshot
 	rejected   *metrics.Snapshot
+	codes      []CodeCount
 }
 
 // views copies the counters under the lock and takes each distribution's
@@ -445,7 +505,7 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
 			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered,
-			unknown: method.unknown, lastAnswer: method.lastAnswer,
+			unknown: method.unknown, lastAnswer: method.lastAnswer, codes: failureCodes(method.codes),
 		})
 		sources = append(sources, method)
 	}
@@ -638,6 +698,7 @@ func (s *Stats) Report() Report {
 			Max:          v.dist.Percentile(1),
 
 			P99WithoutStreamWait: v.served.Percentile(0.99),
+			FailureCodes:         v.codes,
 			Refusal:              refusalOf(v.refusal),
 			Rejected:             refusalOf(v.rejected),
 

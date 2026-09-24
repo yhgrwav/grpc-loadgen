@@ -98,6 +98,11 @@ type Outcome struct {
 	// back. A string rather than a transport type: the engine stays independent
 	// of the protocol.
 	Code string
+	// CodeFromTarget is true when Code came back over the wire, from the target
+	// or a proxy in front of it; false when the transport set it itself: nothing
+	// answered, the stream was reset, our own deadline ran out. The last attempt
+	// of a transparently retried call decides.
+	CodeFromTarget bool
 }
 
 // Sender delivers one call to the target and reports what happened to it.
