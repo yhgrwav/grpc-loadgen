@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,10 +198,17 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		fakeDelay      = flags.Duration("fake-delay", 25*time.Millisecond, "latency of the fake target, with -fake")
 		fakeJitter     = flags.Duration("fake-jitter", 10*time.Millisecond, "random spread added to the fake latency, with -fake")
 		fakeFail       = flags.Float64("fake-fail-ratio", 0, "share of fake replies that fail, 0 to 1, with -fake")
+		showVersion    = flags.Bool("version", false, "print the version and exit")
 	)
 
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *showVersion {
+		info, _ := debug.ReadBuildInfo()
+		fmt.Fprintf(stdout, "leettest %s\n", versionString(version, info))
+
+		return nil
 	}
 	if *configPath == "" {
 		flags.Usage()

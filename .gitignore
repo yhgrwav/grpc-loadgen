@@ -68,3 +68,6 @@ docs/strategy.md
 
 # ghz comparison: binaries and raw outputs
 /test/compare-ghz/out/
+
+# goreleaser output
+dist/
