@@ -28,7 +28,8 @@ func warmupRun(t *testing.T, calls []Outcome, at []time.Duration) *Stats {
 	start := time.Now()
 	stats.Start(start, time.Second)
 
-	for i, o := range calls {
+	for i := range calls {
+		o := calls[i]
 		sched := start.Add(at[i])
 		if o.SentAt.IsZero() {
 			o.SentAt = sched
