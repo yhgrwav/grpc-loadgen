@@ -34,7 +34,8 @@ import (
 
 // rawTarget serves raw HTTP/2 and hands each request's HEADERS to onHeaders,
 // numbered from 1: the test decides what the other end does with the stream.
-// hangUp, when set, closes the connection right after onHeaders.
+// hangUp, when set, closes the connection once the request's DATA is in: on
+// HEADERS alone the client may not have written the request yet.
 func rawTarget(t *testing.T, onHeaders func(fr *http2.Framer, stream uint32, n int), hangUp ...bool) *Sender {
 	t.Helper()
 
@@ -92,6 +93,7 @@ func serveRaw(conn net.Conn, onHeaders func(fr *http2.Framer, stream uint32, n i
 		case *http2.HeadersFrame:
 			n++
 			onHeaders(fr, f.StreamID, n)
+		case *http2.DataFrame:
 			if hangUp {
 				return
 			}
