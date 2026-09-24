@@ -20,10 +20,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # This job can write: a cache other workflows wrote does not get in.
+          cache: false
       - run: go test -race ./...
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          version: "v2.18.2"
           args: build --single-target --clean --output dist/check/leettest
       # Nothing is published unless the binary names the tag it was built for.
       - name: version matches the tag
@@ -34,7 +36,7 @@ jobs:
           [ "$got" = "$want" ] || { echo "::error::-version printed '$got', want '$want'"; exit 1; }
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          version: "v2.18.2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
