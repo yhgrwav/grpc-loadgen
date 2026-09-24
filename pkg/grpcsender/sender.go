@@ -42,6 +42,11 @@ var rawCall = []grpc.CallOption{grpc.ForceCodec(rawCodec{})}
 var (
 	ErrNotConnected = errors.New("sender is not connected, call Connect before the run")
 	ErrClosed       = errors.New("sender is closed")
+	// ErrClosedAfterHandshake is a target that completed the TLS handshake and
+	// closed before its first SETTINGS: under TLS 1.3 that is how a refused
+	// client certificate looks from the client.
+	ErrClosedAfterHandshake = errors.New("the target closed the connection right after the TLS handshake; " +
+		"it may require a client certificate or refuse the one given")
 )
 
 // Options describes the target and how to reach it.
@@ -51,6 +56,18 @@ type Options struct {
 	// TLS turns on transport credentials; without it the connection is
 	// insecure, which is the usual case for a service behind a mesh.
 	TLS bool
+	// RootCAs verifies the target under TLS; nil means the system pool.
+	RootCAs *x509.CertPool
+	// Certificates are presented to a target that asks for a client
+	// certificate (mutual TLS). Used only with TLS.
+	Certificates []tls.Certificate
+	// ServerName is checked against the target's certificate and sent as SNI
+	// instead of the host in Target; :authority stays Target's. Used only with
+	// TLS.
+	ServerName string
+	// Metadata is sent with every call, such as authorization or x-api-key.
+	// Keys must already be lowercase; nil adds nothing to a call.
+	Metadata map[string]string
 	// DialOptions are passed through for cases the fields above do not cover,
 	// such as custom credentials or an in-process dialer in tests. Custom
 	// transport credentials replace the sender's own, which read the stream
@@ -70,9 +87,6 @@ type Sender struct {
 	ready   readyWindow
 	// streams tells a wait for a stream from a delay on our side.
 	streams *streamGauge
-	// rootCAs verifies the target under TLS; nil means the system pool. Set
-	// only by this package's tests until the config gets a CA of its own.
-	rootCAs *x509.CertPool
 	// stopWatch ends the connection watcher; watched closes when it has.
 	stopWatch context.CancelFunc
 	watched   chan struct{}
@@ -107,17 +121,23 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	creds := insecure.NewCredentials()
 	if s.opts.TLS {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: s.rootCAs})
+		creds = credentials.NewTLS(tlsConfig(s.opts))
 	}
 
-	dialOpts := append([]grpc.DialOption{
-		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker}),
+	dialOpts := []grpc.DialOption{
+		grpc.WithTransportCredentials(trackingCreds{TransportCredentials: creds, tracker: s.tracker, serverName: s.opts.ServerName}),
 		grpc.WithStatsHandler(handler{streams: s.streams}),
 		// A retry by a service config policy may follow an attempt the target
 		// served, and would count one call for several. Transparent retries
 		// stay: they follow only attempts the target never processed.
 		grpc.WithDisableRetry(),
-	}, s.opts.DialOptions...)
+	}
+	if len(s.opts.Metadata) > 0 {
+		// Per-RPC credentials rather than a context per call: gRPC attaches
+		// them itself, and a run without metadata has nothing in the send path.
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(staticMetadata(s.opts.Metadata)))
+	}
+	dialOpts = append(dialOpts, s.opts.DialOptions...)
 
 	conn, err := grpc.NewClient(s.opts.Target, dialOpts...)
 	if err != nil {
@@ -126,6 +146,10 @@ func (s *Sender) Connect(ctx context.Context) error {
 
 	if err := waitReady(ctx, conn); err != nil {
 		_ = conn.Close()
+
+		if s.opts.TLS && s.tracker.handshookSilently() {
+			return fmt.Errorf("connect to %s: %w: %w", s.opts.Target, ErrClosedAfterHandshake, err)
+		}
 
 		return fmt.Errorf("connect to %s: %w", s.opts.Target, err)
 	}
@@ -372,5 +396,27 @@ func (s *Sender) blocker(conn *grpc.ClientConn, t callTimes) engine.Blocker {
 		return engine.BlockedOnStream
 	default:
 		return engine.BlockedOnGenerator
+	}
+}
+
+// staticMetadata is the same metadata for every call.
+type staticMetadata map[string]string
+
+func (m staticMetadata) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return m, nil
+}
+
+// RequireTransportSecurity is false: a plaintext target behind a mesh takes
+// tokens too, and refusing them would be a rule the user has to learn.
+func (staticMetadata) RequireTransportSecurity() bool { return false }
+
+// tlsConfig is the one place TLS is configured. Verification stays on: no
+// option here turns InsecureSkipVerify on, and a nil RootCAs is the system
+// pool while a given one replaces it.
+func tlsConfig(opts Options) *tls.Config {
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		RootCAs:      opts.RootCAs,
+		Certificates: opts.Certificates,
 	}
 }

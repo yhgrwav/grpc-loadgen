@@ -15,9 +15,7 @@
 package metrics
 
 import (
-	"fmt"
 	"math"
-	"time"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
@@ -107,44 +105,26 @@ func (b *Buffer) InvalidCount() int64 {
 // Percentile is Snapshot.Percentile over the buffer: p is a fraction in
 // [0, 1], and outside it Percentile panics.
 func (b *Buffer) Percentile(p float64) Quantile {
-	if p < 0 || p > 1 {
-		panic(fmt.Sprintf("metrics: Percentile(%v): p is a fraction in [0, 1], not a 0..100 scale", p))
-	}
+	return percentile(b, p)
+}
 
-	n := b.Count()
-	if n == 0 {
-		return Quantile{}
-	}
+func (b *Buffer) counts() (measured, censored int64) {
+	return b.measured.TotalCount(), b.censored.TotalCount()
+}
 
-	rank := rankFor(p, n)
+func (b *Buffer) thresholds() (lo, hi int64)  { return b.censoredMin, b.censoredMax }
+func (b *Buffer) measuredAt(rank int64) int64 { return valueAtRankOf(b.measured, rank) }
 
-	// Exact when the rank-th measured value's bucket lies at or below every
-	// censored threshold: then no censored observation can take that rank.
-	// That is the same test as Snapshot's count at or below the smallest
-	// threshold reaching the rank.
-	if m := b.measured.TotalCount(); rank <= m {
-		if v := valueAtRankOf(b.measured, rank); v <= b.censoredMin {
-			return Quantile{Value: time.Duration(v), Exact: true, Defined: true}
-		}
-	}
-
-	// The same bound as Snapshot's: a single threshold c when the rank-th
-	// measured value lies in a bucket above c's, else the bottom of the
-	// rank's bucket.
-	if c := b.censoredMin; c == b.censoredMax {
-		if m := b.measured.TotalCount(); m < rank || valueAtRankOf(b.measured, rank) > highestEquivalent(c) {
-			return Quantile{Value: time.Duration(c), Defined: true}
-		}
-	}
-
+// combinedAt builds measured plus censored on first use and keeps it until
+// the next fill.
+func (b *Buffer) combinedAt(rank int64) int64 {
 	if !b.combinedValid {
 		b.combined.Reset()
 		b.combined.Merge(b.measured)
 		b.combined.Merge(b.censored)
 		b.combinedValid = true
 	}
-
-	return Quantile{Value: time.Duration(lowestEquivalent(valueAtRankOf(b.combined, rank))), Defined: true}
+	return valueAtRankOf(b.combined, rank)
 }
 
 // valueAtRankOf returns the upper bound of the bucket holding the rank-th

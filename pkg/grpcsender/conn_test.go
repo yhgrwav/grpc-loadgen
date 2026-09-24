@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -281,7 +282,7 @@ func TestSend_ACallWithAFreeStreamDidNotWait(t *testing.T) {
 func TestSend_UnsentWhileReconnectingIsBlockedOnTheConnection(t *testing.T) {
 	target := dropping(t)
 
-	target.drop()
+	target.drop(t)
 
 	req := request(time.Now())
 	req.Deadline = req.ScheduledAt.Add(100 * time.Millisecond)
@@ -470,13 +471,23 @@ func dropping(t *testing.T) *droppingTarget {
 	return d
 }
 
-// drop cuts the connection and holds the next dial until open.
-func (d *droppingTarget) drop() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+// drop cuts the connection, holds the next dial until open, and returns once
+// the client has seen the connection go: sent earlier, a call could still pick
+// the dying transport and fail at once.
+func (d *droppingTarget) drop(t *testing.T) {
+	t.Helper()
 
+	d.mu.Lock()
 	d.gate = make(chan struct{})
 	_ = d.conn.Close()
+	d.mu.Unlock()
+
+	conn := d.sender.conn
+	for conn.GetState() == connectivity.Ready {
+		if !conn.WaitForStateChange(bounded(t), connectivity.Ready) {
+			t.Fatal("the client never saw the connection drop")
+		}
+	}
 }
 
 func (d *droppingTarget) open() {
@@ -604,13 +615,13 @@ func TestConnections_ReadTheLimitUnderTLS(t *testing.T) {
 	go func() { _ = srv.Serve(lis) }()
 
 	sender := New(Options{
-		Target: "passthrough:///bufnet",
-		TLS:    true,
+		Target:  "passthrough:///bufnet",
+		TLS:     true,
+		RootCAs: pool,
 		DialOptions: []grpc.DialOption{grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		})},
 	})
-	sender.rootCAs = pool
 
 	t.Cleanup(func() {
 		_ = sender.Close()
@@ -911,6 +922,8 @@ func (b barrierOnBegin) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 // one takes it and the other waits for it. The loser waited for a stream, though nothing was
 // full when its wait began; no end-to-end test lines two calls up on one stream this exactly.
 // Mutation "only a snapshot at the start of the wait" turns it red.
+// Bound 400 ms: Linux --cpus=2 -race, 20 runs, the loser took 301–304 ms (margin 96 ms > 50).
+// Keep it below 600, or "the wait is the whole latency" is no longer caught.
 func TestSend_TheLoserOfTheRaceForTheLastStreamWaitedForIt(t *testing.T) {
 	const hold = 300 * time.Millisecond
 
