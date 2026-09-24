@@ -48,9 +48,19 @@ func RunPlain(w io.Writer, target string, eng *engine.Engine, run func() error) 
 		case err := <-done:
 			return err
 		case <-ticker.C:
-			s := eng.Snapshot()
-			fmt.Fprintf(w, "%s  sent %d  rps %.0f  in-flight %d  failed %d  not-sent %d  p99 %s\n",
-				formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, s.NotSent, formatQuantile(s.P99))
+			fmt.Fprintln(w, plainLine(eng.Snapshot()))
 		}
 	}
+}
+
+// plainLine is one second of the plain live view. During the warmup Sent is
+// zero by design, so the line shows the calls going out instead.
+func plainLine(s engine.Snapshot) string {
+	if s.Warmup > 0 && s.Elapsed < s.Warmup {
+		return fmt.Sprintf("%s  warming up: %d sent  in-flight %d  not-sent %d",
+			formatDuration(s.Elapsed), s.WarmupSent, s.InFlight, s.NotSent)
+	}
+
+	return fmt.Sprintf("%s  sent %d  rps %.0f  in-flight %d  failed %d  not-sent %d  p99 %s",
+		formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, s.NotSent, formatQuantile(s.P99))
 }
