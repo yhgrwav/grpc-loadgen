@@ -16,6 +16,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
@@ -43,15 +44,101 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// streamVerdict is the verdict on a run held back by streams, or "" when the
-// wait moved no printed number. It is about the run: the numbers of single
-// methods go to streamNotes.
+// cause is one reason calls waited, with the calls, sent or not, that waited
+// over the floor for it.
+type cause struct {
+	n    int
+	what string
+}
+
+const (
+	causeGenerator  = "generator late"
+	causeStream     = "waited for a stream"
+	causeConnection = "connection not ready"
+)
+
+// rankedCauses lists the causes with calls, largest first; a tie keeps the
+// order generator, stream, connection.
+func rankedCauses(report engine.Report) []cause {
+	var out []cause
+	for _, c := range []cause{
+		{report.WaitedGenerator, causeGenerator},
+		{report.WaitedStream, causeStream},
+		{report.WaitedConnection, causeConnection},
+	} {
+		if c.n > 0 {
+			out = append(out, c)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b cause) int { return b.n - a.n })
+
+	return out
+}
+
+// verdictCause is the cause that names the verdict, or "" when there is none.
+// Whether there is one is decided as before the ranking: streams moved a
+// printed p99 or kept calls back, or calls went unsent for the generator or
+// the connection. The counts only choose the heading.
+func verdictCause(report engine.Report) (cause, bool) {
+	_, limited := streamLimited(report)
+	if !limited && report.NotSentLate == 0 && report.NotSentConnection == 0 {
+		return cause{}, false
+	}
+	ranked := rankedCauses(report)
+	if len(ranked) == 0 {
+		return cause{}, false
+	}
+
+	return ranked[0], true
+}
+
+// streamVerdict is the verdict on a run held back by itself or its
+// connection, or "" when nothing moved. It is about the run: the numbers of
+// single methods go to streamNotes.
 func streamVerdict(report engine.Report) string {
-	moved, limited := streamLimited(report)
-	if !limited {
+	top, ok := verdictCause(report)
+	if !ok {
 		return ""
 	}
 
+	var b strings.Builder
+
+	switch top.what {
+	case causeGenerator:
+		fmt.Fprintf(&b, "limited by the run, not the target: the generator fell behind for %s.", plural(top.n, "call"))
+	case causeConnection:
+		// The target or the network refusing it: not the run's limit.
+		fmt.Fprintf(&b, "the connection to the target was not ready for %s.", plural(top.n, "call"))
+	default:
+		b.WriteString(streamHeading(report))
+	}
+
+	// One cause has nothing to rank.
+	var parts []string
+	if ranked := rankedCauses(report); len(ranked) > 1 {
+		for _, c := range ranked {
+			parts = append(parts, fmt.Sprintf("%s %d", c.what, c.n))
+		}
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(&b, "\ncauses, largest first: %s.", strings.Join(parts, "; "))
+	}
+
+	moved, limited := streamLimited(report)
+	if len(moved) > 0 {
+		fmt.Fprintf(&b, "\nThe printed p99 includes the wait for %d of %d methods.", len(moved), len(report.Methods))
+	}
+
+	if conns := report.Connections; limited && conns != nil && conns.LimitAnnounced {
+		inFlight := conns.Open * int(conns.LastLimit)
+		fmt.Fprintf(&b, " The target was not tested\nabove %s in flight.", plural(inFlight, "call"))
+	}
+
+	return b.String()
+}
+
+// streamHeading names the stream limit the run hit.
+func streamHeading(report engine.Report) string {
 	var b strings.Builder
 
 	b.WriteString("limited by the run, not the target: ")
@@ -76,22 +163,21 @@ func streamVerdict(report engine.Report) string {
 	}
 	b.WriteString(".")
 
-	if len(moved) > 0 {
-		fmt.Fprintf(&b, "\nThe printed p99 includes the wait for %d of %d methods.", len(moved), len(report.Methods))
-	}
-
-	if conns != nil && conns.LimitAnnounced {
-		inFlight := conns.Open * int(conns.LastLimit)
-		fmt.Fprintf(&b, " The target was not tested\nabove %s in flight.", plural(inFlight, "call"))
-	}
-
 	return b.String()
 }
 
 // shortStreamVerdict is streamVerdict in one ASCII phrase.
 func shortStreamVerdict(report engine.Report) string {
-	if _, limited := streamLimited(report); !limited {
+	top, ok := verdictCause(report)
+	if !ok {
 		return ""
+	}
+
+	switch top.what {
+	case causeGenerator:
+		return "limited by the run: the generator fell behind"
+	case causeConnection:
+		return "the connection to the target was not ready"
 	}
 
 	conns := report.Connections

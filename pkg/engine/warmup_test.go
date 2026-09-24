@@ -156,7 +156,7 @@ func TestStop_DuringTheWarmupKeepsItsCalls(t *testing.T) {
 }
 
 // Timed out after waiting most of the deadline before going out: the target
-// had 50ms of a 1s timeout. Counted, so the no-answer line can say so.
+// had 50ms of a 1s timeout; one sent 800ms late had 200ms. Counted, so the no-answer line can say so.
 //
 // Ground: contract — MethodReport.TimedOutAfterWait is public.
 func TestReport_CountsTimeoutsThatWentOutLate(t *testing.T) {
@@ -170,12 +170,13 @@ func TestReport_CountsTimeoutsThatWentOutLate(t *testing.T) {
 			Outcome: Outcome{Category: CategoryTimeout, Code: "DeadlineExceeded", SentAt: sched.Add(waited), DoneAt: sched.Add(time.Second)}})
 	}
 	rec(950 * time.Millisecond)
+	rec(800 * time.Millisecond)
 	rec(time.Millisecond)
 	stats.EndSending(start.Add(2 * time.Second))
 	stats.Finish(start.Add(2 * time.Second))
 
-	if m := stats.Report().Methods[0]; m.TimedOut != 2 || m.TimedOutAfterWait != 1 {
-		t.Errorf("timed out %d, after a wait %d; want 2 and 1", m.TimedOut, m.TimedOutAfterWait)
+	if m := stats.Report().Methods[0]; m.TimedOut != 3 || m.TimedOutAfterWait != 2 {
+		t.Errorf("timed out %d, after a wait %d; want 3 and 2", m.TimedOut, m.TimedOutAfterWait)
 	}
 }
 

@@ -87,6 +87,10 @@ func reportNotes(report engine.Report) []string {
 			lines = append(lines, fmt.Sprintf("%s: at %s rps, %d of %d calls (%.1f%%) got no answer within %s%s.",
 				displayMethod(m.Method), rate, m.TimedOut, m.Sent, share(m.TimedOut, m.Sent),
 				formatDuration(m.Timeout), silence))
+			if m.TimedOutAfterWait > 0 {
+				lines = append(lines, fmt.Sprintf("%d of them went out with less than half the timeout left: the target had\n"+
+					"the smaller part of it.", m.TimedOutAfterWait))
+			}
 		}
 
 		if m.UnsentTimedOut > 0 {

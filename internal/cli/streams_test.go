@@ -33,7 +33,7 @@ func oneStream() engine.Report {
 
 	return engine.Report{
 		Duration: 5 * time.Second, Planned: 5 * time.Second, Sent: 50, Failed: 48,
-		StreamWaited: 48, StreamWaitP99: exact(130),
+		StreamWaited: 48, StreamWaitP99: exact(130), WaitedStream: 48,
 		Connections: &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 1, LastLimit: 1},
 		Methods: []engine.MethodReport{{
 			Method: "grpc.health.v1.Health/Check", Sent: 50, Failed: 48, TimedOut: 48,
@@ -77,7 +77,7 @@ func TestNotes_AStreamLimitThatMovesTheP99IsAVerdict(t *testing.T) {
 // push the target's own verdict down for no printed reason.
 func TestNotes_AWaitThatChangesNoPrintedNumberIsOnlyANote(t *testing.T) {
 	report := oneStream()
-	report.Sent, report.StreamWaited, report.StreamWaitP99 = 10000, 500, metrics.Quantile{
+	report.Sent, report.StreamWaited, report.WaitedStream, report.StreamWaitP99 = 10000, 500, 500, metrics.Quantile{
 		Value: 1200 * time.Microsecond, Exact: true, Defined: true,
 	}
 	m := &report.Methods[0]
@@ -99,6 +99,7 @@ func TestNotes_AWaitThatChangesNoPrintedNumberIsOnlyANote(t *testing.T) {
 func TestNotes_UnsentForAStreamIsAVerdictEvenWithTheSameP99(t *testing.T) {
 	report := oneStream()
 	report.NotSent, report.NotSentStream = 2, 2
+	report.WaitedStream += 2
 	report.Methods[0].P99WithoutStreamWait = report.Methods[0].P99
 
 	v, ok := noteStarting(reportNotes(report), "limited by")
