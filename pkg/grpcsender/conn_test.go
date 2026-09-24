@@ -922,6 +922,8 @@ func (b barrierOnBegin) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 // one takes it and the other waits for it. The loser waited for a stream, though nothing was
 // full when its wait began; no end-to-end test lines two calls up on one stream this exactly.
 // Mutation "only a snapshot at the start of the wait" turns it red.
+// Bound 400 ms: Linux --cpus=2 -race, 20 runs, the loser took 301–304 ms (margin 96 ms > 50).
+// Keep it below 600, or "the wait is the whole latency" is no longer caught.
 func TestSend_TheLoserOfTheRaceForTheLastStreamWaitedForIt(t *testing.T) {
 	const hold = 300 * time.Millisecond
 
