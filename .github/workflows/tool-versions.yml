@@ -1,0 +1,43 @@
+name: Tool versions
+
+# Dependabot bumps `uses:` but not the version an action installs, nor the Go
+# release the matrix tests against. This job fails when one of them falls
+# behind; the failure is the reminder.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: pinned versions are the latest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          stale=0
+          check() { # name pinned latest
+            echo "$1: pinned $2, latest $3"
+            if [ -z "$3" ] || [ -z "$2" ]; then echo "::error::$1: could not read a version"; stale=1
+            elif [ "$2" != "$3" ]; then echo "::error::$1 $2 is behind $3"; stale=1; fi
+          }
+
+          lint=$(sed -n 's/^ *GOLANGCI_LINT_VERSION: *"\(v[^"]*\)".*/\1/p' .github/workflows/ci.yml)
+          check golangci-lint "$lint" "$(gh api repos/golangci/golangci-lint/releases/latest --jq .tag_name)"
+
+          latest_gr=$(gh api repos/goreleaser/goreleaser/releases/latest --jq .tag_name)
+          for f in .github/workflows/ci.yml .github/workflows/release.yml; do
+            for v in $(grep -A2 'goreleaser/goreleaser-action@' "$f" | sed -n 's/^ *version: *"\(v[^"]*\)".*/\1/p'); do
+              check "goreleaser in $f" "$v" "$latest_gr"
+            done
+          done
+
+          go_pinned=$(sed -n 's/^ *GO_LATEST: *"\([^"]*\)".*/\1/p' .github/workflows/ci.yml)
+          check "Go (GO_LATEST)" "$go_pinned" "$(curl -fsS 'https://go.dev/VERSION?m=text' | head -1 | sed 's/^go//')"
+
+          exit $stale
