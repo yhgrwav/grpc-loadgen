@@ -33,9 +33,13 @@ type callTimes struct {
 	begunAt  time.Time
 	pickedAt time.Time
 	// invokedAt is when Send handed the call to grpc-go, before name
-	// resolution. connWait sums each attempt's wait for a connection.
+	// resolution; attemptAt, when the current attempt began. connWait sums
+	// each attempt's wait for a connection; resolved says the first attempt
+	// waited for the resolver before its Begin.
 	invokedAt time.Time
+	attemptAt time.Time
 	connWait  time.Duration
+	resolved  bool
 	// streamFull says every stream the target allows was open at some moment
 	// between the start of the wait for one and the headers going out.
 	streamFull bool
@@ -85,7 +89,28 @@ type handler struct {
 	clock func() time.Time
 }
 
-func (handler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
+// TagRPC is where grpc-go says the call waited for the resolver: that wait
+// comes before Begin (v1.84.0 stream.go:338, :566).
+func (handler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	if !info.NameResolutionDelay {
+		return ctx
+	}
+	if call, ok := ctx.Value(callKey{}).(*callStats); ok {
+		call.mu.Lock()
+		call.times.resolved = true
+		call.mu.Unlock()
+	}
+
+	return ctx
+}
+
+func (h handler) now() time.Time {
+	if h.clock != nil {
+		return h.clock()
+	}
+
+	return time.Now()
+}
 
 func (handler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context { return ctx }
 
@@ -102,8 +127,12 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 
 	switch v := rpc.(type) {
 	case *stats.Begin:
+		call.times.attemptAt = v.BeginTime
 		if !v.IsTransparentRetryAttempt {
 			call.times.begunAt = v.BeginTime
+			if call.times.resolved && !call.times.invokedAt.IsZero() {
+				call.times.connWait += v.BeginTime.Sub(call.times.invokedAt)
+			}
 
 			break
 		}
@@ -119,11 +148,12 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 		call.times.sentAt = time.Time{}
 	case *stats.DelayedPickComplete:
 		// The wait for a stream starts once there is a connection.
-		call.times.pickedAt = time.Now()
+		call.times.pickedAt = h.now()
+		call.times.connWait += call.times.pickedAt.Sub(call.times.attemptAt)
 	case *stats.OutHeader:
 		// OutHeader carries no time of its own; the call is synchronous at the
 		// point the headers are handed to the transport.
-		now := time.Now()
+		now := h.now()
 		call.times.headerAt = now
 		if h.streams != nil {
 			// Asked before this stream counts: whether the wait met a full

@@ -319,6 +319,8 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	payload := req.Payload
 	body, target := responseTarget(req.KeepResponse)
 
+	// Before Invoke: grpc-go waits for the resolver before its first Begin.
+	call.times.invokedAt = time.Now()
 	err := conn.Invoke(callCtx, req.Method, &payload, target, rawCall...)
 
 	// The run was stopped: not a broken sender, but nothing was measured either.
@@ -337,6 +339,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 		SentAt:     sentAt,
 		NotSent:    notSent,
 		StreamWait: times.streamWait(),
+		ConnWait:   times.connWait,
 		DoneAt:     doneAt,
 		Category:   category,
 		Code:       status.Code(err).String(),
