@@ -204,3 +204,35 @@ func (s servingTarget) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckR
 
 	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
 }
+
+// Ground: contract — the rule's boundary: a service config the caller passes in DialOptions with
+// grpc.WithDefaultServiceConfig is the caller's choice and still applies.
+func TestServiceConfig_TheCallersDefaultStillApplies(t *testing.T) {
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(srv, servingTarget{delay: 200 * time.Millisecond})
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	sender := New(Options{Target: "passthrough:///bufnet", DialOptions: []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithDefaultServiceConfig(methodConfig(`"timeout": "0.05s"`)),
+	}})
+	t.Cleanup(func() { _ = sender.Close() })
+
+	if err := sender.Connect(bounded(t)); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	req := request(time.Now())
+	req.Deadline = req.ScheduledAt.Add(time.Second)
+
+	out, err := sender.Send(bounded(t), req)
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if out.Category != engine.CategoryTimeout {
+		t.Errorf("category %v, want the caller's 50ms timeout to cut the 200ms answer", out.Category)
+	}
+}
