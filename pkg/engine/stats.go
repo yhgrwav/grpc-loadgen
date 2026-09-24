@@ -31,7 +31,8 @@ type Snapshot struct {
 	// NotSent counts calls that timed out before going out: absent from Sent
 	// and Failed, which are about the target.
 	NotSent int
-	// Warmup and WarmupSent: stub for the spec.
+	// Warmup is the planned warmup; WarmupSent counts its calls that went out,
+	// so a live view has something to show while Sent is still zero.
 	Warmup     time.Duration
 	WarmupSent int
 	InFlight   int
@@ -199,7 +200,8 @@ type Report struct {
 	// Warmup is the leading span of the run whose calls are on Seconds but not
 	// in the totals: a call is warmup by the moment it was scheduled for.
 	Warmup time.Duration
-	// WarmupSent and WarmupFailed: stub for the spec.
+	// WarmupSent and WarmupFailed count the warmup's calls by the rule of Sent
+	// and Failed: Sent plus WarmupSent is every call that went out.
 	WarmupSent   int
 	WarmupFailed int
 	Sent         int
@@ -255,12 +257,15 @@ type Stats struct {
 	sendingEndedAt time.Time
 	endedAt        time.Time
 	warmup         time.Duration
-	sent           int
-	failed         int
-	notSent        int
-	aborted        int
-	reserve        int
-	byMethod       map[string]*methodStats
+	// warmupSent and warmupFailed count the warmup's calls by the rule of
+	// sent and failed.
+	warmupSent, warmupFailed int
+	sent                     int
+	failed                   int
+	notSent                  int
+	aborted                  int
+	reserve                  int
+	byMethod                 map[string]*methodStats
 	// startLag is how late calls began against their schedule, startLagMax
 	// its exact maximum; lateCancelMax how far past its deadline a timeout
 	// returned.
@@ -383,6 +388,12 @@ func (s *Stats) Record(r Result) {
 	}
 
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
+		if !r.NotSent {
+			s.warmupSent++
+			if r.Category != CategorySuccess && r.Category != CategoryAborted {
+				s.warmupFailed++
+			}
+		}
 		s.mu.Unlock()
 
 		return
@@ -573,6 +584,7 @@ func (s *Stats) SnapshotInto(dst *Snapshot, buf *LiveBuffer, percentiles bool) {
 
 	elapsed, sent, failed := s.elapsed(), s.sent, s.failed
 	dst.NotSent = s.notSent
+	dst.Warmup, dst.WarmupSent = s.warmup, s.warmupSent
 	measured := s.sendingWindow(elapsed)
 
 	if len(dst.Methods) != len(buf.names) {
@@ -648,6 +660,7 @@ func (s *Stats) Report() Report {
 	// snapshots the interface takes several times a second.
 	s.mu.Lock()
 	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
+	warmupSent, warmupFailed := s.warmupSent, s.warmupFailed
 	late, stream, connection := s.notSentLate, s.notSentStream, s.notSentConnection
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
@@ -675,10 +688,13 @@ func (s *Stats) Report() Report {
 	report := Report{
 		Duration: elapsed,
 		Warmup:   warmup,
-		Sent:     sent,
-		Failed:   failed,
-		NotSent:  notSent,
-		Aborted:  aborted,
+
+		WarmupSent:   warmupSent,
+		WarmupFailed: warmupFailed,
+		Sent:         sent,
+		Failed:       failed,
+		NotSent:      notSent,
+		Aborted:      aborted,
 
 		StartLagP99:   startLag.Percentile(0.99),
 		StartLagMax:   startLagMax,

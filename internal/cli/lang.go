@@ -205,12 +205,14 @@ func (t Text) FakeTarget() string {
 	})
 }
 
-func (t Text) WarmupNote(left string) string {
+func (t Text) WarmupNote(left string, sent int) string {
+	n := strconv.Itoa(sent)
+
 	return t.get(phrase{
-		LangRU: "идёт прогрев (" + left + "): эти запросы не попадут в percentiles, поэтому p99 пока пуст",
-		LangEN: "warming up (" + left + "): these requests stay out of the percentiles, so p99 is still empty",
-		LangDE: "Aufwärmphase (" + left + "): diese Anfragen bleiben aus den Perzentilen, daher ist p99 noch leer",
-		LangZH: "预热中（" + left + "）：这些请求不计入分位数，因此 p99 暂为空",
+		LangRU: "идёт прогрев (" + left + "): отправлено " + n + ", эти запросы не попадут в percentiles, поэтому p99 пока пуст",
+		LangEN: "warming up (" + left + "): " + n + " sent, these requests stay out of the percentiles, so p99 is still empty",
+		LangDE: "Aufwärmphase (" + left + "): " + n + " gesendet, diese Anfragen bleiben aus den Perzentilen, daher ist p99 noch leer",
+		LangZH: "预热中（" + left + "）：已发送 " + n + "，这些请求不计入分位数，因此 p99 暂为空",
 	})
 }
 
@@ -374,13 +376,15 @@ func (t Text) PickHint() string {
 }
 
 // WarmupNoteShort is WarmupNote for a narrow frame. It leaves out the time
-// left, which the header shows, so its width does not depend on the warmup.
-func (t Text) WarmupNoteShort() string {
+// left, which the header shows.
+func (t Text) WarmupNoteShort(sent int) string {
+	n := strconv.Itoa(sent)
+
 	return t.get(phrase{
-		LangRU: "прогрев: p99 пока пуст",
-		LangEN: "warming up: no p99 yet",
-		LangDE: "Aufwärmphase: p99 noch leer",
-		LangZH: "预热中：p99 暂为空",
+		LangRU: "прогрев: отправлено " + n + ", p99 пуст",
+		LangEN: "warming up: " + n + " sent, no p99",
+		LangDE: "Aufwärmen: " + n + " gesendet, kein p99",
+		LangZH: "预热中：已发送 " + n + "，p99 为空",
 	})
 }
 

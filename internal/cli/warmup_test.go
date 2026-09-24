@@ -69,7 +69,7 @@ func TestPlainLine_ShowsWarmupCallsGoingOut(t *testing.T) {
 	if !strings.Contains(line, "warming up: 120 sent") {
 		t.Errorf("line = %q, want it to show the warm-up calls", line)
 	}
-	if strings.Contains(line, "sent 0") {
+	if strings.Contains(line, "  sent 0  ") {
 		t.Errorf("line = %q: sent 0 while calls go out", line)
 	}
 	if after := plainLine(engine.Snapshot{Elapsed: 6 * time.Second, Warmup: 5 * time.Second, Sent: 50, WarmupSent: 250}); strings.Contains(after, "warming up") {

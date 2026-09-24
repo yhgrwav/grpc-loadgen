@@ -849,7 +849,7 @@ func (m *model) note() (full, short string) {
 	s := m.snapshot
 
 	if m.warmup > 0 && s.Elapsed < m.warmup {
-		return m.text.WarmupNote(formatDuration(m.warmup - s.Elapsed)), m.text.WarmupNoteShort()
+		return m.text.WarmupNote(formatDuration(m.warmup-s.Elapsed), s.WarmupSent), m.text.WarmupNoteShort(s.WarmupSent)
 	}
 	if s.Sent > 0 && float64(s.Failed)/float64(s.Sent) > 0.05 {
 		return m.text.ErrorsNote(), m.text.ErrorsNoteShort()

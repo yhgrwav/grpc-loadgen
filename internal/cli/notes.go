@@ -31,6 +31,16 @@ func reportNotes(report engine.Report) []string {
 		notes = append(notes, strings.TrimRight(fmt.Sprintf(format, args...), "\n"))
 	}
 
+	// Sent leaves the warmup out; this line holds it, so the two add up to
+	// what the target saw.
+	if report.Warmup > 0 {
+		failed := ""
+		if report.WarmupFailed > 0 {
+			failed = fmt.Sprintf(" (%d failed)", report.WarmupFailed)
+		}
+		add("warm-up %d sent%s, excluded from stats", report.WarmupSent, failed)
+	}
+
 	censored, unanswered, cutOff, unclassified, outside, invalid, refused := 0, 0, 0, 0, 0, 0, 0
 	rejected := make([]string, 0, len(report.Methods))
 	outright := make([]string, 0, len(report.Methods))

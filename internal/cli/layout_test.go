@@ -353,7 +353,7 @@ func TestShortNotesFitTheNarrowestFrame(t *testing.T) {
 	for _, lang := range allLangs {
 		text := NewText(lang)
 		for name, note := range map[string]string{
-			"warmup":    text.WarmupNoteShort(),
+			"warmup":    text.WarmupNoteShort(9999999), // seven digits: 100k rps for 100s
 			"errors":    text.ErrorsNoteShort(),
 			"in flight": text.InFlightNoteShort(),
 		} {
