@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -298,4 +299,43 @@ func TestConnections_ReadTheLimitUnderMutualTLS(t *testing.T) {
 	if got, ok := sender.Connections(); !ok || !got.LimitAnnounced || got.FirstLimit != 7 {
 		t.Errorf("connections %+v (known %v), want the limit 7 read under mTLS", got, ok)
 	}
+}
+
+// Ground: contract — ServerName changes SNI and the name the certificate is checked against, and
+// nothing else: :authority stays the target's address, so a target that routes by it sees the
+// same request with or without the option.
+func TestTLS_ServerNameLeavesTheAuthorityAlone(t *testing.T) {
+	cert, pool := selfSigned(t)
+	target := &authorityTarget{}
+	opts := listen(t, target, grpc.Creds(credentials.NewServerTLSFromCert(&cert)))
+	opts.Target = "passthrough:///127.0.0.1:443"
+	opts.TLS = true
+	opts.RootCAs = pool
+	opts.ServerName = "bufnet"
+
+	sender := connected(t, opts)
+	if _, err := sender.Send(bounded(t), request(time.Now())); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if got := target.seen.Load(); got == nil || *got != "127.0.0.1:443" {
+		t.Errorf(":authority = %v, want the target's address 127.0.0.1:443", got)
+	}
+}
+
+type authorityTarget struct {
+	grpc_health_v1.UnimplementedHealthServer
+
+	seen atomic.Pointer[string]
+}
+
+func (a *authorityTarget) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (
+	*grpc_health_v1.HealthCheckResponse, error,
+) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	if v := md.Get(":authority"); len(v) == 1 {
+		a.seen.Store(&v[0])
+	}
+
+	return &grpc_health_v1.HealthCheckResponse{}, nil
 }

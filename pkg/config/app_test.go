@@ -218,3 +218,49 @@ func TestServerName_Kept(t *testing.T) {
 		t.Errorf("server name %q, want api.internal", cfg.App.ServerName)
 	}
 }
+
+// Ground: contract — a variable that is set but empty would send "Bearer " and the run would show
+// every call Unauthenticated as the target's fault; refused, and told apart from an unset one.
+func TestMetadata_EmptyVariableIsRefusedApartFromUnset(t *testing.T) {
+	t.Setenv("LEETTEST_EMPTY", "")
+
+	_, empty := config.Parse(withApp("  metadata:\n    authorization: Bearer ${LEETTEST_EMPTY}\n"))
+	_, unset := config.Parse(withApp("  metadata:\n    authorization: Bearer ${LEETTEST_NOT_SET_ANYWHERE}\n"))
+
+	for _, err := range []error{empty, unset} {
+		if !errors.Is(err, config.ErrInvalidMetadata) {
+			t.Fatalf("err = %v, want ErrInvalidMetadata", err)
+		}
+	}
+	if !strings.Contains(empty.Error(), "LEETTEST_EMPTY") || !strings.Contains(empty.Error(), "empty") {
+		t.Errorf("the error for an empty variable does not say so: %v", empty)
+	}
+	if !strings.Contains(unset.Error(), "not set") {
+		t.Errorf("the error for an unset variable does not say so: %v", unset)
+	}
+	if empty.Error() == strings.ReplaceAll(unset.Error(), "LEETTEST_NOT_SET_ANYWHERE", "LEETTEST_EMPTY") {
+		t.Errorf("empty and unset read the same: %v", empty)
+	}
+}
+
+// Ground: contract — "$${" writes a literal "${"; any other "$" is kept as written.
+func TestMetadata_DoubledDollarWritesALiteralReference(t *testing.T) {
+	cfg, err := config.Parse(withApp("  metadata:\n    x-a: p$${NOT_A_VAR}q\n    x-b: a$$b\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.App.Metadata["x-a"]; got != "p${NOT_A_VAR}q" {
+		t.Errorf("x-a = %q, want %q", got, "p${NOT_A_VAR}q")
+	}
+	if got := cfg.App.Metadata["x-b"]; got != "a$$b" {
+		t.Errorf("x-b = %q, want %q", got, "a$$b")
+	}
+}
+
+// Ground: contract — the refusal of a binary key says why in the words users search for.
+func TestMetadata_BinaryKeySaysItIsNotSupported(t *testing.T) {
+	_, err := config.Parse(withApp("  metadata:\n    x-trace-bin: AAAA\n"))
+	if err == nil || !strings.Contains(err.Error(), "binary metadata is not supported") {
+		t.Errorf("err = %v, want \"binary metadata is not supported\"", err)
+	}
+}

@@ -400,3 +400,97 @@ func TestRun_InvalidMetadataFailsBeforeConnecting(t *testing.T) {
 		})
 	}
 }
+
+// The methods are checked before the run with the same metadata. A target
+// that refuses the token there stops the run before it starts, saying the
+// credentials were rejected, never quoting them.
+func TestRun_CredentialsRejectedAtTheMethodCheckStopBeforeTheRun(t *testing.T) {
+	dir, g := mutual(t)
+
+	app := "  ca: server.pem\n  cert: client.pem\n  key: client.key\n" +
+		"  metadata:\n    authorization: " + secretToken + "-wrong\n"
+	res := runCLI(t.Context(), t, 10*time.Second, "-c", guardedConfig(t, dir, g.addr, app, ""))
+
+	if res.err == nil {
+		t.Fatal("run succeeded with a token the target refuses")
+	}
+	if code := exitCode(res.err); code != 1 {
+		t.Errorf("exit code %d, want 1", code)
+	}
+	if !strings.Contains(res.err.Error(), "target rejected credentials") {
+		t.Errorf("error %q does not say the credentials were rejected", res.err)
+	}
+	if strings.Contains(res.stdout+res.stderr+res.err.Error(), secretMark) {
+		t.Error("the token appears in the output")
+	}
+	if n := g.health.calls.Load(); n != 0 {
+		t.Errorf("target received %d calls of the run", n)
+	}
+}
+
+// TLS on against a plaintext target, and off against a TLS one: the two
+// commonest setup mistakes. Each fails before the run with exit code 1, a
+// message naming app.tls, and within the connect timeout — without TLS the
+// client waits for a server preface that never comes (grpc-go v1.84.0,
+// http2_client.go:472).
+func TestRun_TLSMismatchFailsWithinTheConnectTimeout(t *testing.T) {
+	dir := t.TempDir()
+	server := writePair(t, dir, "server", localCert())
+	tlsTarget := startGuardedTarget(t, server, nil)
+	plainTarget := startTarget(t)
+
+	cases := []struct{ name, addr, app string }{
+		{"TLS on, plaintext target", plainTarget.addr, "  tls: true\n"},
+		{"TLS off, TLS target", tlsTarget.addr, "  tls: false\n"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			start := time.Now()
+			res := runCLI(t.Context(), t, 8*time.Second, "-connect-timeout", "2s",
+				"-c", guardedConfig(t, dir, c.addr, c.app, ""))
+
+			if res.err == nil {
+				t.Fatal("run succeeded")
+			}
+			if took := time.Since(start); took > 3*time.Second {
+				t.Errorf("failed after %v; the connect timeout is 2s", took)
+			}
+			if code := exitCode(res.err); code != 1 {
+				t.Errorf("exit code %d, want 1", code)
+			}
+			if !strings.Contains(res.err.Error(), "app.tls") {
+				t.Errorf("error %q does not point at app.tls", res.err)
+			}
+		})
+	}
+}
+
+// A password-protected key cannot be read; the error says that, not the
+// parser's own words.
+func TestRun_EncryptedKeyIsRefusedByName(t *testing.T) {
+	dir := t.TempDir()
+	writePair(t, dir, "client", localCert())
+
+	for name, block := range map[string]*pem.Block{
+		"PKCS#8 encrypted": {Type: "ENCRYPTED PRIVATE KEY", Bytes: []byte{0x30, 0x00}},
+		"legacy Proc-Type": {Type: "EC PRIVATE KEY", Headers: map[string]string{
+			"Proc-Type": "4,ENCRYPTED", "DEK-Info": "AES-256-CBC,00000000000000000000000000000000",
+		}, Bytes: []byte{0x00}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(dir, "locked.key"), pem.EncodeToMemory(block), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			res := runCLI(t.Context(), t, 5*time.Second, "-c",
+				guardedConfig(t, dir, closedPort(t), "  cert: client.pem\n  key: locked.key\n", ""))
+			if res.err == nil || !strings.Contains(res.err.Error(), "encrypted keys are not supported") {
+				t.Errorf("err = %v, want \"encrypted keys are not supported\"", res.err)
+			}
+			if code := exitCode(res.err); code != 1 {
+				t.Errorf("exit code %d, want 1", code)
+			}
+		})
+	}
+}
