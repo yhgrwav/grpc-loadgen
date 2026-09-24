@@ -108,6 +108,53 @@ func TestVerdict_CausesThatMoveP99OnlyTogether(t *testing.T) {
 	}
 }
 
+// 10 000 calls waited 2ms for a stream and moved nothing: 3.002s prints as
+// 3.00s. 200 calls waited 500ms for the connection and moved p99 to 3.50s.
+// The heading names the cause of the tail, not the commonest wait; N stays the
+// run's count. The tail is the calls at or above the printed p99: calls above
+// p99 without waits would take in all 10 000.
+func TestVerdict_TheTailNotTheRunRanksTheCauses(t *testing.T) {
+	calls := times(10000, waitCall{stream: 2 * ms, served: 3 * time.Second})
+	calls = append(calls, times(200, waitCall{conn: 500 * ms, served: 3 * time.Second})...)
+	r := reportOf(t, calls)
+
+	v := verdictOf(t, r)
+	if !strings.HasPrefix(v, "the connection to the target was not ready for 200 calls") {
+		t.Errorf("heading:\n%s", v)
+	}
+}
+
+// p99 2.00ms, its tail waited 0.8ms for a stream each: under the 1ms floor, so
+// every count is 0. p99 without the waits is 1.20ms and the printed number
+// moved, but no cause is there to name: a note with both numbers, no verdict.
+func TestVerdict_AMoveWithNoCauseOverTheFloorIsNoVerdict(t *testing.T) {
+	calls := times(98, waitCall{served: 1200 * time.Microsecond})
+	calls = append(calls, times(2, waitCall{stream: 800 * time.Microsecond, served: 1200 * time.Microsecond})...)
+	r := reportOf(t, calls)
+
+	notes := strings.Join(reportNotes(r), "\n\n")
+	if strings.Contains(notes, "limited by") || strings.Contains(notes, "was not ready for") {
+		t.Errorf("a verdict with every count at 0:\n%s", notes)
+	}
+	if !strings.Contains(notes, "pkg.Svc/Do: p99 without client-side waits (generator, connection, stream) is 1.20ms.") {
+		t.Errorf("the note with the number is gone:\n%s", notes)
+	}
+	if s := shortStreamVerdict(r); s != "" {
+		t.Errorf("short verdict %q", s)
+	}
+}
+
+// The in-flight line is about the stream limit: a verdict from the connection
+// alone does not print it.
+func TestVerdict_NoInFlightLineWithoutAStreamCause(t *testing.T) {
+	r := reportOf(t, times(200, waitCall{conn: 50 * ms, served: 2 * ms}))
+	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 100, LastLimit: 100}
+
+	if v := verdictOf(t, r); strings.Contains(v, "in flight") {
+		t.Errorf("the stream limit's line under a connection verdict:\n%s", v)
+	}
+}
+
 // Waits that moved no printed p99 are a note, and it says which waits it
 // compared, not just that p99 did not change.
 func TestNotes_ClientWaitsThatMovedNothingSayWhatWasCompared(t *testing.T) {
