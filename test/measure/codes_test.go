@@ -41,7 +41,7 @@ func TestReport_FailedCallsCarryTheCodeTheStandSent(t *testing.T) {
 
 	checkCounts(t, method, sent)
 
-	want := []engine.CodeCount{{Code: codes.ResourceExhausted.String(), Count: sent / 3}}
+	want := []engine.CodeCount{{Code: codes.ResourceExhausted.String(), Count: sent / 3, FromTarget: true}}
 	if !slices.Equal(method.FailureCodes, want) {
 		t.Errorf("failure codes %v, want %v: every 3rd of %d calls", method.FailureCodes, want, sent)
 	}

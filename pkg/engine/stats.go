@@ -50,26 +50,41 @@ type MethodSnapshot struct {
 	P99       metrics.Quantile
 }
 
-// CodeCount is how many calls failed with one transport code.
+// CodeCount is how many calls failed with one transport code from one source.
 type CodeCount struct {
-	Code       string
-	Count      int
+	Code  string
+	Count int
+	// FromTarget is true for a code that came back over the wire, false for one
+	// the client's transport set. The same code from both is two entries.
 	FromTarget bool
 }
 
-// failureCodes lists codes by count, the commonest first, a tie by name; nil
-// when nothing failed.
-func failureCodes(codes map[string]int) []CodeCount {
+type codeKey struct {
+	code       string
+	fromTarget bool
+}
+
+// failureCodes lists the codes that came back first, then those the client
+// set, each by count, the commonest first, a tie by name; nil when nothing
+// failed.
+func failureCodes(codes map[codeKey]int) []CodeCount {
 	if len(codes) == 0 {
 		return nil
 	}
 
 	out := make([]CodeCount, 0, len(codes))
-	for code, n := range codes {
-		out = append(out, CodeCount{Code: code, Count: n})
+	for k, n := range codes {
+		out = append(out, CodeCount{Code: k.code, Count: n, FromTarget: k.fromTarget})
 	}
 
 	slices.SortFunc(out, func(a, b CodeCount) int {
+		if a.FromTarget != b.FromTarget {
+			if a.FromTarget {
+				return -1
+			}
+
+			return 1
+		}
 		if a.Count != b.Count {
 			return b.Count - a.Count
 		}
@@ -95,9 +110,9 @@ type MethodReport struct {
 	// wait taken out: the time the target had them.
 	P99WithoutStreamWait metrics.Quantile
 	// FailureCodes counts the failed calls by the transport's own code, such
-	// as Unavailable: the category says whose fault a failure is, the code is
-	// what the target's logs call it. A call whose transport gives no code is
-	// not listed.
+	// as Unavailable, and by whether it came back over the wire or the client
+	// set it: the category says whose fault a failure is, the code is what the
+	// target's logs call it. A call whose transport gives no code is not listed.
 	FailureCodes []CodeCount
 	// The percentiles above are the service time: successes, with timeouts and
 	// aborted calls as lower bounds of it. Refusals — the target answering it
@@ -264,8 +279,9 @@ type methodStats struct {
 	refusal  *metrics.Latencies
 	rejected *metrics.Latencies
 	timeline timeline
-	// codes counts failed calls by the transport's code; nil until one fails.
-	codes map[string]int
+	// codes counts failed calls by the transport's code and its source; nil
+	// until one fails.
+	codes map[codeKey]int
 	// lastAnswer is the latest scheduled moment among the calls the target
 	// answered, as an offset from the start of the run; -1 until one is.
 	lastAnswer time.Duration
@@ -403,9 +419,9 @@ func (s *Stats) Record(r Result) {
 		method.failed++
 		if r.Code != "" {
 			if method.codes == nil {
-				method.codes = make(map[string]int)
+				method.codes = make(map[codeKey]int)
 			}
-			method.codes[r.Code]++
+			method.codes[codeKey{r.Code, r.CodeFromTarget}]++
 		}
 	}
 

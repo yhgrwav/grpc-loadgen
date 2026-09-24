@@ -35,9 +35,9 @@ func printCodes(codes []engine.CodeCount, failed int) string {
 // The category says whose fault a failure is; the code is what a developer
 // greps the target's logs for. Both are in the report.
 func TestPrintReport_NamesTheCodesOfFailedCalls(t *testing.T) {
-	text := printCodes([]engine.CodeCount{{Code: "Unavailable", Count: 12}, {Code: "DeadlineExceeded", Count: 3}}, 15)
+	text := printCodes([]engine.CodeCount{{Code: "Unavailable", Count: 12, FromTarget: true}, {Code: "DeadlineExceeded", Count: 3, FromTarget: true}}, 15)
 
-	if !strings.Contains(text, "codes: Unavailable 12, DeadlineExceeded 3") {
+	if !strings.Contains(text, "a.B/One codes sent by the target: Unavailable 12, DeadlineExceeded 3") {
 		t.Errorf("no codes line under the method:\n%s", text)
 	}
 }
