@@ -733,14 +733,14 @@ func (s *Stats) Report() Report {
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
 
-		NotSentLate:       late,
-		NotSentStream:     stream,
-		NotSentConnection: connection,
-		StreamWaited:      int(streamWait.Count()),
-		StreamWaitP99:     streamWait.Percentile(0.99),
-		GeneratorCauseCalls:   waited[0],
-		ConnectionCauseCalls:  waited[1],
-		StreamCauseCalls:      waited[2],
+		NotSentLate:          late,
+		NotSentStream:        stream,
+		NotSentConnection:    connection,
+		StreamWaited:         int(streamWait.Count()),
+		StreamWaitP99:        streamWait.Percentile(0.99),
+		GeneratorCauseCalls:  waited[0],
+		ConnectionCauseCalls: waited[1],
+		StreamCauseCalls:     waited[2],
 	}
 
 	for _, v := range views {
