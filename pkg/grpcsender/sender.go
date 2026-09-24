@@ -72,6 +72,14 @@ type Options struct {
 	// such as custom credentials or an in-process dialer in tests. Custom
 	// transport credentials replace the sender's own, which read the stream
 	// limit the target announces; Connections then reports nothing.
+	//
+	// The service config the target hands out through its resolver is
+	// ignored: the sender keeps one connection to one address, pick_first,
+	// and with several addresses in DNS loads that one backend only. A
+	// config given here with grpc.WithDefaultServiceConfig still applies:
+	// that is the caller's own choice, and the CLI offers none. With a load
+	// balancing policy other than pick_first the connection lines and the
+	// "limited by the run" verdict are wrong: they assume one connection.
 	DialOptions []grpc.DialOption
 }
 
@@ -131,6 +139,10 @@ func (s *Sender) Connect(ctx context.Context) error {
 		// served, and would count one call for several. Transparent retries
 		// stay: they follow only attempts the target never processed.
 		grpc.WithDisableRetry(),
+		// The target's service config would change what is measured: more
+		// connections, a shorter deadline, calls held on a failed connection,
+		// a reply limit of its own. See Options.DialOptions.
+		grpc.WithDisableServiceConfig(),
 	}
 	if len(s.opts.Metadata) > 0 {
 		// Per-RPC credentials rather than a context per call: gRPC attaches
