@@ -378,7 +378,7 @@ func TestPrintReportSeparatesARejectedRequestFromARefusal(t *testing.T) {
 	if !strings.Contains(text, "rejected") {
 		t.Errorf("no rejected row:\n%s", text)
 	}
-	for _, want := range []string{"invalid run", "a.B/One", "client's limit", "app.max_response_size", "larger than accepted"} {
+	for _, want := range []string{"invalid run", "a.B/One", "client's limit, 4MiB", "app.max_response_size", "larger than accepted"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("verdict does not say %q:\n%s", want, text)
 		}

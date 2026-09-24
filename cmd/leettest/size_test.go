@@ -17,12 +17,28 @@ package main
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
 )
+
+// lineWith reports whether some line of text holds every part.
+func lineWith(text string, parts ...string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		all := true
+		for _, p := range parts {
+			all = all && strings.Contains(line, p)
+		}
+		if all {
+			return true
+		}
+	}
+
+	return false
+}
 
 // passCodec moves bytes as they are, so the server below needs no schema.
 type passCodec struct{}
@@ -86,6 +102,17 @@ func TestRun_MaxResponseSizeLetsALargeReplyThrough(t *testing.T) {
 			}
 			if (failed == sent) != c.failAll || (failed == 0) == c.failAll {
 				t.Errorf("failed %d of %d, want all failed = %v", failed, sent, c.failAll)
+			}
+			if !c.failAll {
+				return
+			}
+			// The client refused the reply after it came in whole: not cut off
+			// (#85 leaves size out), and the code is the client's, not the target's.
+			if strings.Contains(res.stdout, "cut off") || strings.Contains(res.stdout, "codes sent by the target") {
+				t.Errorf("an oversized reply reads as cut off or as the target's code:\n%s", res.stdout)
+			}
+			if !lineWith(res.stdout, "codes set by the client", "ResourceExhausted") {
+				t.Errorf("ResourceExhausted is not among the codes the client set:\n%s", res.stdout)
 			}
 		})
 	}
