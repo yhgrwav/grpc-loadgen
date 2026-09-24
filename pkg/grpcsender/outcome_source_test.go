@@ -44,7 +44,11 @@ func TestSend_WentOutNoStatusIsCutOffNotUnreachable(t *testing.T) {
 		want engine.Category
 	}{
 		{"stream reset with INTERNAL_ERROR", func(t *testing.T) engine.Outcome {
-			return sendWithin(t, rawTarget(t, func(fr *http2.Framer, id uint32, _ int) { _ = fr.WriteRSTStream(id, http2.ErrCodeInternal) }), 0)
+			return sendWithin(t, rawTargetOnData(t, func(fr *http2.Framer, id uint32) bool {
+				_ = fr.WriteRSTStream(id, http2.ErrCodeInternal)
+
+				return false
+			}), 0)
 		}, codes.Internal, engine.CategoryCutOff},
 		// The other end took the request and dropped the connection.
 		{"connection dropped after the request went out", func(t *testing.T) engine.Outcome {
