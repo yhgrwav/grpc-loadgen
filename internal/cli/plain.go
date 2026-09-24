@@ -48,9 +48,13 @@ func RunPlain(w io.Writer, target string, eng *engine.Engine, run func() error) 
 		case err := <-done:
 			return err
 		case <-ticker.C:
-			s := eng.Snapshot()
-			fmt.Fprintf(w, "%s  sent %d  rps %.0f  in-flight %d  failed %d  not-sent %d  p99 %s\n",
-				formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, s.NotSent, formatQuantile(s.P99))
+			fmt.Fprintln(w, plainLine(eng.Snapshot()))
 		}
 	}
+}
+
+// plainLine is one second of the plain live view. Stub for the spec.
+func plainLine(s engine.Snapshot) string {
+	return fmt.Sprintf("%s  sent %d  rps %.0f  in-flight %d  failed %d  not-sent %d  p99 %s",
+		formatDuration(s.Elapsed), s.Sent, s.RPS, s.InFlight, s.Failed, s.NotSent, formatQuantile(s.P99))
 }

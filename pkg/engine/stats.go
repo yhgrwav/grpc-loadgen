@@ -30,13 +30,16 @@ type Snapshot struct {
 	Failed  int
 	// NotSent counts calls that timed out before going out: absent from Sent
 	// and Failed, which are about the target.
-	NotSent  int
-	InFlight int
-	RPS      float64
-	P50      metrics.Quantile
-	P90      metrics.Quantile
-	P99      metrics.Quantile
-	Methods  []MethodSnapshot
+	NotSent int
+	// Warmup and WarmupSent: stub for the spec.
+	Warmup     time.Duration
+	WarmupSent int
+	InFlight   int
+	RPS        float64
+	P50        metrics.Quantile
+	P90        metrics.Quantile
+	P99        metrics.Quantile
+	Methods    []MethodSnapshot
 }
 
 type MethodSnapshot struct {
@@ -196,8 +199,11 @@ type Report struct {
 	// Warmup is the leading span of the run whose calls are on Seconds but not
 	// in the totals: a call is warmup by the moment it was scheduled for.
 	Warmup time.Duration
-	Sent   int
-	Failed int
+	// WarmupSent and WarmupFailed: stub for the spec.
+	WarmupSent   int
+	WarmupFailed int
+	Sent         int
+	Failed       int
 	// NotSent counts calls that timed out before going out: absent from Sent
 	// and Failed, which are about the target.
 	NotSent int
