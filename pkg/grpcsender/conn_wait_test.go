@@ -382,22 +382,27 @@ func TestSend_ConnWaitCoversAHeldHandshake(t *testing.T) {
 	}
 }
 
-// gatedResolver hands out the address at once on the first build and, after
-// the channel went idle, only once gate is closed.
+// gatedResolver hands out the address at once until armed, and after that
+// only once gate is closed. Arming by hand, not by counting builds: under a
+// loaded CPU the channel can go idle during the first connection, and a
+// second build gated then would hold Connect until its deadline.
 type gatedResolver struct {
-	gate   chan struct{}
-	builds atomic.Int32
+	gate  chan struct{}
+	armed atomic.Bool
+	// gated counts the builds that waited for gate.
+	gated atomic.Int32
 }
 
 func (r *gatedResolver) Scheme() string { return "gated" }
 
 func (r *gatedResolver) Build(_ resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
 	state := resolver.State{Addresses: []resolver.Address{{Addr: "bufnet"}}}
-	if r.builds.Add(1) == 1 {
+	if !r.armed.Load() {
 		_ = cc.UpdateState(state)
 
 		return nopResolver{}, nil
 	}
+	r.gated.Add(1)
 	go func() {
 		<-r.gate
 		_ = cc.UpdateState(state)
@@ -436,6 +441,8 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 
+	res.armed.Store(true)
+
 	// Idle drops the resolver; the next call builds it again and waits.
 	// One read per turn: a second GetState could see Idle already and wait
 	// for a change away from it that never comes.
@@ -446,7 +453,7 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 	}
 
 	out := sendHeld(t, sender, started, func() { close(res.gate) }, hold)
-	if res.builds.Load() < 2 {
+	if res.gated.Load() < 1 {
 		t.Fatal("the resolver was not rebuilt: the call did not wait for it")
 	}
 	checkHeldWait(t, out, hold, resolveSlack)
