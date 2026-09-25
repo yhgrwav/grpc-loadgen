@@ -96,7 +96,10 @@ func runOn(t *testing.T, s *stand.Stand, call engine.Call, maxInFlight int,
 		t.Errorf("%d streams still counted open after the run", n)
 	}
 
-	return eng.Report(), err
+	report := eng.Report()
+	checkNoSenderDefects(t, report)
+
+	return report, err
 }
 
 // --- the in-flight cap ---------------------------------------------------
@@ -331,6 +334,7 @@ func TestReport_AHangingTargetFailsEveryCallLiveAndInTheReport(t *testing.T) {
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	if report.Failed != report.Sent || report.Methods[0].Failed != report.Methods[0].Sent {
 		t.Errorf("report: failed %d of %d, method %d of %d; want all",
 			report.Failed, report.Sent, report.Methods[0].Failed, report.Methods[0].Sent)
@@ -408,6 +412,7 @@ func TestReport_TwoMethodsOfDifferentBudgetsStillNameTheHeldSlots(t *testing.T) 
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	if report.CapHit == nil {
 		t.Fatal("no cap hit in the report")
 	}
@@ -493,6 +498,7 @@ func TestReport_AStoppedRunRatesOverTheTimeItSent(t *testing.T) {
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	if !report.Incomplete {
 		t.Fatal("report not marked incomplete after Stop")
 	}
@@ -580,6 +586,7 @@ func TestReport_OneRejectedMethodAmongServedOnesIsStillAVerdict(t *testing.T) {
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	if !report.RequestRejected {
 		t.Error("one method rejected every call, yet the run passed as valid")
 	}
@@ -633,6 +640,7 @@ func TestReport_TheLastAnswerIsWhereTheSilenceBegins(t *testing.T) {
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	arrivals := target.Arrivals()
 	if len(arrivals) == 0 {
 		t.Fatal("the stand saw no calls")

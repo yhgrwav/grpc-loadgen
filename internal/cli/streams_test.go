@@ -256,3 +256,15 @@ func TestNotes_TheVerdictCountsMethodsAndEachMovedOneGetsANote(t *testing.T) {
 		t.Errorf("a note for a method the wait did not move: %q", n)
 	}
 }
+
+// Causes that fall short of NotSent are a sender's defect: said, with the
+// count, so three numbers that miss the fourth are not left unexplained.
+func TestNotes_AnUnsentCallWithoutACauseIsNamed(t *testing.T) {
+	report := oneStream()
+	report.NotSentStream, report.NotSent = 3, 5
+
+	want := "not sent 5: waited for a stream 3, cause unknown 2 (a defect of the tool; please report it)."
+	if _, ok := noteStarting(reportNotes(report, ""), want); !ok {
+		t.Errorf("no %q in:\n%s", want, strings.Join(reportNotes(report, ""), "\n\n"))
+	}
+}

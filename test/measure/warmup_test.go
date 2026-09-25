@@ -63,6 +63,7 @@ func TestReport_SentAndWarmupAreEveryCallTheStandGot(t *testing.T) {
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	got := checkArrivals(t, target.Arrivals(), rps, duration)
 
 	if report.WarmupSent == 0 {
