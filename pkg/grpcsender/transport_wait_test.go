@@ -136,6 +136,22 @@ func TestSend_QuotaWaitUntilDeadlineIsNotServiceTime(t *testing.T) {
 	}
 }
 
+// A target that answers on the request's HEADERS, before the body: grpc-go
+// then sometimes reports no OutPayload (measured under -race on a GitHub
+// runner: 161 of 2000 on go1.27.1, 37 of 2000 on go1.25). Every call must
+// still come back with a SentAt. With the fallback removed, 500 calls miss
+// every such case with probability 0.981^500 ≈ 6e-5 at the lower rate; with
+// it, the invariant cannot fail, so the test is not flaky.
+//
+// Ground: signal grpc-go v1.84.0 — pins that a call answered before its body
+// still reaches us as a success we can date; the unit table above pins our rule.
+func TestSend_AnAnswerBeforeTheBodyStillDatesTheCall(t *testing.T) {
+	s := rawTarget(t, answerOK)
+	for range 500 {
+		sendWithin(t, s, time.Second)
+	}
+}
+
 // Ground: boundary — the branch "headers out, body stuck" has no end-to-end test: a grpc-go
 // server reads the whole body before the handler, so the stand cannot hold a flow-control window
 // shut.
@@ -159,8 +175,8 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload, false},
 		// The target answered before the body was written: grpc-go's Write
 		// failed on the finished stream and reported no OutPayload
-		// (stream.go:1253–1257, v1.84.0). The headers are the last sign of
-		// the call going out, for any outcome.
+		// (stream.go:1253–1257, v1.84.0). headerAt, the stream granted, is
+		// the last moment we have for any outcome that came back.
 		{"success before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategorySuccess, header, false},
 		{"error status before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryServerFault, header, false},
 		{"cut off before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryCutOff, header, false},
