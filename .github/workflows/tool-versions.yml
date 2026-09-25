@@ -43,4 +43,7 @@ jobs:
           release_go=$(grep -A8 'actions/setup-go@' .github/workflows/release.yml | sed -n 's/^ *go-version: *"\([^"]*\)".*/\1/p')
           check "Go in release.yml" "$release_go" "$go_pinned"
 
+          stress_go=$(sed -n 's/^ *go: \[.*"\([0-9.]*\)"\].*/\1/p' .github/workflows/stress.yml)
+          check "latest Go in stress.yml" "$stress_go" "$go_pinned"
+
           exit $stale
