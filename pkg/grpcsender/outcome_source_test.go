@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -121,10 +123,12 @@ func TestCategorize_OutcomeAgreesWithTheCodesSource(t *testing.T) {
 // arrived, so the attempt's OutPayload has fired. The first connection refuses
 // its first stream; with once set it then hangs up and the listener is gone,
 // so the transparent retry fails before writing anything. Without once every
-// stream is refused.
-func refusingAfterPayload(t *testing.T, once bool) *Sender {
+// stream is refused. The record says what reached each side before the first
+// refusal, so a test can check its scenario held.
+func refusingAfterPayload(t *testing.T, once bool) (*Sender, *refusalRecord) {
 	t.Helper()
 
+	rec := &refusalRecord{}
 	lis := bufconn.Listen(1024 * 1024)
 	t.Cleanup(func() { _ = lis.Close() })
 
@@ -146,10 +150,16 @@ func refusingAfterPayload(t *testing.T, once bool) *Sender {
 		if err := fr.WriteSettings(); err != nil {
 			return
 		}
+		sawData := make(map[uint32]bool)
 		for {
 			f, err := fr.ReadFrame()
 			if err != nil {
 				return
+			}
+			// Recorded apart from the refusal, so a refusal moved before the
+			// DATA shows in the record.
+			if d, ok := f.(*http2.DataFrame); ok {
+				sawData[d.StreamID] = true
 			}
 			switch f := f.(type) {
 			case *http2.SettingsFrame:
@@ -157,6 +167,16 @@ func refusingAfterPayload(t *testing.T, once bool) *Sender {
 					_ = fr.WriteSettingsAck()
 				}
 			case *http2.DataFrame:
+				// GOAWAY first: the client stops opening streams on this
+				// connection before it sees the refusal, so the retry cannot
+				// be written here before the hang-up (5 in 300 on go1.25.0,
+				// -race, 2 CPUs).
+				if !rec.refused.Swap(true) {
+					rec.dataBeforeRefusal.Store(sawData[f.StreamID])
+				}
+				if once {
+					_ = fr.WriteGoAway(f.StreamID, http2.ErrCodeNo, nil)
+				}
 				_ = fr.WriteRSTStream(f.StreamID, http2.ErrCodeRefusedStream)
 				if once {
 					return
@@ -167,13 +187,40 @@ func refusingAfterPayload(t *testing.T, once bool) *Sender {
 
 	sender := New(Options{Target: "passthrough:///bufnet", DialOptions: []grpc.DialOption{
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithStatsHandler(rec),
 	}})
 	t.Cleanup(func() { _ = sender.Close() })
 	if err := sender.Connect(bounded(t)); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 
-	return sender
+	return sender, rec
+}
+
+// refusalRecord notes whether the stand got the first attempt's DATA and
+// whether grpc-go reported its OutPayload before that attempt ended.
+type refusalRecord struct {
+	refused           atomic.Bool
+	dataBeforeRefusal atomic.Bool
+	payloadBeforeEnd  atomic.Bool
+	firstEnded        atomic.Bool
+}
+
+func (r *refusalRecord) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
+func (r *refusalRecord) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+func (r *refusalRecord) HandleConn(context.Context, stats.ConnStats) {}
+
+func (r *refusalRecord) HandleRPC(_ context.Context, s stats.RPCStats) {
+	switch s.(type) {
+	case *stats.OutPayload:
+		if !r.firstEnded.Load() {
+			r.payloadBeforeEnd.Store(true)
+		}
+	case *stats.End:
+		r.firstEnded.Store(true)
+	}
 }
 
 // As the state in #75, the last attempt decides whether the call went out: the
@@ -181,8 +228,15 @@ func refusingAfterPayload(t *testing.T, once bool) *Sender {
 // A sticky "went out" would say the target may have processed a call that
 // REFUSED_STREAM guarantees it did not.
 func TestSend_WentOutIsTheLastAttempts(t *testing.T) {
-	out := sendWithin(t, refusingAfterPayload(t, true), time.Second)
+	sender, rec := refusingAfterPayload(t, true)
+	out := sendWithin(t, sender, time.Second)
 
+	// The scenario: the first attempt went out — its DATA reached the stand and
+	// grpc-go reported its payload — and only then was it refused.
+	if !rec.dataBeforeRefusal.Load() || !rec.payloadBeforeEnd.Load() {
+		t.Fatalf("DATA at the stand %v, OutPayload before the first End %v: the first attempt did not go out",
+			rec.dataBeforeRefusal.Load(), rec.payloadBeforeEnd.Load())
+	}
 	if out.Category != engine.CategoryUnreachable {
 		t.Errorf("category = %v (code %s), want unreachable: the retry went nowhere", out.Category, out.Code)
 	}
@@ -192,7 +246,8 @@ func TestSend_WentOutIsTheLastAttempts(t *testing.T) {
 // with "may have processed": the safe side, a user checks for duplicates rather
 // than assumes none. Telling it apart needs the status text; that is tech debt.
 func TestSend_RefusedOnTheLastAttemptIsCutOff(t *testing.T) {
-	out := sendWithin(t, refusingAfterPayload(t, false), time.Second)
+	sender, _ := refusingAfterPayload(t, false)
+	out := sendWithin(t, sender, time.Second)
 
 	if out.Category != engine.CategoryCutOff {
 		t.Errorf("category = %v (code %s, %v), want cut off", out.Category, out.Code, out.Err)
