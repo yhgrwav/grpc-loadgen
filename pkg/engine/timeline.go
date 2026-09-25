@@ -30,13 +30,8 @@ type Second struct {
 	// RequestFailed is client faults: the request itself was wrong, and the
 	// target said so.
 	RequestFailed int
-	// UnsentLate and UnsentQuota are timeouts whose request never went out,
-	// split by who ate more of the budget: the generator's lag, or the wait
-	// on the connection from the start of the call to the deadline.
-	UnsentLate  int
-	UnsentQuota int
-	// NotSentLate, NotSentStream and NotSentConnection split the unsent calls
-	// by the rule of the report's totals.
+	// NotSentLate, NotSentStream and NotSentConnection are timeouts whose
+	// request never went out, split by notSentCause as the report's totals are.
 	NotSentLate       int
 	NotSentStream     int
 	NotSentConnection int
@@ -72,9 +67,10 @@ type second struct {
 	// the target, how many went out and got nothing within their timeout.
 	planned, answered, plannedTimedOut int64
 
-	unsentLate, unsentQuota, unanswered, cutOff, aborted, unknown int64
-	lagCalls, observedCalls                                       int64
-	lagSum, lagMax, observedLag, transportWait, service           time.Duration
+	notSentLate, notSentStream, notSentConnection       int64
+	unanswered, cutOff, aborted, unknown                int64
+	lagCalls, observedCalls                             int64
+	lagSum, lagMax, observedLag, transportWait, service time.Duration
 }
 
 // timeline never grows while recording: growing means copying it under the
@@ -165,13 +161,17 @@ func (t *timeline) record(start time.Time, r Result) {
 	case CategoryUnknown:
 		s.unknown++
 	case CategoryTimeout:
-		switch {
-		case !r.NotSent:
+		if !r.NotSent {
 			s.timedOut++
-		case lateMoreThanQueued(r):
-			s.unsentLate++
+			break
+		}
+		switch notSentCause(r) {
+		case BlockedOnGenerator:
+			s.notSentLate++
+		case BlockedOnStream:
+			s.notSentStream++
 		default:
-			s.unsentQuota++
+			s.notSentConnection++
 		}
 	default:
 		s.targetFailed++
@@ -191,6 +191,21 @@ func lateMoreThanQueued(r Result) bool {
 	return r.QueueTime() >= r.Deadline.Sub(r.BegunAt)
 }
 
+// notSentCause is what kept an unsent call back, the same for the totals and
+// the timeline. The sender's BlockedOnGenerator outranks the timing: it saw a
+// ready connection with streams to spare, so only the generator was left to
+// hold the call, however short its lag.
+func notSentCause(r Result) Blocker {
+	switch {
+	case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
+		return BlockedOnGenerator
+	case r.NotSentOn == BlockedOnStream:
+		return BlockedOnStream
+	default:
+		return BlockedOnConnection
+	}
+}
+
 func (t *timeline) export() []Second {
 	out := make([]Second, t.used)
 
@@ -198,28 +213,29 @@ func (t *timeline) export() []Second {
 
 	for i := range t.secs[:t.used] {
 		s := &t.secs[i]
-		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.unsentLate -
-			s.unsentQuota - s.unanswered - s.cutOff - s.aborted - s.unknown
+		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.notSentLate -
+			s.notSentStream - s.notSentConnection - s.unanswered - s.cutOff - s.aborted - s.unknown
 		out[i] = Second{
-			Begun:            int(s.begun),
-			Succeeded:        int(s.succeeded),
-			TargetFailed:     int(s.targetFailed),
-			TimedOut:         int(s.timedOut),
-			RequestFailed:    int(s.requestFailed),
-			UnsentLate:       int(s.unsentLate),
-			UnsentQuota:      int(s.unsentQuota),
-			Unanswered:       int(s.unanswered),
-			CutOff:           int(s.cutOff),
-			Aborted:          int(s.aborted),
-			Unclassified:     int(s.unknown),
-			InFlight:         int(inFlight),
-			LagSum:           s.lagSum,
-			LagMax:           s.lagMax,
-			LagCalls:         int(s.lagCalls),
-			ObservedCalls:    int(s.observedCalls),
-			ObservedLagSum:   s.observedLag,
-			TransportWaitSum: s.transportWait,
-			ServiceTimeSum:   s.service,
+			Begun:             int(s.begun),
+			Succeeded:         int(s.succeeded),
+			TargetFailed:      int(s.targetFailed),
+			TimedOut:          int(s.timedOut),
+			RequestFailed:     int(s.requestFailed),
+			NotSentLate:       int(s.notSentLate),
+			NotSentStream:     int(s.notSentStream),
+			NotSentConnection: int(s.notSentConnection),
+			Unanswered:        int(s.unanswered),
+			CutOff:            int(s.cutOff),
+			Aborted:           int(s.aborted),
+			Unclassified:      int(s.unknown),
+			InFlight:          int(inFlight),
+			LagSum:            s.lagSum,
+			LagMax:            s.lagMax,
+			LagCalls:          int(s.lagCalls),
+			ObservedCalls:     int(s.observedCalls),
+			ObservedLagSum:    s.observedLag,
+			TransportWaitSum:  s.transportWait,
+			ServiceTimeSum:    s.service,
 		}
 	}
 

@@ -139,7 +139,7 @@ func TestTimeline_OutcomesAreSplit(t *testing.T) {
 
 	got := seconds(t, stats)[0]
 	want := Second{
-		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, UnsentQuota: 1, UnsentLate: 1,
+		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, NotSentConnection: 1, NotSentLate: 1,
 		Unanswered: 1, Aborted: 1, Unclassified: 1,
 	}
 	got.LagSum, got.LagMax, got.LagCalls = 0, 0, 0
@@ -214,9 +214,9 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	stats.Record(unsentAfterLag(start, 50*time.Millisecond, 450*time.Millisecond))
 
 	got := seconds(t, stats)[0]
-	if got.UnsentQuota != 4 || got.UnsentLate != 7 || got.TargetFailed != 0 {
-		t.Errorf("quota %d, late %d, target failed %d; want 4, 7 and 0",
-			got.UnsentQuota, got.UnsentLate, got.TargetFailed)
+	if got.NotSentConnection != 4 || got.NotSentLate != 7 || got.TargetFailed != 0 {
+		t.Errorf("connection %d, late %d, target failed %d; want 4, 7 and 0",
+			got.NotSentConnection, got.NotSentLate, got.TargetFailed)
 	}
 }
 
