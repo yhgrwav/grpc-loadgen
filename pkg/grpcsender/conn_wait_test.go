@@ -48,10 +48,14 @@ import (
 //
 // resolveSlack covers a whole connection made after the address arrives —
 // dial, handshake, the balancer's pick — which is waiting for a connection
-// too: max 5.1 ms.
+// too. Its excess: max 5.8 ms in docker at one CPU; 10.43 ms on a GitHub
+// runner; 53 ms with the CPU oversubscribed fivefold, where the scheduler
+// throttles in steps of about 25 ms. It is half of resolveHold, so a wait
+// counted twice still clears it by resolveHold/2.
 const (
 	handshakeSlack = 15 * time.Millisecond
-	resolveSlack   = 10 * time.Millisecond
+	resolveHold    = 200 * time.Millisecond
+	resolveSlack   = resolveHold / 2
 )
 
 // feed plays events into a call as grpc-go would, with the handler's clock at
@@ -378,22 +382,27 @@ func TestSend_ConnWaitCoversAHeldHandshake(t *testing.T) {
 	}
 }
 
-// gatedResolver hands out the address at once on the first build and, after
-// the channel went idle, only once gate is closed.
+// gatedResolver hands out the address at once until armed, and after that
+// only once gate is closed. Arming by hand, not by counting builds: under a
+// loaded CPU the channel can go idle during the first connection, and a
+// second build gated then would hold Connect until its deadline.
 type gatedResolver struct {
-	gate   chan struct{}
-	builds atomic.Int32
+	gate  chan struct{}
+	armed atomic.Bool
+	// gated counts the builds that waited for gate.
+	gated atomic.Int32
 }
 
 func (r *gatedResolver) Scheme() string { return "gated" }
 
 func (r *gatedResolver) Build(_ resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
 	state := resolver.State{Addresses: []resolver.Address{{Addr: "bufnet"}}}
-	if r.builds.Add(1) == 1 {
+	if !r.armed.Load() {
 		_ = cc.UpdateState(state)
 
 		return nopResolver{}, nil
 	}
+	r.gated.Add(1)
 	go func() {
 		<-r.gate
 		_ = cc.UpdateState(state)
@@ -411,7 +420,7 @@ func (nopResolver) Close()                                {}
 // newClientStream before the first Begin (stream.go:338); a wait counted from
 // BeginTime misses it.
 func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
-	const hold = 50 * time.Millisecond
+	const hold = resolveHold
 
 	lis := bufconn.Listen(1024 * 1024)
 	srv := grpc.NewServer()
@@ -424,13 +433,17 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 	sender := New(Options{Target: "gated:///bufnet", DialOptions: []grpc.DialOption{
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
 		grpc.WithResolvers(res),
-		grpc.WithIdleTimeout(20 * time.Millisecond),
+		// Longer than a first connection under a loaded CPU: idle cuts a dial
+		// in progress, and Connect would never get the channel up.
+		grpc.WithIdleTimeout(250 * time.Millisecond),
 		grpc.WithChainUnaryInterceptor(signalStart(started)),
 	}})
 	t.Cleanup(func() { _ = sender.Close() })
 	if err := sender.Connect(bounded(t)); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+
+	res.armed.Store(true)
 
 	// Idle drops the resolver; the next call builds it again and waits.
 	// One read per turn: a second GetState could see Idle already and wait
@@ -442,7 +455,7 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 	}
 
 	out := sendHeld(t, sender, started, func() { close(res.gate) }, hold)
-	if res.builds.Load() < 2 {
+	if res.gated.Load() < 1 {
 		t.Fatal("the resolver was not rebuilt: the call did not wait for it")
 	}
 	checkHeldWait(t, out, hold, resolveSlack)
