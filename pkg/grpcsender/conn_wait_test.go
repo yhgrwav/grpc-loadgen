@@ -430,8 +430,10 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 	}
 
 	// Idle drops the resolver; the next call builds it again and waits.
-	for sender.conn.GetState() != connectivity.Idle {
-		if !sender.conn.WaitForStateChange(bounded(t), sender.conn.GetState()) {
+	// One read per turn: a second GetState could see Idle already and wait
+	// for a change away from it that never comes.
+	for s := sender.conn.GetState(); s != connectivity.Idle; s = sender.conn.GetState() {
+		if !sender.conn.WaitForStateChange(bounded(t), s) {
 			t.Fatal("the channel never went idle")
 		}
 	}
