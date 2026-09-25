@@ -142,7 +142,17 @@ type MethodReport struct {
 	// of the sender, kept apart so it does not pass for an unreachable target.
 	// They are absent from the distribution too.
 	Unclassified int
-	Refusal      RefusalLatency
+	// The method's share of the run's totals, by the same rules: Aborted is
+	// among Sent, NotSent* are out of it, Warmup* are out of all of them.
+	Aborted           int
+	NotSent           int
+	NotSentLate       int
+	NotSentStream     int
+	NotSentConnection int
+	WarmupSent        int
+	WarmupFailed      int
+	WarmupNotSent     int
+	Refusal           RefusalLatency
 	// Rejected is the target answering that the request itself is wrong —
 	// no such method, bad argument, a message over a size limit. Such a call
 	// says nothing about the load: it would fail the same way at any rate.
@@ -217,7 +227,9 @@ type Report struct {
 	// NotSent counts calls that timed out before going out: absent from Sent
 	// and Failed, which are about the target.
 	NotSent int
-	Methods []MethodReport
+	// WarmupNotSent counts the warmup's calls that timed out before going out.
+	WarmupNotSent int
+	Methods       []MethodReport
 	// Aborted counts calls cut off by an abort of the run. They are no fault
 	// of the target, so they are not in Failed; each is censored at the abort.
 	Aborted int

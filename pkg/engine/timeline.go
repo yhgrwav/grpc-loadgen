@@ -35,7 +35,12 @@ type Second struct {
 	// on the connection from the start of the call to the deadline.
 	UnsentLate  int
 	UnsentQuota int
-	Unanswered  int
+	// NotSentLate, NotSentStream and NotSentConnection split the unsent calls
+	// by the rule of the report's totals.
+	NotSentLate       int
+	NotSentStream     int
+	NotSentConnection int
+	Unanswered        int
 	// CutOff is calls that went out and got no status back.
 	CutOff  int
 	Aborted int
