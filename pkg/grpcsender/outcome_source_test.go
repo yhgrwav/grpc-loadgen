@@ -157,6 +157,13 @@ func refusingAfterPayload(t *testing.T, once bool) *Sender {
 					_ = fr.WriteSettingsAck()
 				}
 			case *http2.DataFrame:
+				// GOAWAY first: the client stops opening streams on this
+				// connection before it sees the refusal, so the retry cannot
+				// be written here before the hang-up (5 in 300 on go1.25.0,
+				// -race, 2 CPUs).
+				if once {
+					_ = fr.WriteGoAway(f.StreamID, http2.ErrCodeNo, nil)
+				}
 				_ = fr.WriteRSTStream(f.StreamID, http2.ErrCodeRefusedStream)
 				if once {
 					return
