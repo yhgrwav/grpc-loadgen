@@ -397,9 +397,7 @@ func withBudgetAdvice(err error) error {
 	// would round it to zero.
 	room := budget.Cap - budget.Reserved - budget.Calls
 	if room <= 0 {
-		return fmt.Errorf("%w\nno timeout fits this cap: run with -max-in-flight %d\n"+
-			"(the cap keeps a slot per call for the call on the window's edge, and room for calls released up\n"+
-			"to %s past their deadline)", err, budget.Need, engine.ReleaseMargin)
+		return fmt.Errorf("%w\nno timeout fits this cap: run with -max-in-flight %d", err, budget.Need)
 	}
 
 	fits := time.Duration(room) * time.Second / time.Duration(budget.PeakRPS)
@@ -409,9 +407,8 @@ func withBudgetAdvice(err error) error {
 		fits = fits.Truncate(time.Microsecond)
 	}
 
-	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d\n"+
-		"(the cap keeps a slot per call for the call on the window's edge, and room for calls released up\n"+
-		"to %s past their deadline)", err, fits, budget.Need, engine.ReleaseMargin)
+	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d",
+		err, fits, budget.Need)
 }
 
 // senderOptions reads the certificate files the config names, before any

@@ -69,7 +69,28 @@ func TestInFlightBudgetError_NamesBothPartsOfTheReserve(t *testing.T) {
 	}
 
 	text := err.Error()
-	for _, want := range []string{"plus 101", "window's edge", "100ms past their deadline"} {
+	for _, want := range []string{
+		"up to 20101 requests",
+		"rps × timeout = 20000",
+		"plus 100 for calls released up to 100ms past their deadline",
+		"plus 1 for the call on the window's edge",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q lacks %q", text, want)
+		}
+	}
+}
+
+// Ground: contract — the parts come from the check's own numbers, not from text: another rate and
+// timeout give other parts that still add up to Need.
+func TestInFlightBudgetError_PartsFollowTheCall(t *testing.T) {
+	err := newWithCap(2000, budgetCall("a", 1000, 2*time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	text := err.Error()
+	for _, want := range []string{"up to 2101 requests", "rps × timeout = 2000,", "plus 100 for calls", "plus 1 for the call"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("%q lacks %q", text, want)
 		}

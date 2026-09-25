@@ -559,6 +559,28 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 // The margin is explained once, and that once names both of its parts: said
 // twice it reads as two reserves, and the engine's line alone left the edge
 // slot out of a number that holds it.
+// 1000 rps with 2s against a cap of 2000: 2000 + 100 + 1 = 2101 needed. The
+// advice keeps one slot for rounding rps × timeout up, so 1898ms: 1898 + 101 +
+// 1 = 2000.
+func TestBudgetAdvice_FollowsTheCall(t *testing.T) {
+	_, err := engine.New(engine.Options{
+		Calls: []engine.Call{{Method: "a", Timeout: 2 * time.Second,
+			Stages: []engine.Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Second}}}},
+		Sender:      engine.FakeSender{},
+		MaxInFlight: 2000,
+	})
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	advice := withBudgetAdvice(err).Error()
+	for _, want := range []string{"up to 2101 requests", "at most 1.898s", "-max-in-flight 2101"} {
+		if !strings.Contains(advice, want) {
+			t.Errorf("%q lacks %q", advice, want)
+		}
+	}
+}
+
 func TestRun_OverBudgetErrorExplainsTheMarginOnce(t *testing.T) {
 	for _, c := range []struct{ name, cap string }{
 		{"a timeout fits", "10"},
