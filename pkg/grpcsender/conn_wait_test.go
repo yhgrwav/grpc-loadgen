@@ -433,7 +433,9 @@ func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
 	sender := New(Options{Target: "gated:///bufnet", DialOptions: []grpc.DialOption{
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
 		grpc.WithResolvers(res),
-		grpc.WithIdleTimeout(20 * time.Millisecond),
+		// Longer than a first connection under a loaded CPU: idle cuts a dial
+		// in progress, and Connect would never get the channel up.
+		grpc.WithIdleTimeout(250 * time.Millisecond),
 		grpc.WithChainUnaryInterceptor(signalStart(started)),
 	}})
 	t.Cleanup(func() { _ = sender.Close() })
