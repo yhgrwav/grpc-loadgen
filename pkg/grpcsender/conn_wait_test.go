@@ -40,14 +40,17 @@ import (
 // 300 runs each on Windows and in Linux (docker --cpus=2, -race).
 //
 // handshakeSlack covers the release, the rest of the handshake and the pick
-// after it: max 2.4 ms. It is above the 4 ms hold, so that case checks only
-// the lower bound: a short drop is not lost.
+// after it: max 2.4 ms locally; on a GitHub runner the 4 ms case read 9.53 ms,
+// 5.53 ms over (1 in 160 package runs under -race), so it is about three times
+// that. Both cases check both bounds. In the 4 ms case the slack is larger than
+// the hold, so a wait counted twice passes there: that case guards the lower
+// bound, a short drop is not lost. The 50 ms case catches a wait counted twice.
 //
 // resolveSlack covers a whole connection made after the address arrives —
 // dial, handshake, the balancer's pick — which is waiting for a connection
 // too: max 5.1 ms.
 const (
-	handshakeSlack = 5 * time.Millisecond
+	handshakeSlack = 15 * time.Millisecond
 	resolveSlack   = 10 * time.Millisecond
 )
 
