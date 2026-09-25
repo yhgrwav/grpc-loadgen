@@ -136,6 +136,23 @@ func TestSend_QuotaWaitUntilDeadlineIsNotServiceTime(t *testing.T) {
 	}
 }
 
+// A target that answers on the request's HEADERS, before the body: grpc-go
+// then sometimes reports no OutPayload (measured under -race on a GitHub
+// runner: 161 of 2000 on go1.27.1, 37 of 2000 on go1.25). Every call must
+// still come back with a SentAt. With the fallback removed, 2000 calls went
+// red on go1.27.1 and, in one runner run, 500 found none on go1.25: the rate
+// varies by runner, so the count is set well past it. With the fallback the
+// invariant cannot fail, so the test is not flaky.
+//
+// Ground: signal grpc-go v1.84.0 — pins that a call answered before its body
+// still reaches us as a success we can date; the unit table above pins our rule.
+func TestSend_AnAnswerBeforeTheBodyStillDatesTheCall(t *testing.T) {
+	s := rawTarget(t, answerOK)
+	for range 2000 {
+		sendWithin(t, s, time.Second)
+	}
+}
+
 // Ground: boundary — the branch "headers out, body stuck" has no end-to-end test: a grpc-go
 // server reads the whole body before the handler, so the stand cannot hold a flow-control window
 // shut.
@@ -157,6 +174,14 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 		{"no stream: quota wait, nothing is service", callTimes{doneAt: end}, engine.CategoryTimeout, end, true},
 		{"unreachable: left as is", callTimes{doneAt: end}, engine.CategoryUnreachable, time.Time{}, false},
 		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload, false},
+		// The target answered before the body was written: grpc-go's Write
+		// failed on the finished stream and reported no OutPayload
+		// (stream.go:1253–1257, v1.84.0). headerAt, the stream granted, is
+		// the last moment we have for any outcome that came back.
+		{"success before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategorySuccess, header, false},
+		{"error status before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryServerFault, header, false},
+		{"cut off before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryCutOff, header, false},
+		{"unreachable with headers: still no SentAt", callTimes{headerAt: header, doneAt: end}, engine.CategoryUnreachable, time.Time{}, false},
 	}
 
 	for _, tt := range tests {

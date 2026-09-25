@@ -149,6 +149,10 @@ func sendWithin(t *testing.T, s *Sender, deadline time.Duration) engine.Outcome 
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
+	// A call that came back with a status went out at least as its headers.
+	if (out.Category == engine.CategorySuccess || out.Category == engine.CategoryServerFault) && out.SentAt.IsZero() {
+		t.Errorf("%v without SentAt: the call came back, so it went out", out.Category)
+	}
 
 	return out
 }

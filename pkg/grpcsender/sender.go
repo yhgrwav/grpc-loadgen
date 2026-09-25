@@ -391,9 +391,16 @@ func (s *Sender) Conn() grpc.ClientConnInterface {
 // Without headers the stream was never opened and the deadline expired waiting
 // for stream quota, so nothing counts as service; with headers the target saw
 // the stream and the rest is its own doing, such as a closed flow-control
-// window.
+// window. An outcome other than unreachable whose body was not reported sent —
+// the target answered before it was written — takes headerAt: the moment the
+// stream was granted, not a moment anything reached the wire (grpc-go reports
+// OutHeader before the headers are queued). Unreachable keeps no SentAt:
+// headerAt does not prove anything left.
 func timestamps(call callTimes, category engine.Category) (sentAt, doneAt time.Time, notSent bool) {
 	sentAt, doneAt = call.sentAt, call.doneAt
+	if sentAt.IsZero() && category != engine.CategoryTimeout && category != engine.CategoryUnreachable {
+		sentAt = call.headerAt
+	}
 	if category != engine.CategoryTimeout || !sentAt.IsZero() {
 		return sentAt, doneAt, false
 	}
