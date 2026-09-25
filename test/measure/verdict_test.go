@@ -297,7 +297,7 @@ func TestReport_ARefusalIsAnAnswerAmongTimeouts(t *testing.T) {
 }
 
 func TestReport_AHangingTargetFailsEveryCallLiveAndInTheReport(t *testing.T) {
-	// Timeouts left TargetFailed for an outcome of their own; the error share
+	// Timeouts left the error statuses for an outcome of their own; the error share
 	// the live view and the report print must still count them.
 	target := stand.Start(stand.Hanging())
 	t.Cleanup(target.Stop)

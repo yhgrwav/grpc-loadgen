@@ -30,8 +30,8 @@ func TestTimeline_TimeoutsOfSentCallsAreTheirOwnOutcome(t *testing.T) {
 	stats.Record(call(start, 0, time.Millisecond, CategoryOverload))
 
 	got := seconds(t, stats)[0]
-	if got.TimedOut != 1 || got.TargetFailed != 1 {
-		t.Errorf("timed out %d, target failed %d; want 1 and 1", got.TimedOut, got.TargetFailed)
+	if got.TimedOut != 1 || (got.Overload+got.Failure) != 1 {
+		t.Errorf("timed out %d, target failed %d; want 1 and 1", got.TimedOut, (got.Overload + got.Failure))
 	}
 
 	m := stats.Report().Methods[0]

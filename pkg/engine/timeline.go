@@ -22,11 +22,9 @@ import "time"
 type Second struct {
 	Begun     int
 	Succeeded int
-	// TargetFailed is error statuses that came back, Overload plus Failure:
-	// from the target or a proxy in front of it.
-	TargetFailed int
-	// Overload and Failure split TargetFailed by what the status says;
-	// ClientError and BadResponse are the client refusing to send or to accept.
+	// Overload and Failure are error statuses that came back, from the target
+	// or a proxy in front of it, split by what they say; ClientError and
+	// BadResponse are the client refusing to send or to accept.
 	Overload    int
 	Failure     int
 	ClientError int
@@ -59,7 +57,7 @@ type Second struct {
 	// The observed sums are over successes only: ObservedCalls. They add up to
 	// those calls' latencies. A refusal in 2ms would pass for a faster target,
 	// and a timeout's service time is only a lower bound. So a drowning target
-	// keeps a fine average here; its signal is TargetFailed.
+	// keeps a fine average here; its signal is Overload and Failure.
 	ObservedCalls    int
 	ObservedLagSum   time.Duration
 	TransportWaitSum time.Duration
@@ -241,7 +239,6 @@ func (t *timeline) export() []Second {
 		out[i] = Second{
 			Begun:             int(s.begun),
 			Succeeded:         int(s.succeeded),
-			TargetFailed:      int(s.overload + s.failure),
 			Overload:          int(s.overload),
 			Failure:           int(s.failure),
 			ClientError:       int(s.clientError),

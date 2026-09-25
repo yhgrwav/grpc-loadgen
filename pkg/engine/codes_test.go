@@ -264,7 +264,7 @@ func TestReport_CutOffIsNotAnAnswer(t *testing.T) {
 	if m.LastAnswerAt == nil || *m.LastAnswerAt != 100*time.Millisecond {
 		t.Errorf("last answer at %v, want 100ms: the cut-off call at 1.5s got no status", m.LastAnswerAt)
 	}
-	if len(m.Seconds) < 2 || m.Seconds[1].CutOff != 1 || m.Seconds[1].TargetFailed != 0 {
-		t.Errorf("seconds %+v: want the cut-off call in second 1 as CutOff, not TargetFailed", m.Seconds)
+	if len(m.Seconds) < 2 || m.Seconds[1].CutOff != 1 || m.Seconds[1].Overload+m.Seconds[1].Failure != 0 {
+		t.Errorf("seconds %+v: want the cut-off call in second 1 as CutOff, not an error status", m.Seconds)
 	}
 }

@@ -114,7 +114,7 @@ func TestTotals_SecondsAddUpToTheMethodsTotals(t *testing.T) {
 		var begun, ended, late, stream, conn int
 		for _, s := range m.Seconds {
 			begun += s.Begun
-			ended += s.Succeeded + s.TargetFailed + s.TimedOut + s.RequestFailed +
+			ended += s.Succeeded + s.Overload + s.Failure + s.ClientError + s.BadResponse + s.TimedOut + s.RequestFailed +
 				s.NotSentGenerator + s.NotSentStream + s.NotSentConnection +
 				s.Unanswered + s.CutOff + s.Aborted + s.Unclassified
 			late += s.NotSentGenerator

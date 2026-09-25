@@ -100,7 +100,6 @@ func TestCategory_SecondsKeepEveryCategoryApart(t *testing.T) {
 		got.Failure += s.Failure
 		got.ClientError += s.ClientError
 		got.BadResponse += s.BadResponse
-		got.TargetFailed += s.TargetFailed
 		got.Unclassified += s.Unclassified
 	}
 	if got.Overload != 1 || got.Failure != 2 || got.ClientError != 3 || got.BadResponse != 4 || got.Unclassified != 0 {
