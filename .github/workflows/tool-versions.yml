@@ -40,4 +40,7 @@ jobs:
           go_pinned=$(sed -n 's/^ *GO_LATEST: *"\([^"]*\)".*/\1/p' .github/workflows/ci.yml)
           check "Go (GO_LATEST)" "$go_pinned" "$(curl -fsS 'https://go.dev/VERSION?m=text' | head -1 | sed 's/^go//')"
 
+          release_go=$(grep -A8 'actions/setup-go@' .github/workflows/release.yml | sed -n 's/^ *go-version: *"\([^"]*\)".*/\1/p')
+          check "Go in release.yml" "$release_go" "$go_pinned"
+
           exit $stale
