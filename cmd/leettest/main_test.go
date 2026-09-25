@@ -23,6 +23,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -545,11 +546,11 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 		t.Fatal("run succeeded, want the in-flight budget to reject the config")
 	}
 
-	// Cap 10 at 50 RPS: a slot for the call on the window's edge, 5 for 100ms
-	// of late release and one for rounding rps × timeout up leave 3, a timeout
-	// of 60ms; keeping 2s needs 100 + 1 + 5 = 106. The error says why the
-	// numbers are not 200ms and 100.
-	for _, want := range []string{"timeout", "60ms", "-max-in-flight", "106", "100ms"} {
+	// Cap 10 at 50 RPS: a slot for the call on the window's edge and 5 for
+	// 100ms of late release leave 4, a timeout of 80ms (81ms rounds up to 5);
+	// keeping 2s needs 100 + 1 + 5 = 106. The error says why the numbers are
+	// not 200ms and 100.
+	for _, want := range []string{"timeout", "80ms", "-max-in-flight", "106", "100ms"} {
 		if !strings.Contains(res.err.Error(), want) {
 			t.Errorf("error %q lacks %q", res.err, want)
 		}
@@ -559,22 +560,22 @@ func TestRun_OverBudgetErrorGivesBothWaysOut(t *testing.T) {
 // The margin is explained once, and that once names both of its parts: said
 // twice it reads as two reserves, and the engine's line alone left the edge
 // slot out of a number that holds it.
-// 1000 rps with 2s against a cap of 2000: 2000 + 100 + 1 = 2101 needed. The
-// advice keeps one slot for rounding rps × timeout up, so 1898ms: 1898 + 101 +
-// 1 = 2000.
+// 1000 rps with 2s against a cap of 2000: 2000 + 100 + 1 = 2101 needed, and
+// 1899ms is the largest that fits: 1899 + 100 + 1 = 2000.
 func TestBudgetAdvice_FollowsTheCall(t *testing.T) {
-	_, err := engine.New(engine.Options{
+	opts := engine.Options{
 		Calls: []engine.Call{{Method: "a", Timeout: 2 * time.Second,
 			Stages: []engine.Stage{{StartRPS: 1000, TargetRPS: 1000, Duration: time.Second}}}},
 		Sender:      engine.FakeSender{},
 		MaxInFlight: 2000,
-	})
+	}
+	err := engine.CheckOptions(opts)
 	if err == nil {
 		t.Fatal("err = nil, want the budget refused")
 	}
 
-	advice := withBudgetAdvice(err).Error()
-	for _, want := range []string{"up to 2101 requests", "at most 1.898s", "-max-in-flight 2101"} {
+	advice := withBudgetAdvice(err, opts).Error()
+	for _, want := range []string{"up to 2101 requests", "at most 1.899s ", "-max-in-flight 2101"} {
 		if !strings.Contains(advice, want) {
 			t.Errorf("%q lacks %q", advice, want)
 		}
@@ -969,12 +970,14 @@ func TestRunResult_OtherFailuresStayErrors(t *testing.T) {
 	}
 }
 
-func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
-	// Each call rounds its own rps × timeout up: dividing the cap by the summed
-	// rate once advised 600ms for 3 and 7 RPS under a cap of 10, which New
-	// then rejected with a budget of 11.
-	for _, maxInFlight := range []int{3, 10, 57, 500, 5000, 12345} {
-		for _, rates := range [][]int{{1}, {50}, {3, 7}, {999, 1}, {2500}, {100, 200, 300}} {
+// The advised timeout is the boundary: New accepts it and refuses one step
+// more. Each call rounds its own rps × timeout up: dividing the cap by the
+// summed rate once advised 600ms for 3 and 7 RPS under a cap of 10, which New
+// then rejected with a budget of 11; a formula with a slot kept for rounding
+// advised 1898ms where 1899ms fits.
+func TestBudgetAdvice_TheAdviceIsTheBoundary(t *testing.T) {
+	for _, maxInFlight := range []int{3, 10, 57, 500, 2000, 5000, 12345} {
+		for _, rates := range [][]int{{1}, {50}, {3, 7}, {333}, {999, 1}, {1000}, {2500}, {100, 200, 300}} {
 			calls := make([]engine.Call, len(rates))
 			for i, rps := range rates {
 				calls[i] = engine.Call{Method: strconv.Itoa(i), Timeout: 2 * time.Second,
@@ -994,7 +997,9 @@ func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
 				continue
 			}
 
-			advice := withBudgetAdvice(budget).Error()
+			advice := withBudgetAdvice(budget, engine.Options{
+				Calls: slices.Clone(calls), Sender: engine.FakeSender{}, MaxInFlight: maxInFlight,
+			}).Error()
 			if err := fresh(2*time.Second, budget.Need); err != nil {
 				t.Errorf("cap %d, rates %v: advised -max-in-flight %d, New says %v", maxInFlight, rates, budget.Need, err)
 			}
@@ -1015,6 +1020,13 @@ func TestBudgetAdvice_EveryAdviceIsAccepted(t *testing.T) {
 			}
 			if err := fresh(fits, maxInFlight); err != nil {
 				t.Errorf("cap %d, rates %v: advised %v, New says %v", maxInFlight, rates, fits, err)
+			}
+			step := time.Millisecond
+			if fits < 2*time.Millisecond {
+				step = time.Microsecond
+			}
+			if err := fresh(fits+step, maxInFlight); err == nil {
+				t.Errorf("cap %d, rates %v: advised %v, yet %v fits too", maxInFlight, rates, fits, fits+step)
 			}
 		}
 	}

@@ -81,6 +81,18 @@ func TestInFlightBudgetError_NamesBothPartsOfTheReserve(t *testing.T) {
 	}
 }
 
+// Ground: contract — with several calls the edge part counts one slot per call and says so.
+func TestInFlightBudgetError_OneEdgeSlotPerCall(t *testing.T) {
+	err := newWithCap(1, budgetCall("a", 10, time.Second), budgetCall("b", 10, time.Second), budgetCall("c", 10, time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	if want := "plus 3, one per configured call for the call on its window's edge)"; !strings.Contains(err.Error(), want) {
+		t.Errorf("%q lacks %q", err, want)
+	}
+}
+
 // Ground: contract — the parts come from the check's own numbers, not from text: another rate and
 // timeout give other parts that still add up to Need.
 func TestInFlightBudgetError_PartsFollowTheCall(t *testing.T) {

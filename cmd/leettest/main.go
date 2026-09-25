@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -252,7 +253,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 
 	// A config error does not wait for the network: checked before connecting.
 	if err = engine.CheckOptions(opts); err != nil {
-		return withBudgetAdvice(err)
+		return withBudgetAdvice(err, opts)
 	}
 
 	// Methods nothing could be checked against: named again with the report,
@@ -386,25 +387,39 @@ func checkFakeFlags(flags *flag.FlagSet, fake bool) error {
 }
 
 // withBudgetAdvice turns the engine's numbers into the two settings that fix
-// them. The engine knows neither the config fields nor the flags.
-func withBudgetAdvice(err error) error {
+// them. The engine knows neither the config fields nor the flags. opts are
+// the ones err came from.
+func withBudgetAdvice(err error, opts engine.Options) error {
 	var budget *engine.InFlightBudgetError
 	if !errors.As(err, &budget) || len(budget.Unbounded) > 0 || budget.PeakRPS == 0 {
 		return err
 	}
 
-	// Rounded down, so the advice still fits; to the millisecond unless that
+	// The formula only bounds the answer from above: each call rounds its own
+	// rps × timeout up. The check itself says which timeout fits, so the
+	// advice is the largest one it accepts, to the millisecond unless that
 	// would round it to zero.
-	room := budget.Cap - budget.Reserved - budget.Calls
-	if room <= 0 {
-		return fmt.Errorf("%w\nno timeout fits this cap: run with -max-in-flight %d", err, budget.Need)
+	passes := func(timeout time.Duration) bool {
+		trial := opts
+		trial.Calls = slices.Clone(opts.Calls)
+		for i := range trial.Calls {
+			trial.Calls[i].Timeout = timeout
+		}
+
+		return !errors.Is(engine.CheckOptions(trial), engine.ErrInFlightBudget)
 	}
 
-	fits := time.Duration(room) * time.Second / time.Duration(budget.PeakRPS)
-	if fits >= time.Millisecond {
-		fits = fits.Truncate(time.Millisecond)
-	} else {
-		fits = fits.Truncate(time.Microsecond)
+	upper := time.Duration(budget.Cap-budget.Reserved) * time.Second / time.Duration(budget.PeakRPS)
+	step := time.Millisecond
+	if upper < 2*time.Millisecond {
+		step = time.Microsecond
+	}
+	fits := upper.Truncate(step) + step
+	for fits > 0 && !passes(fits) {
+		fits -= step
+	}
+	if fits <= 0 {
+		return fmt.Errorf("%w\nno timeout fits this cap: run with -max-in-flight %d", err, budget.Need)
 	}
 
 	return fmt.Errorf("%w\nset timeout to at most %s for every call, or run with -max-in-flight %d",
