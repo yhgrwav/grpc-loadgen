@@ -206,7 +206,7 @@ func newGatedTarget(t *testing.T) *gatedTarget {
 				first = conn
 				mu.Unlock()
 				close(accepted)
-				go serveRaw(conn, answerOK, false)
+				go serveAfterData(conn)
 
 				continue
 			}
@@ -218,7 +218,7 @@ func newGatedTarget(t *testing.T) *gatedTarget {
 
 					return
 				}
-				serveRaw(conn, answerOK, false)
+				serveAfterData(conn)
 			}()
 		}
 	}()
@@ -250,6 +250,18 @@ func newGatedTarget(t *testing.T) *gatedTarget {
 	}
 
 	return g
+}
+
+// serveAfterData answers each call with answerOK once its DATA has arrived.
+// Answered on HEADERS, the reply could beat the client's write of the body:
+// grpc-go then reports no OutPayload and the call succeeds without SentAt
+// (161 of 2000 under -race on a GitHub runner, go1.27.1).
+func serveAfterData(conn net.Conn) {
+	serveRawData(conn, func(*http2.Framer, uint32, int) {}, func(fr *http2.Framer, stream uint32) bool {
+		answerOK(fr, stream, 0)
+
+		return false
+	})
 }
 
 // answerOK replies with an empty message and OK. A trailers-only OK carries
