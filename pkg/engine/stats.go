@@ -221,7 +221,10 @@ type RefusalLatency struct {
 }
 
 type Report struct {
-	Duration time.Duration
+	// StartedAt is when the schedule began, warmup included: the moment every
+	// offset in the report counts from.
+	StartedAt time.Time
+	Duration  time.Duration
 	// Warmup is the leading span of the run whose calls are on Seconds but not
 	// in the totals: a call is warmup by the moment it was scheduled for.
 	Warmup time.Duration

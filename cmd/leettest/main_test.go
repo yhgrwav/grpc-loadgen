@@ -849,7 +849,7 @@ func runStopped(t *testing.T, presses int, callLines string) result {
 
 // runSignalled runs the fake target for a minute and calls signal once the run
 // is under way: stops carries Ctrl+C presses, aborts carries SIGTERM.
-func runSignalled(t *testing.T, callLines string, signal func(stops, aborts chan<- struct{})) result {
+func runSignalled(t *testing.T, callLines string, signal func(stops, aborts chan<- struct{}), extra ...string) result {
 	t.Helper()
 
 	// Pressed only once calls are in flight, so an abort has something to cut.
@@ -882,7 +882,7 @@ func runSignalled(t *testing.T, callLines string, signal func(stops, aborts chan
 	stops, aborts := make(chan struct{}), make(chan struct{})
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
-	args := []string{"-c", path, "-fake", "-fake-delay", "20s"}
+	args := append([]string{"-c", path, "-fake", "-fake-delay", "20s"}, extra...)
 	go func() { done <- run(t.Context(), stops, aborts, args, &stdout, &stderr) }()
 
 	select {

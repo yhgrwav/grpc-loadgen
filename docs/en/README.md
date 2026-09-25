@@ -19,8 +19,8 @@
 > one is right.
 
 > **Early stage.** Working now: unary load against a real service, several methods at their own
-> RPS in one run, request bodies from the config, a console report. Not yet: ramp-up, pass/fail
-> thresholds for CI, a JSON report, metrics export. Everything below describes what already
+> RPS in one run, request bodies from the config, a console report and JSON for scripts. Not yet: ramp-up, pass/fail
+> thresholds for CI, metrics export. Everything below describes what already
 > works.
 
 The tool answers the question people bring to a load test: **at what load does the service stop
@@ -228,6 +228,7 @@ measured Docker's network, not it.
 | `-fake` | Load a built-in stub instead of the service from the config — to look at the tool without a service. The report is marked `fake target` |
 | `-fake-delay`, `-fake-jitter`, `-fake-fail-ratio` | The stub's behavior. Only together with `-fake` |
 | `-version` | Print the version and exit. A build from source prints the commit |
+| `-output` | Report format on stdout: `text` (the default) or `json` for scripts and CI |
 
 In a terminal the run goes full-screen: RPS, requests in flight, errors and percentiles in real
 time, `q` to stop. Without a terminal (in CI, with redirected output) — a progress line once a
@@ -342,14 +343,50 @@ that did print a report is always `3`.
 |---|---|
 | `0` | The plan ran, the report is complete |
 | `1` | The run did not happen: flags, config, connection. No report |
-| `2` | The run is invalid: it hit the in-flight cap, or the target rejected every call of some method as a wrong request. There is a report, but its numbers are not about the target |
+| `2` | The run is invalid: it hit the in-flight cap, or every measured call of some method is a `request error`, a `client error` or a `bad response`. There is a report, but its numbers are not about the load |
 | `3` | The run stopped before its plan. There is a report, and it covers only what got through |
 | `130` | Aborted without a report after Ctrl+C |
 | `143` | Aborted without a report after SIGTERM |
 
+Code `4` is reserved for thresholds.
+
+**JSON for scripts and CI.** With `-output json`, stdout gets exactly one JSON object and a newline:
+progress, the live screen, warnings and errors go to stderr, so stdout can go straight into `jq`.
+The object is printed only for a run that happened (codes `0`, `2`, `3`); on `1`, `130` and `143`
+stdout is empty. The `outcome` field (`complete`, `invalid` or `incomplete`) always matches the exit
+code.
+
+The schema is versioned by `schema_version`, now `1`, and it is a contract; the screen text is not,
+and may change before 1.0: parse the JSON, not the screen. The rules:
+
+- a new field is added without a version change; renaming or removing a field, or changing its
+  type, raises `schema_version`;
+- the values of an enum (`outcome`, `unchecked[].reason`, the codes in `failure_codes`) may grow
+  without a version change;
+- a consumer must skip unknown fields and handle an unknown enum value without failing.
+
+The unit is in the field's name: `_us` is whole microseconds, `_s` whole seconds; the rate `rps` is
+the only fractional number. A value the run did not produce is `null`, not `0`: a percentile with no
+observations, the rate of a method with no calls, a stream limit the target did not announce. A
+percentile is an object `{"us": 1234, "lower_bound": false}`: with `lower_bound: true` it is a lower
+bound (the tail ran past the timeout, `>5.00s` on screen), not a value. Latencies are the histogram's values in
+whole microseconds, without the screen's rounding; the histogram keeps 3 significant figures (a
+relative error of up to 0.1%). Counts are exact. Times count from `started_at`
+(RFC 3339, UTC), the start of the schedule, warm-up included; `duration_us` includes warm-up too.
+`in_flight` in a second is how many calls were in flight at its end. The codes in `failure_codes`
+are canonical names (`UNAVAILABLE`). `unchecked[].error` is text for people and changes with
+grpc-go; scripts have `reason`. To reconcile: the run's totals are the sum of the methods', and over
+a method's seconds `Σ begun` plus `outside_timeline` is every call of the method, warm-up included.
+
+Decisions are fields, not text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+`methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` or `null`),
+`limited_by` (`generator`, `stream`, `connection` or `null`, by the same rule as the screen's
+verdict) and the numbers per cause in `client_waits`. `notes` is the notes' text for people: it is
+reworded freely, do not parse it.
+
 ## Not yet
 
-Ramp-up from zero to the target RPS, pass/fail thresholds and a JSON report for CI, export to
+Ramp-up from zero to the target RPS, pass/fail thresholds for CI, export to
 Prometheus.
 
 ## Going deeper
