@@ -249,7 +249,8 @@ have come not from the target itself but from a proxy in front of it: nginx with
 answers `UNAVAILABLE`, and the client cannot tell one from the other. The `rejected` row is how many
 times a call would have failed at any rate: a wrong request (no such method, a bad argument, a
 body that does not match the schema) or a message that did not fit — a reply rejected whole by the
-client's 4 MB limit (nothing of it arrives), or a request the target or a proxy in front of it
+client's limit (`app.max_response_size`, 4 MiB by default; nothing of the reply arrives; the
+note under the report names the run's limit), or a request the target or a proxy in front of it
 found too large (their limit is unknown to us). The latter does not depend on the load: such a
 call fails at any RPS. If every measured call of a method is rejected, the run is declared invalid
 and the verdict names that method: with one typo in three methods the run's share would be 33%,
