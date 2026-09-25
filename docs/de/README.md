@@ -15,7 +15,8 @@
 
 ---
 
-> Diese Übersetzung kann hinter dem [russischen Original](../../README.md) zurückliegen.
+> Übersetzt aus dem [russischen README](../../README.md), wie es beim letzten Commit dieser Datei
+> war. Weichen die beiden ab, gilt das russische.
 
 > **Frühe Phase.** Funktioniert bereits: Unary-Last gegen einen echten Dienst, mehrere Methoden
 > mit eigener RPS in einem Lauf, Request-Body aus der Konfiguration, Bericht in der Konsole. Noch
