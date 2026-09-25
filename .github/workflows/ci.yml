@@ -88,3 +88,16 @@ jobs:
         with:
           version: "v2.18.2"
           args: release --snapshot --clean
+      # The same build and check as release.yml, on every PR: a step that only
+      # runs on a tag is first tried on the release. The snapshot's tag
+      # (v0.0.0 before any tag) stands in for GITHUB_REF_NAME.
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "v2.18.2"
+          args: build --snapshot --single-target --clean --output dist/leettest-check
+      - name: version matches the tag
+        run: |
+          got=$(dist/leettest-check -version)
+          want="leettest $(jq -r .tag dist/metadata.json)"
+          echo "$got"
+          [ "$got" = "$want" ] || { echo "::error::-version printed '$got', want '$want'"; exit 1; }

@@ -26,11 +26,14 @@ jobs:
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "v2.18.2"
-          args: build --single-target --clean --output dist/check/leettest
+          # --clean empties dist and nothing makes a subdirectory in it:
+          # dist/check/leettest fails to copy. The file stays inside dist so
+          # the tree is clean for the release step.
+          args: build --single-target --clean --output dist/leettest-check
       # Nothing is published unless the binary names the tag it was built for.
       - name: version matches the tag
         run: |
-          got=$(dist/check/leettest -version)
+          got=$(dist/leettest-check -version)
           want="leettest ${GITHUB_REF_NAME}"
           echo "$got"
           [ "$got" = "$want" ] || { echo "::error::-version printed '$got', want '$want'"; exit 1; }
