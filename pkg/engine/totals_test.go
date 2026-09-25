@@ -79,6 +79,13 @@ func mixed() []finished {
 				finished{method: m, at: at, notSent: true, blocker: BlockedOnConnection},
 			)
 		}
+		calls = append(calls,
+			// Scheduled in the warmup's last millisecond, begun after it:
+			// warmup by its schedule, on second 1 by its start.
+			finished{method: m, at: 999 * time.Millisecond, category: CategorySuccess, lag: 5 * time.Millisecond},
+			// Past the reserved six seconds: off the timeline, still sent.
+			finished{method: m, at: 7 * time.Second, category: CategorySuccess},
+		)
 	}
 
 	return calls
@@ -116,12 +123,12 @@ func TestTotals_SecondsAddUpToTheMethodsTotals(t *testing.T) {
 		}
 
 		all := m.Sent + m.NotSent + m.WarmupSent + m.WarmupNotSent
-		if m.OutsideTimeline != 0 {
-			t.Fatalf("%s: %d calls off the timeline, want none in this run", m.Method, m.OutsideTimeline)
+		if m.OutsideTimeline != 1 {
+			t.Errorf("%s: %d calls off the timeline, want the one past its end", m.Method, m.OutsideTimeline)
 		}
-		if begun != all || ended != all {
-			t.Errorf("%s: seconds begun %d, ended %d, want every call once: sent %d + not sent %d + warmup sent %d + warmup not sent %d = %d",
-				m.Method, begun, ended, m.Sent, m.NotSent, m.WarmupSent, m.WarmupNotSent, all)
+		if begun+m.OutsideTimeline != all || ended+m.OutsideTimeline != all {
+			t.Errorf("%s: seconds begun %d, ended %d, + off the timeline %d, want every call once: sent %d + not sent %d + warmup sent %d + warmup not sent %d = %d",
+				m.Method, begun, ended, m.OutsideTimeline, m.Sent, m.NotSent, m.WarmupSent, m.WarmupNotSent, all)
 		}
 		if last := m.Seconds[len(m.Seconds)-1].InFlight; last != 0 {
 			t.Errorf("%s: %d still in flight at the end of a finished run", m.Method, last)
@@ -146,17 +153,18 @@ func TestTotals_TheRunIsTheSumOfItsMethods(t *testing.T) {
 
 	var sum MethodReport
 	for _, m := range report.Methods {
-		// Two measured schedule points, 13 calls each: 9 went out, 4 did not.
-		if m.Sent != 18 || m.NotSent != 8 || m.Aborted != 2 || m.Failed != 14 {
-			t.Errorf("%s: sent %d, not sent %d, aborted %d, failed %d; want 18, 8, 2, 14",
+		// Two measured schedule points, 13 calls each: 9 went out, 4 did not;
+		// plus the one off the timeline. Warmup: 9 + the one at its edge.
+		if m.Sent != 19 || m.NotSent != 8 || m.Aborted != 2 || m.Failed != 14 {
+			t.Errorf("%s: sent %d, not sent %d, aborted %d, failed %d; want 19, 8, 2, 14",
 				m.Method, m.Sent, m.NotSent, m.Aborted, m.Failed)
 		}
 		if m.NotSentLate != 4 || m.NotSentStream != 2 || m.NotSentConnection != 2 {
 			t.Errorf("%s: not sent late %d, stream %d, connection %d; want 4, 2, 2",
 				m.Method, m.NotSentLate, m.NotSentStream, m.NotSentConnection)
 		}
-		if m.WarmupSent != 9 || m.WarmupFailed != 7 || m.WarmupNotSent != 4 {
-			t.Errorf("%s: warmup sent %d, failed %d, not sent %d; want 9, 7, 4",
+		if m.WarmupSent != 10 || m.WarmupFailed != 7 || m.WarmupNotSent != 4 {
+			t.Errorf("%s: warmup sent %d, failed %d, not sent %d; want 10, 7, 4",
 				m.Method, m.WarmupSent, m.WarmupFailed, m.WarmupNotSent)
 		}
 
