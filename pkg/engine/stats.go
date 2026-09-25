@@ -142,7 +142,17 @@ type MethodReport struct {
 	// of the sender, kept apart so it does not pass for an unreachable target.
 	// They are absent from the distribution too.
 	Unclassified int
-	Refusal      RefusalLatency
+	// The method's share of the run's totals, by the same rules: Aborted is
+	// among Sent, NotSent* are out of it, Warmup* are out of all of them.
+	Aborted           int
+	NotSent           int
+	NotSentGenerator  int
+	NotSentStream     int
+	NotSentConnection int
+	WarmupSent        int
+	WarmupFailed      int
+	WarmupNotSent     int
+	Refusal           RefusalLatency
 	// Rejected is the target answering that the request itself is wrong —
 	// no such method, bad argument, a message over a size limit. Such a call
 	// says nothing about the load: it would fail the same way at any rate.
@@ -217,7 +227,9 @@ type Report struct {
 	// NotSent counts calls that timed out before going out: absent from Sent
 	// and Failed, which are about the target.
 	NotSent int
-	Methods []MethodReport
+	// WarmupNotSent counts the warmup's calls that timed out before going out.
+	WarmupNotSent int
+	Methods       []MethodReport
 	// Aborted counts calls cut off by an abort of the run. They are no fault
 	// of the target, so they are not in Failed; each is censored at the abort.
 	Aborted int
@@ -234,11 +246,11 @@ type Report struct {
 	// on its own: how late cancellation ran.
 	LateCancelMax time.Duration
 
-	// NotSentLate, NotSentStream and NotSentConnection split NotSent by what
+	// NotSentGenerator, NotSentStream and NotSentConnection split NotSent by what
 	// kept a call from going out: the generator's lag, a ready connection
 	// with no free stream, or a connection that was not ready. They add up
 	// to NotSent.
-	NotSentLate       int
+	NotSentGenerator  int
 	NotSentStream     int
 	NotSentConnection int
 	// StreamWaited counts calls that went out after waiting for a stream
@@ -282,24 +294,24 @@ type Stats struct {
 	sendingEndedAt time.Time
 	endedAt        time.Time
 	warmup         time.Duration
-	// warmupSent and warmupFailed count the warmup's calls by the rule of
-	// sent and failed.
-	warmupSent, warmupFailed int
-	sent                     int
-	failed                   int
-	notSent                  int
-	aborted                  int
-	reserve                  int
-	byMethod                 map[string]*methodStats
+	// warmupSent, warmupFailed and warmupNotSent count the warmup's calls by
+	// the rule of sent, failed and notSent.
+	warmupSent, warmupFailed, warmupNotSent int
+	sent                                    int
+	failed                                  int
+	notSent                                 int
+	aborted                                 int
+	reserve                                 int
+	byMethod                                map[string]*methodStats
 	// startLag is how late calls began against their schedule, startLagMax
 	// its exact maximum; lateCancelMax how far past its deadline a timeout
 	// returned.
 	startLag      *metrics.Latencies
 	startLagMax   time.Duration
 	lateCancelMax time.Duration
-	// notSentLate, notSentStream and notSentConnection split notSent by reason;
+	// notSentGenerator, notSentStream and notSentConnection split notSent by reason;
 	// streamWait is the wait of sent calls that waited over StreamWaitFloor.
-	notSentLate       int
+	notSentGenerator  int
 	notSentStream     int
 	notSentConnection int
 	streamWait        *metrics.Latencies
@@ -318,7 +330,11 @@ type methodStats struct {
 	// timedOutLate counts timeouts sent with less than half the deadline left.
 	timedOutLate int
 	unsentOut    int
-	latency      *metrics.Latencies
+	aborted      int
+	// The method's share of the run's split of unsent calls and of warmup.
+	notSentGenerator, notSentStream, notSentConnection int
+	warmupSent, warmupFailed, warmupNotSent            int
+	latency                                            *metrics.Latencies
 	// served is latency with each call's client-side waits taken out: start
 	// lag, the wait for a connection and for a stream.
 	served *metrics.Latencies
@@ -423,10 +439,15 @@ func (s *Stats) Record(r Result) {
 	}
 
 	if r.ScheduledAt.Before(s.startedAt.Add(s.warmup)) {
-		if !r.NotSent {
+		if r.NotSent {
+			s.warmupNotSent++
+			method.warmupNotSent++
+		} else {
 			s.warmupSent++
+			method.warmupSent++
 			if r.Category != CategorySuccess && r.Category != CategoryAborted {
 				s.warmupFailed++
+				method.warmupFailed++
 			}
 		}
 		s.mu.Unlock()
@@ -451,15 +472,18 @@ func (s *Stats) Record(r Result) {
 		method.unsentOut++
 		// Only the cause that kept it back: its other waits are cut short.
 		gen, conn, stream = false, false, false
-		switch {
-		case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
-			s.notSentLate++
+		switch notSentCause(r) {
+		case BlockedOnGenerator:
+			s.notSentGenerator++
+			method.notSentGenerator++
 			gen = true
-		case r.NotSentOn == BlockedOnStream:
+		case BlockedOnStream:
 			s.notSentStream++
+			method.notSentStream++
 			stream = true
-		default:
+		case BlockedOnConnection:
 			s.notSentConnection++
+			method.notSentConnection++
 			conn = true
 		}
 		s.countWaits(gen, conn, stream)
@@ -475,6 +499,7 @@ func (s *Stats) Record(r Result) {
 	}
 	if r.Category == CategoryAborted {
 		s.aborted++
+		method.aborted++
 	}
 
 	method.sent++
@@ -743,8 +768,8 @@ func (s *Stats) Report() Report {
 	// snapshots the interface takes several times a second.
 	s.mu.Lock()
 	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
-	warmupSent, warmupFailed := s.warmupSent, s.warmupFailed
-	late, stream, connection := s.notSentLate, s.notSentStream, s.notSentConnection
+	warmupSent, warmupFailed, warmupNotSent := s.warmupSent, s.warmupFailed, s.warmupNotSent
+	late, stream, connection := s.notSentGenerator, s.notSentStream, s.notSentConnection
 	waited := s.waited
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
@@ -755,6 +780,15 @@ func (s *Stats) Report() Report {
 			TimedOut:          method.timedOut,
 			TimedOutAfterWait: method.timedOutLate,
 			UnsentTimedOut:    method.unsentOut,
+
+			Aborted:           method.aborted,
+			NotSent:           method.unsentOut,
+			NotSentGenerator:  method.notSentGenerator,
+			NotSentStream:     method.notSentStream,
+			NotSentConnection: method.notSentConnection,
+			WarmupSent:        method.warmupSent,
+			WarmupFailed:      method.warmupFailed,
+			WarmupNotSent:     method.warmupNotSent,
 		}
 		if from, ok := method.timeline.silentFrom(); ok {
 			entry.SilentFrom = &from
@@ -774,18 +808,19 @@ func (s *Stats) Report() Report {
 		Duration: elapsed,
 		Warmup:   warmup,
 
-		WarmupSent:   warmupSent,
-		WarmupFailed: warmupFailed,
-		Sent:         sent,
-		Failed:       failed,
-		NotSent:      notSent,
-		Aborted:      aborted,
+		WarmupSent:    warmupSent,
+		WarmupFailed:  warmupFailed,
+		WarmupNotSent: warmupNotSent,
+		Sent:          sent,
+		Failed:        failed,
+		NotSent:       notSent,
+		Aborted:       aborted,
 
 		StartLagP99:   startLag.Percentile(0.99),
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
 
-		NotSentLate:          late,
+		NotSentGenerator:     late,
 		NotSentStream:        stream,
 		NotSentConnection:    connection,
 		StreamWaited:         int(streamWait.Count()),
@@ -829,6 +864,15 @@ func (s *Stats) Report() Report {
 			TimedOut:          timelines[v.name].TimedOut,
 			TimedOutAfterWait: timelines[v.name].TimedOutAfterWait,
 			UnsentTimedOut:    timelines[v.name].UnsentTimedOut,
+
+			Aborted:           timelines[v.name].Aborted,
+			NotSent:           timelines[v.name].NotSent,
+			NotSentGenerator:  timelines[v.name].NotSentGenerator,
+			NotSentStream:     timelines[v.name].NotSentStream,
+			NotSentConnection: timelines[v.name].NotSentConnection,
+			WarmupSent:        timelines[v.name].WarmupSent,
+			WarmupFailed:      timelines[v.name].WarmupFailed,
+			WarmupNotSent:     timelines[v.name].WarmupNotSent,
 			SilentFrom:        timelines[v.name].SilentFrom,
 			LastAnswerAt:      timelines[v.name].LastAnswerAt,
 		}

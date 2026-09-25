@@ -149,9 +149,13 @@ type Sender interface {
 type Blocker int
 
 const (
-	// BlockedOnConnection is the zero value: when the sender cannot prove the
-	// connection was ready the whole time, the call is not blamed on streams.
-	BlockedOnConnection Blocker = iota
+	// BlockedUnknown is the zero value: a sender that left NotSentOn unset.
+	// It is a defect of the sender, so such a call is in NotSent but in none
+	// of its causes, and their sum falls short of it.
+	BlockedUnknown Blocker = iota
+	// BlockedOnConnection is a connection the sender cannot prove was ready
+	// the whole time: then the call is not blamed on streams.
+	BlockedOnConnection
 	// BlockedOnStream is a ready connection with every stream the target
 	// allows already in use.
 	BlockedOnStream

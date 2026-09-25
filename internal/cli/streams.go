@@ -226,7 +226,7 @@ func streamNotes(report engine.Report) []string {
 		}{
 			{report.NotSentStream, "waited for a stream"},
 			{report.NotSentConnection, "waited for the connection"},
-			{report.NotSentLate, "generator late"},
+			{report.NotSentGenerator, "generator late"},
 		} {
 			if r.n > 0 {
 				reasons = append(reasons, fmt.Sprintf("%s %d", r.what, r.n))

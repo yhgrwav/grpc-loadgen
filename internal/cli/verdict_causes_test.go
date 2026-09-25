@@ -27,8 +27,8 @@ import (
 func ledgerShaped() engine.Report {
 	r := oneStream()
 	r.Sent, r.StreamWaited = 196788, 213
-	r.NotSentLate, r.NotSentConnection, r.NotSentStream = 28839, 24372, 0
-	r.NotSent = r.NotSentLate + r.NotSentConnection
+	r.NotSentGenerator, r.NotSentConnection, r.NotSentStream = 28839, 24372, 0
+	r.NotSent = r.NotSentGenerator + r.NotSentConnection
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 28839, 24372, 213
 	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 28839, 24372, 213
 	r.Connections = &engine.Connections{Open: 1, LimitAnnounced: true, FirstLimit: 128, LastLimit: 128}
@@ -68,7 +68,7 @@ func TestVerdict_NamesTheLargestCauseAndListsTheRest(t *testing.T) {
 // "limited by the run", which would take the blame off the target.
 func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 	r := ledgerShaped()
-	r.NotSentLate, r.NotSentConnection, r.StreamWaited = 10, 500, 0
+	r.NotSentGenerator, r.NotSentConnection, r.StreamWaited = 10, 500, 0
 	r.NotSent = 510
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 10, 500, 0
 	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 10, 500, 0
@@ -89,7 +89,7 @@ func TestVerdict_AConnectionNotReadyIsNotLimitedByTheRun(t *testing.T) {
 // Equal causes: a fixed order decides — generator, stream, connection.
 func TestVerdict_ATieIsBrokenByAFixedOrder(t *testing.T) {
 	r := ledgerShaped()
-	r.NotSentLate, r.NotSentConnection = 100, 100
+	r.NotSentGenerator, r.NotSentConnection = 100, 100
 	r.NotSent = 200
 	r.GeneratorCauseCalls, r.ConnectionCauseCalls, r.StreamCauseCalls = 100, 100, 100
 	r.GeneratorTailCalls, r.ConnectionTailCalls, r.StreamTailCalls = 100, 100, 100
