@@ -302,8 +302,7 @@ func TestJSON_StartLagMaxWithoutCallsIsNull(t *testing.T) {
 // Category.Name are one list. success is counted as "succeeded".
 func TestJSON_SecondsCountEveryCategoryByItsName(t *testing.T) {
 	keys := map[string]bool{}
-	var walk func(reflect.Type)
-	walk = func(rt reflect.Type) {
+	walk := func(rt reflect.Type) {
 		for i := range rt.NumField() {
 			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
 			keys[name] = true
