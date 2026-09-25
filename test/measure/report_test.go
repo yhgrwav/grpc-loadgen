@@ -523,10 +523,11 @@ func checkNoSenderDefects(t *testing.T, report engine.Report) {
 	if got := report.NotSentGenerator + report.NotSentStream + report.NotSentConnection; got != report.NotSent {
 		t.Errorf("unsent calls by cause add up to %d, not sent %d: a cause is unknown", got, report.NotSent)
 	}
-	for _, m := range report.Methods {
+	for i := range report.Methods {
+		m := &report.Methods[i]
 		unclassified := m.Unclassified
-		for _, s := range m.Seconds {
-			unclassified += s.Unclassified
+		for j := range m.Seconds {
+			unclassified += m.Seconds[j].Unclassified
 		}
 		if unclassified != 0 {
 			t.Errorf("%s: %d unclassified calls (totals and seconds): the sender left a category or a cause unset",
