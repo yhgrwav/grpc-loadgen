@@ -176,7 +176,7 @@ func (s *stuckSender) Send(ctx context.Context, _ Request) (Outcome, error) {
 	i := s.sends.Add(1)
 	time.Sleep(500 * time.Millisecond) // the hold under test, not synchronisation
 
-	return Outcome{Category: CategoryTimeout, NotSent: i%3 == 0, Err: context.DeadlineExceeded, DoneAt: time.Now()}, nil
+	return Outcome{Category: CategoryTimeout, NotSent: i%3 == 0, NotSentOn: BlockedOnConnection, Err: context.DeadlineExceeded, DoneAt: time.Now()}, nil
 }
 
 // Ground: contract — the report accounts for every call the schedule handed
@@ -204,6 +204,12 @@ func TestEngine_SentNotSentAndCapRefusedAddUpToEveryCall(t *testing.T) {
 	}
 	if report.NotSent != sends/3 || report.CapHit.Unsent != 1 {
 		t.Errorf("not sent %d, refused by the cap %d; want %d and 1", report.NotSent, report.CapHit.Unsent, sends/3)
+	}
+	// The cap refuses at once instead of holding a call for a slot, so a
+	// refusal never becomes an unsent call blamed on the generator.
+	if report.NotSentGenerator != 0 || report.NotSentConnection != report.NotSent {
+		t.Errorf("not sent on the generator %d, on the connection %d of %d; want 0 and all",
+			report.NotSentGenerator, report.NotSentConnection, report.NotSent)
 	}
 }
 

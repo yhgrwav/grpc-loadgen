@@ -232,6 +232,9 @@ func streamNotes(report engine.Report) []string {
 				reasons = append(reasons, fmt.Sprintf("%s %d", r.what, r.n))
 			}
 		}
+		if unknown := report.NotSent - report.NotSentStream - report.NotSentConnection - report.NotSentGenerator; unknown > 0 {
+			reasons = append(reasons, fmt.Sprintf("cause unknown %d (a defect of the tool; please report it)", unknown))
+		}
 		notes = append(notes, fmt.Sprintf("not sent %d: %s.", report.NotSent, strings.Join(reasons, ", ")))
 	}
 

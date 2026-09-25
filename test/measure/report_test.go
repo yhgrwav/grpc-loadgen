@@ -105,6 +105,7 @@ func run(t *testing.T, s *stand.Stand, call engine.Call, maxInFlight int) (engin
 	}
 
 	report := eng.Report()
+	checkNoSenderDefects(t, report)
 	if report.Incomplete {
 		t.Fatalf("the run did not finish its plan; it had %v", ceiling)
 	}
@@ -511,5 +512,26 @@ func checkFreeze(t *testing.T, method engine.MethodReport, longest time.Duration
 	}
 	if method.P50.Value > freezeDelay+slack {
 		t.Errorf("p50 is %v, two thirds of the calls were answered in %v", method.P50.Value, freezeDelay)
+	}
+}
+
+// checkNoSenderDefects fails on a call the sender left without a category or
+// an unsent call without a cause: a bug to catch, not only to show.
+func checkNoSenderDefects(t *testing.T, report engine.Report) {
+	t.Helper()
+
+	if got := report.NotSentGenerator + report.NotSentStream + report.NotSentConnection; got != report.NotSent {
+		t.Errorf("unsent calls by cause add up to %d, not sent %d: a cause is unknown", got, report.NotSent)
+	}
+	for i := range report.Methods {
+		m := &report.Methods[i]
+		unclassified := m.Unclassified
+		for j := range m.Seconds {
+			unclassified += m.Seconds[j].Unclassified
+		}
+		if unclassified != 0 {
+			t.Errorf("%s: %d unclassified calls (totals and seconds): the sender left a category or a cause unset",
+				m.Method, unclassified)
+		}
 	}
 }
