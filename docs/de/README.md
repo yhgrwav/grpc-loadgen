@@ -45,6 +45,8 @@ Vorteile des Produkts, und eine unklare Fehlermeldung ist ebenso ein Defekt wie 
 $ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
+Erfordert Go 1.26 oder neuer.
+
 ## Konfiguration
 
 ```yaml
