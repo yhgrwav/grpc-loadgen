@@ -65,6 +65,45 @@ func TestReport_P95AndP99ReadTheirOwnRanks(t *testing.T) {
 	}
 }
 
+// TestReport_MaxIsTheSlowestCallNotP99 holds one call longer than every
+// other slow one. The run holds 199 to 201 calls: p99 is rank 198 to 199,
+// among the slow ones, and max is the single slowest. With two levels max and
+// p99 are the same number, and a max that read p99 would pass.
+func TestReport_MaxIsTheSlowestCallNotP99(t *testing.T) {
+	const (
+		fast      = 20 * time.Millisecond
+		slow      = 200 * time.Millisecond
+		slowest   = 700 * time.Millisecond
+		rps       = 200
+		duration  = time.Second
+		fastCalls = 194
+	)
+
+	target := stand.Start(func(c stand.Call) stand.Behavior {
+		switch {
+		case c.N <= fastCalls:
+			return stand.Behavior{Delay: fast}
+		case c.N == fastCalls+1:
+			return stand.Behavior{Delay: slowest}
+		default:
+			return stand.Behavior{Delay: slow}
+		}
+	})
+	t.Cleanup(target.Stop)
+
+	_, method := run(t, target, load(target.Method(), rps, duration, time.Second), 2*rps)
+	sent := checkArrivals(t, target.Arrivals(), rps, duration)
+
+	checkCounts(t, method, sent)
+
+	if method.P99.Value < slow || method.P99.Value > slow+slack {
+		t.Errorf("p99 is %v, %d of %d calls were held for %v and one for %v", method.P99.Value, sent-fastCalls-1, sent, slow, slowest)
+	}
+	if method.Max.Value < slowest || method.Max.Value > slowest+slack {
+		t.Errorf("max is %v, the stand held the slowest answer for %v", method.Max.Value, slowest)
+	}
+}
+
 // TestReport_TheRunsTotalsAreWhatTheStandSaw checks the run-wide counters, not
 // only the method's: the header's numbers come from them.
 func TestReport_TheRunsTotalsAreWhatTheStandSaw(t *testing.T) {

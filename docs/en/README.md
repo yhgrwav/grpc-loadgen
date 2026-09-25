@@ -15,7 +15,8 @@
 
 ---
 
-> This translation may lag behind the [Russian original](../../README.md).
+> Translated from [README.md](../../README.md) at 4bcef1e, 2026-09-25. If they differ, the Russian
+> one is right.
 
 > **Early stage.** Working now: unary load against a real service, several methods at their own
 > RPS in one run, request bodies from the config, a console report. Not yet: ramp-up, pass/fail
@@ -78,7 +79,7 @@ from the service itself through gRPC server reflection, so there is no `.proto` 
 | `app.server_name` | The name to check the service's certificate against when it does not name the address in `target`. Needs TLS |
 | `app.metadata` | Headers of every call: `authorization`, `x-api-key` and so on. `${NAME}` is taken from an environment variable |
 | `app.max_response_size` | The largest reply a call accepts: `16MiB`, `512KB`. The unit is required (`MB` = 10⁶ bytes, `MiB` = 2²⁰), below 2 GiB. Left out — 4 MiB, as in gRPC. A larger reply is a rejected request, not an overloaded target |
-| `load.warmup` | The first N seconds stay out of the percentiles and of `sent`: cold caches spoil them. Warm-up calls do reach the target; the report prints them on a line `warm-up N sent (M failed), excluded from stats` — `sent` plus that line is every call that went out. The target got all of them except those counted as unreachable; `cut off` ones may not have reached it either. Counts toward `duration`, shorter than any call |
+| `load.warmup` | The first N seconds stay out of the percentiles and of `sent`: cold caches spoil them. Warm-up calls do reach the target; the report prints them on a line `warm-up N sent (M failed), excluded from stats` — `sent` plus that line is every call that went out. The target got all of them except those counted as unreachable; `cut off` and timed-out ones may not have fully reached it: a target that does not open its HTTP/2 window (flow control) gets the headers only, and its counters may not see the call. Counts toward `duration`, shorter than any call |
 | `load.calls[].method` | The full method name |
 | `load.calls[].rps` | Requests per second for this method |
 | `load.calls[].duration` | How long to load it: `30s`, `5m`, `1h` |
@@ -249,7 +250,8 @@ have come not from the target itself but from a proxy in front of it: nginx with
 answers `UNAVAILABLE`, and the client cannot tell one from the other. The `rejected` row is how many
 times a call would have failed at any rate: a wrong request (no such method, a bad argument, a
 body that does not match the schema) or a message that did not fit — a reply rejected whole by the
-client's 4 MB limit (nothing of it arrives), or a request the target or a proxy in front of it
+client's limit (`app.max_response_size`, 4 MiB by default; nothing of the reply arrives; the
+note under the report names the run's limit), or a request the target or a proxy in front of it
 found too large (their limit is unknown to us). The latter does not depend on the load: such a
 call fails at any RPS. If every measured call of a method is rejected, the run is declared invalid
 and the verdict names that method: with one typo in three methods the run's share would be 33%,
