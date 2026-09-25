@@ -15,8 +15,8 @@
 
 ---
 
-> Übersetzt aus dem [russischen README](../../README.md), wie es beim letzten Commit dieser Datei
-> war. Weichen die beiden ab, gilt das russische.
+> Übersetzt aus [README.md](../../README.md) bei 4bcef1e, 2026-09-25. Weichen die beiden ab, gilt
+> das russische.
 
 > **Frühe Phase.** Funktioniert bereits: Unary-Last gegen einen echten Dienst, mehrere Methoden
 > mit eigener RPS in einem Lauf, Request-Body aus der Konfiguration, Bericht in der Konsole. Noch
@@ -80,7 +80,7 @@ werden.
 | `app.server_name` | Name, gegen den das Zertifikat des Dienstes geprüft wird, wenn es die Adresse aus `target` nicht nennt. Braucht TLS |
 | `app.metadata` | Header jedes Aufrufs: `authorization`, `x-api-key` usw. `${NAME}` wird aus einer Umgebungsvariable genommen |
 | `app.max_response_size` | Die größte Antwort, die ein Aufruf annimmt: `16MiB`, `512KB`. Die Einheit ist Pflicht (`MB` = 10⁶ Bytes, `MiB` = 2²⁰), unter 2 GiB. Fehlt es — 4 MiB, wie bei gRPC. Eine größere Antwort ist eine abgewiesene Anfrage, keine Überlastung des Ziels |
-| `load.warmup` | Die ersten N Sekunden bleiben aus den Perzentilen und aus `sent`: kalte Caches verzerren sie. Die Aufrufe der Aufwärmphase gehen an das Ziel; der Bericht druckt sie als Zeile `warm-up N sent (M failed), excluded from stats` — `sent` plus diese Zeile ergeben alle ausgegangenen Aufrufe. Das Ziel hat sie alle erhalten, außer den als unreachable gezählten; `cut off` und Aufrufe mit Timeout haben es womöglich nur teilweise erreicht: Ein Ziel, das sein HTTP/2-Fenster (Flow Control) nicht öffnet, bekommt nur die Header, und seine Zähler sehen den Aufruf nicht. Zählt zu `duration`, kürzer als jeder Aufruf |
+| `load.warmup` | Die ersten N Sekunden bleiben aus den Perzentilen und aus `sent`: kalte Caches verzerren sie. Die Aufrufe der Aufwärmphase gehen an das Ziel; der Bericht druckt sie als Zeile `warm-up N sent (M failed), excluded from stats` — `sent` plus diese Zeile ergeben alle ausgegangenen Aufrufe. Das Ziel hat sie alle erhalten, außer den als unreachable gezählten; `cut off` und Aufrufe mit Timeout haben es womöglich nur teilweise erreicht: Ein Ziel, das sein HTTP/2-Fenster (Flow Control) nicht öffnet, bekommt nur die Header, und seine Zähler sehen den Aufruf womöglich nicht. Zählt zu `duration`, kürzer als jeder Aufruf |
 | `load.calls[].method` | Vollständiger Methodenname |
 | `load.calls[].rps` | Anfragen pro Sekunde für diese Methode |
 | `load.calls[].duration` | Wie lange sie belastet wird: `30s`, `5m`, `1h` |

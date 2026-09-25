@@ -15,7 +15,7 @@
 
 ---
 
-> 译自本文件最近一次提交时的[俄文 README](../../README.md)。两者不一致时，以俄文版为准。
+> 译自 4bcef1e（2026-09-25）时的 [README.md](../../README.md)。两者不一致时，以俄文版为准。
 
 > **早期阶段。** 已可用：对真实服务施加 unary 负载，一次运行中多个方法各自的 RPS，
 > 从配置生成请求体，控制台报告。尚未实现：逐步加压、用于 CI 的通过/失败阈值、JSON 报告、
@@ -74,7 +74,7 @@ load:
 | `app.server_name` | 当服务证书不包含 `target` 中的地址时，用于校验证书的名称。需要 TLS |
 | `app.metadata` | 每次调用的请求头：`authorization`、`x-api-key` 等。`${NAME}` 取自环境变量 |
 | `app.max_response_size` | 一次调用接受的最大响应：`16MiB`、`512KB`。必须带单位（`MB` = 10⁶ 字节，`MiB` = 2²⁰），小于 2 GiB。省略时为 4 MiB，与 gRPC 相同。更大的响应算作被拒绝的请求，而不是目标过载 |
-| `load.warmup` | 前 N 秒不计入百分位和 `sent`：冷缓存会扭曲它们。预热期间的调用确实会发往目标；报告将其打印为一行 `warm-up N sent (M failed), excluded from stats`——`sent` 加上这一行等于所有发出的调用。除计为 unreachable 的调用外，目标都收到了；`cut off` 和超时的调用可能只有一部分到达了目标：不打开 HTTP/2 窗口（flow control）的目标只会收到请求头，它的计数器看不到这次调用。计入 `duration`，必须短于每个调用 |
+| `load.warmup` | 前 N 秒不计入百分位和 `sent`：冷缓存会扭曲它们。预热期间的调用确实会发往目标；报告将其打印为一行 `warm-up N sent (M failed), excluded from stats`——`sent` 加上这一行等于所有发出的调用。除计为 unreachable 的调用外，目标都收到了；`cut off` 和超时的调用可能只有一部分到达了目标：不打开 HTTP/2 窗口（flow control）的目标只会收到请求头，它的计数器可能看不到这次调用。计入 `duration`，必须短于每个调用 |
 | `load.calls[].method` | 方法全名 |
 | `load.calls[].rps` | 该方法每秒请求数 |
 | `load.calls[].duration` | 对它施压多久：`30s`、`5m`、`1h` |
