@@ -51,6 +51,14 @@ const (
 	// connection. It may have been processed. There is no status to time, so
 	// it carries no latency, and it does not count as an answer.
 	CategoryCutOff
+	// CategoryClientError means the client stack refused to send: a request it
+	// could not encode, a codec or interceptor that failed. Nothing reached the
+	// target, and the same call will fail again.
+	CategoryClientError
+	// CategoryBadResponse means a reply reached the client and the client did
+	// not accept it: over its size limit, or a body it could not decompress.
+	// The target answered, so the latency is real; the call is not a success.
+	CategoryBadResponse
 )
 
 func (c Category) String() string {
@@ -187,4 +195,10 @@ type Connections struct {
 // it can vouch for, and the report then says nothing about connections.
 type ConnectionReporter interface {
 	Connections() (Connections, bool)
+}
+
+// Name is the category's name in machine-readable output. The set is a
+// contract: a rename breaks scripts that read it.
+func (c Category) Name() string {
+	return ""
 }

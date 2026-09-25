@@ -25,6 +25,12 @@ type Second struct {
 	// TargetFailed is error statuses that came back: server faults and
 	// overload, from the target or a proxy in front of it.
 	TargetFailed int
+	// Overload and Failure split TargetFailed by what the status says;
+	// ClientError and BadResponse are the client refusing to send or to accept.
+	Overload    int
+	Failure     int
+	ClientError int
+	BadResponse int
 	// TimedOut is calls that went out and got no answer within the timeout.
 	TimedOut int
 	// RequestFailed is client faults: the request itself was wrong, and the

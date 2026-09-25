@@ -59,9 +59,9 @@ func sendTo(t *testing.T, replySize, limit int) engine.Outcome {
 
 // Ground: signal grpc-go v1.84.0 — without the option the limit is grpc-go's default of 4 MiB,
 // which it documents only in a comment; a change there changes what a run can receive.
-func TestMaxResponse_WithoutTheOptionAReplyOverFourMiBIsARequestError(t *testing.T) {
-	if out := sendTo(t, 4*mib+1, 0); out.Category != engine.CategoryClientFault {
-		t.Errorf("category %v, want a request error (%v)", out.Category, out.Err)
+func TestMaxResponse_WithoutTheOptionAReplyOverFourMiBIsABadResponse(t *testing.T) {
+	if out := sendTo(t, 4*mib+1, 0); out.Category != engine.CategoryBadResponse {
+		t.Errorf("category %v, want a bad response: the reply came and our limit refused it (%v)", out.Category, out.Err)
 	}
 	if out := sendTo(t, 4*mib-64, 0); out.Category != engine.CategorySuccess {
 		t.Errorf("a reply under 4 MiB: category %v (%v)", out.Category, out.Err)
@@ -76,8 +76,8 @@ func TestMaxResponse_ARaisedLimitTakesALargerReply(t *testing.T) {
 }
 
 // Ground: contract — the raised limit is still a limit.
-func TestMaxResponse_AReplyOverTheRaisedLimitIsARequestError(t *testing.T) {
-	if out := sendTo(t, 8*mib+1, 8*mib); out.Category != engine.CategoryClientFault {
-		t.Errorf("category %v, want a request error (%v)", out.Category, out.Err)
+func TestMaxResponse_AReplyOverTheRaisedLimitIsABadResponse(t *testing.T) {
+	if out := sendTo(t, 8*mib+1, 8*mib); out.Category != engine.CategoryBadResponse {
+		t.Errorf("category %v, want a bad response: the reply came and our limit refused it (%v)", out.Category, out.Err)
 	}
 }

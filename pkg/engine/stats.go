@@ -157,6 +157,13 @@ type MethodReport struct {
 	// no such method, bad argument, a message over a size limit. Such a call
 	// says nothing about the load: it would fail the same way at any rate.
 	Rejected RefusalLatency
+	// ClientError counts calls the client stack refused to send.
+	ClientError int
+	// Overload and Failure split Refusal by what the status says.
+	Overload RefusalLatency
+	Failure  RefusalLatency
+	// BadResponse is how long until a reply came that the client refused.
+	BadResponse RefusalLatency
 	// Seconds covers the whole run, warmup included, up to the last second
 	// anything happened in. Unlike the totals it keeps every call.
 	Seconds []Second
