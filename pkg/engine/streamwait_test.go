@@ -63,10 +63,10 @@ func TestStats_NotSentSplitsIntoThreeReasonsThatAddUp(t *testing.T) {
 	if r.NotSent != 6 {
 		t.Fatalf("not sent %d, want 6", r.NotSent)
 	}
-	if r.NotSentLate != 3 || r.NotSentStream != 2 || r.NotSentConnection != 1 {
-		t.Errorf("late %d, stream %d, connection %d; want 3, 2, 1", r.NotSentLate, r.NotSentStream, r.NotSentConnection)
+	if r.NotSentGenerator != 3 || r.NotSentStream != 2 || r.NotSentConnection != 1 {
+		t.Errorf("late %d, stream %d, connection %d; want 3, 2, 1", r.NotSentGenerator, r.NotSentStream, r.NotSentConnection)
 	}
-	if sum := r.NotSentLate + r.NotSentStream + r.NotSentConnection; sum != r.NotSent {
+	if sum := r.NotSentGenerator + r.NotSentStream + r.NotSentConnection; sum != r.NotSent {
 		t.Errorf("reasons add up to %d, not sent is %d", sum, r.NotSent)
 	}
 }
@@ -81,9 +81,9 @@ func TestStats_NoCallsNoReasons(t *testing.T) {
 
 	r := stats.Report()
 
-	if r.NotSentLate != 0 || r.NotSentStream != 0 || r.NotSentConnection != 0 || r.StreamWaited != 0 {
+	if r.NotSentGenerator != 0 || r.NotSentStream != 0 || r.NotSentConnection != 0 || r.StreamWaited != 0 {
 		t.Errorf("late %d, stream %d, connection %d, waited %d; want all zero",
-			r.NotSentLate, r.NotSentStream, r.NotSentConnection, r.StreamWaited)
+			r.NotSentGenerator, r.NotSentStream, r.NotSentConnection, r.StreamWaited)
 	}
 	if r.StreamWaitP99.Defined {
 		t.Errorf("stream wait p99 %v is defined over no calls", r.StreamWaitP99.Value)

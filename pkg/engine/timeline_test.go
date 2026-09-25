@@ -139,7 +139,7 @@ func TestTimeline_OutcomesAreSplit(t *testing.T) {
 
 	got := seconds(t, stats)[0]
 	want := Second{
-		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, NotSentConnection: 1, NotSentLate: 1,
+		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, NotSentConnection: 1, NotSentGenerator: 1,
 		Unanswered: 1, Aborted: 1, Unclassified: 1,
 	}
 	got.LagSum, got.LagMax, got.LagCalls = 0, 0, 0
@@ -158,6 +158,8 @@ func unsent(start time.Time, begun, untilDeadline time.Duration) Result {
 	r.Deadline = r.BegunAt.Add(untilDeadline)
 	r.SentAt = r.DoneAt
 	r.NotSent = true
+	// A sender that could not prove the connection ready: the timing decides.
+	r.NotSentOn = BlockedOnConnection
 
 	return r
 }
@@ -212,11 +214,16 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	stats.Record(unsentAfterLag(start, 450*time.Millisecond, 50*time.Millisecond))
 	// And the other way round: the connection ate 450ms of it.
 	stats.Record(unsentAfterLag(start, 50*time.Millisecond, 450*time.Millisecond))
+	// The same timing, but the sender saw a ready connection with streams to
+	// spare: its word outranks the timing.
+	blamed := unsentAfterLag(start, 50*time.Millisecond, 450*time.Millisecond)
+	blamed.NotSentOn = BlockedOnGenerator
+	stats.Record(blamed)
 
 	got := seconds(t, stats)[0]
-	if got.NotSentConnection != 4 || got.NotSentLate != 7 || got.TargetFailed != 0 {
-		t.Errorf("connection %d, late %d, target failed %d; want 4, 7 and 0",
-			got.NotSentConnection, got.NotSentLate, got.TargetFailed)
+	if got.NotSentConnection != 4 || got.NotSentGenerator != 8 || got.TargetFailed != 0 {
+		t.Errorf("connection %d, generator %d, target failed %d; want 4, 8 and 0",
+			got.NotSentConnection, got.NotSentGenerator, got.TargetFailed)
 	}
 }
 

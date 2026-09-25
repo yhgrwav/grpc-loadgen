@@ -115,9 +115,9 @@ func TestTotals_SecondsAddUpToTheMethodsTotals(t *testing.T) {
 		for _, s := range m.Seconds {
 			begun += s.Begun
 			ended += s.Succeeded + s.TargetFailed + s.TimedOut + s.RequestFailed +
-				s.NotSentLate + s.NotSentStream + s.NotSentConnection +
+				s.NotSentGenerator + s.NotSentStream + s.NotSentConnection +
 				s.Unanswered + s.CutOff + s.Aborted + s.Unclassified
-			late += s.NotSentLate
+			late += s.NotSentGenerator
 			stream += s.NotSentStream
 			conn += s.NotSentConnection
 		}
@@ -135,7 +135,7 @@ func TestTotals_SecondsAddUpToTheMethodsTotals(t *testing.T) {
 		}
 
 		// Without warmup's share: 2 of the 3 schedule points are measured.
-		if want := m.NotSentLate + 2; late != want {
+		if want := m.NotSentGenerator + 2; late != want {
 			t.Errorf("%s: seconds not sent late %d, want the method's %d plus warmup's", m.Method, late, want)
 		}
 		if want := m.NotSentStream + 1; stream != want {
@@ -159,9 +159,9 @@ func TestTotals_TheRunIsTheSumOfItsMethods(t *testing.T) {
 			t.Errorf("%s: sent %d, not sent %d, aborted %d, failed %d; want 19, 8, 2, 14",
 				m.Method, m.Sent, m.NotSent, m.Aborted, m.Failed)
 		}
-		if m.NotSentLate != 4 || m.NotSentStream != 2 || m.NotSentConnection != 2 {
+		if m.NotSentGenerator != 4 || m.NotSentStream != 2 || m.NotSentConnection != 2 {
 			t.Errorf("%s: not sent late %d, stream %d, connection %d; want 4, 2, 2",
-				m.Method, m.NotSentLate, m.NotSentStream, m.NotSentConnection)
+				m.Method, m.NotSentGenerator, m.NotSentStream, m.NotSentConnection)
 		}
 		if m.WarmupSent != 10 || m.WarmupFailed != 7 || m.WarmupNotSent != 4 {
 			t.Errorf("%s: warmup sent %d, failed %d, not sent %d; want 10, 7, 4",
@@ -172,7 +172,7 @@ func TestTotals_TheRunIsTheSumOfItsMethods(t *testing.T) {
 		sum.Failed += m.Failed
 		sum.Aborted += m.Aborted
 		sum.NotSent += m.NotSent
-		sum.NotSentLate += m.NotSentLate
+		sum.NotSentGenerator += m.NotSentGenerator
 		sum.NotSentStream += m.NotSentStream
 		sum.NotSentConnection += m.NotSentConnection
 		sum.WarmupSent += m.WarmupSent
@@ -182,11 +182,11 @@ func TestTotals_TheRunIsTheSumOfItsMethods(t *testing.T) {
 
 	got := MethodReport{
 		Sent: report.Sent, Failed: report.Failed, Aborted: report.Aborted, NotSent: report.NotSent,
-		NotSentLate: report.NotSentLate, NotSentStream: report.NotSentStream, NotSentConnection: report.NotSentConnection,
+		NotSentGenerator: report.NotSentGenerator, NotSentStream: report.NotSentStream, NotSentConnection: report.NotSentConnection,
 		WarmupSent: report.WarmupSent, WarmupFailed: report.WarmupFailed, WarmupNotSent: report.WarmupNotSent,
 	}
 	if got.Sent != sum.Sent || got.Failed != sum.Failed || got.Aborted != sum.Aborted || got.NotSent != sum.NotSent ||
-		got.NotSentLate != sum.NotSentLate || got.NotSentStream != sum.NotSentStream || got.NotSentConnection != sum.NotSentConnection ||
+		got.NotSentGenerator != sum.NotSentGenerator || got.NotSentStream != sum.NotSentStream || got.NotSentConnection != sum.NotSentConnection ||
 		got.WarmupSent != sum.WarmupSent || got.WarmupFailed != sum.WarmupFailed || got.WarmupNotSent != sum.WarmupNotSent {
 		t.Errorf("run totals %+v, want the sum of the methods %+v", got, sum)
 	}
@@ -206,5 +206,54 @@ func TestTotals_AnUnsentWarmupCallIsCounted(t *testing.T) {
 	if report.NotSent != 0 || report.WarmupSent != 0 {
 		t.Errorf("run not sent %d, warmup sent %d; want 0, 0: warmup is out of the measured totals",
 			report.NotSent, report.WarmupSent)
+	}
+}
+
+// A sender that forgot NotSentOn: the call is in NotSent but in none of its
+// causes, so the causes fall short of it — a visible defect, not a quiet
+// connection problem. The late start would name the generator by timing; it
+// must not cover the missing cause.
+func TestTotals_AnUnsentCallWithoutACauseIsInNoCause(t *testing.T) {
+	r := finished{method: "a", at: 1500 * time.Millisecond, notSent: true, lag: 900 * time.Millisecond}
+	report := reportOf([]finished{r}, time.Second)
+
+	m := report.Methods[0]
+	if m.NotSent != 1 || m.NotSentGenerator+m.NotSentStream+m.NotSentConnection != 0 {
+		t.Errorf("not sent %d, by cause %d/%d/%d; want 1 and none by cause",
+			m.NotSent, m.NotSentGenerator, m.NotSentStream, m.NotSentConnection)
+	}
+	var s Second
+	for _, sec := range m.Seconds {
+		s.NotSentGenerator += sec.NotSentGenerator
+		s.NotSentStream += sec.NotSentStream
+		s.NotSentConnection += sec.NotSentConnection
+		s.Unclassified += sec.Unclassified
+	}
+	s.InFlight = m.Seconds[len(m.Seconds)-1].InFlight
+	if s.NotSentGenerator+s.NotSentStream+s.NotSentConnection != 0 || s.Unclassified != 1 || s.InFlight != 0 {
+		t.Errorf("seconds: by cause %d/%d/%d, unclassified %d, in flight %d; want none, 1, 0 at the end",
+			s.NotSentGenerator, s.NotSentStream, s.NotSentConnection, s.Unclassified, s.InFlight)
+	}
+}
+
+// Every unsent call of a well-behaved sender names its cause: the causes add
+// up to NotSent on the run, on each method and over each method's seconds.
+func TestTotals_TheCausesAddUpToNotSent(t *testing.T) {
+	report := reportOf(mixed(), time.Second)
+
+	if got := report.NotSentGenerator + report.NotSentStream + report.NotSentConnection; got != report.NotSent {
+		t.Errorf("run: causes add up to %d, not sent %d", got, report.NotSent)
+	}
+	for _, m := range report.Methods {
+		if got := m.NotSentGenerator + m.NotSentStream + m.NotSentConnection; got != m.NotSent {
+			t.Errorf("%s: causes add up to %d, not sent %d", m.Method, got, m.NotSent)
+		}
+		var bySeconds int
+		for _, s := range m.Seconds {
+			bySeconds += s.NotSentGenerator + s.NotSentStream + s.NotSentConnection
+		}
+		if want := m.NotSent + m.WarmupNotSent; bySeconds != want {
+			t.Errorf("%s: seconds' causes add up to %d, want not sent + warmup not sent = %d", m.Method, bySeconds, want)
+		}
 	}
 }

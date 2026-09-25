@@ -29,9 +29,9 @@ import (
 func checkReasons(t *testing.T, report engine.Report) {
 	t.Helper()
 
-	if sum := report.NotSentLate + report.NotSentStream + report.NotSentConnection; sum != report.NotSent {
+	if sum := report.NotSentGenerator + report.NotSentStream + report.NotSentConnection; sum != report.NotSent {
 		t.Errorf("late %d + stream %d + connection %d = %d, not sent is %d",
-			report.NotSentLate, report.NotSentStream, report.NotSentConnection, sum, report.NotSent)
+			report.NotSentGenerator, report.NotSentStream, report.NotSentConnection, sum, report.NotSent)
 	}
 }
 

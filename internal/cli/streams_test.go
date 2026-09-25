@@ -164,7 +164,7 @@ func TestNotes_NotSentIsSplitByReason(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			report := oneStream()
-			report.NotSentLate, report.NotSentStream, report.NotSentConnection = tt.late, tt.stream, tt.connection
+			report.NotSentGenerator, report.NotSentStream, report.NotSentConnection = tt.late, tt.stream, tt.connection
 			report.NotSent = tt.late + tt.stream + tt.connection
 
 			if _, ok := noteStarting(reportNotes(report, ""), tt.want); !ok {

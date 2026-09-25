@@ -30,9 +30,9 @@ type Second struct {
 	// RequestFailed is client faults: the request itself was wrong, and the
 	// target said so.
 	RequestFailed int
-	// NotSentLate, NotSentStream and NotSentConnection are timeouts whose
+	// NotSentGenerator, NotSentStream and NotSentConnection are timeouts whose
 	// request never went out, split by notSentCause as the report's totals are.
-	NotSentLate       int
+	NotSentGenerator  int
 	NotSentStream     int
 	NotSentConnection int
 	Unanswered        int
@@ -67,7 +67,7 @@ type second struct {
 	// the target, how many went out and got nothing within their timeout.
 	planned, answered, plannedTimedOut int64
 
-	notSentLate, notSentStream, notSentConnection       int64
+	notSentGenerator, notSentStream, notSentConnection  int64
 	unanswered, cutOff, aborted, unknown                int64
 	lagCalls, observedCalls                             int64
 	lagSum, lagMax, observedLag, transportWait, service time.Duration
@@ -167,11 +167,13 @@ func (t *timeline) record(start time.Time, r Result) {
 		}
 		switch notSentCause(r) {
 		case BlockedOnGenerator:
-			s.notSentLate++
+			s.notSentGenerator++
 		case BlockedOnStream:
 			s.notSentStream++
-		default:
+		case BlockedOnConnection:
 			s.notSentConnection++
+		default:
+			s.unknown++
 		}
 	default:
 		s.targetFailed++
@@ -195,8 +197,13 @@ func lateMoreThanQueued(r Result) bool {
 // the timeline. The sender's BlockedOnGenerator outranks the timing: it saw a
 // ready connection with streams to spare, so only the generator was left to
 // hold the call, however short its lag.
+//
+// An unset NotSentOn stays BlockedUnknown even when the timing would name the
+// generator: the timing would hide the sender's defect.
 func notSentCause(r Result) Blocker {
 	switch {
+	case r.NotSentOn == BlockedUnknown:
+		return BlockedUnknown
 	case lateMoreThanQueued(r), r.NotSentOn == BlockedOnGenerator:
 		return BlockedOnGenerator
 	case r.NotSentOn == BlockedOnStream:
@@ -213,7 +220,7 @@ func (t *timeline) export() []Second {
 
 	for i := range t.secs[:t.used] {
 		s := &t.secs[i]
-		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.notSentLate -
+		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.notSentGenerator -
 			s.notSentStream - s.notSentConnection - s.unanswered - s.cutOff - s.aborted - s.unknown
 		out[i] = Second{
 			Begun:             int(s.begun),
@@ -221,7 +228,7 @@ func (t *timeline) export() []Second {
 			TargetFailed:      int(s.targetFailed),
 			TimedOut:          int(s.timedOut),
 			RequestFailed:     int(s.requestFailed),
-			NotSentLate:       int(s.notSentLate),
+			NotSentGenerator:  int(s.notSentGenerator),
 			NotSentStream:     int(s.notSentStream),
 			NotSentConnection: int(s.notSentConnection),
 			Unanswered:        int(s.unanswered),

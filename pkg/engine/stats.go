@@ -146,7 +146,7 @@ type MethodReport struct {
 	// among Sent, NotSent* are out of it, Warmup* are out of all of them.
 	Aborted           int
 	NotSent           int
-	NotSentLate       int
+	NotSentGenerator  int
 	NotSentStream     int
 	NotSentConnection int
 	WarmupSent        int
@@ -246,11 +246,11 @@ type Report struct {
 	// on its own: how late cancellation ran.
 	LateCancelMax time.Duration
 
-	// NotSentLate, NotSentStream and NotSentConnection split NotSent by what
+	// NotSentGenerator, NotSentStream and NotSentConnection split NotSent by what
 	// kept a call from going out: the generator's lag, a ready connection
 	// with no free stream, or a connection that was not ready. They add up
 	// to NotSent.
-	NotSentLate       int
+	NotSentGenerator  int
 	NotSentStream     int
 	NotSentConnection int
 	// StreamWaited counts calls that went out after waiting for a stream
@@ -309,9 +309,9 @@ type Stats struct {
 	startLag      *metrics.Latencies
 	startLagMax   time.Duration
 	lateCancelMax time.Duration
-	// notSentLate, notSentStream and notSentConnection split notSent by reason;
+	// notSentGenerator, notSentStream and notSentConnection split notSent by reason;
 	// streamWait is the wait of sent calls that waited over StreamWaitFloor.
-	notSentLate       int
+	notSentGenerator  int
 	notSentStream     int
 	notSentConnection int
 	streamWait        *metrics.Latencies
@@ -332,9 +332,9 @@ type methodStats struct {
 	unsentOut    int
 	aborted      int
 	// The method's share of the run's split of unsent calls and of warmup.
-	notSentLate, notSentStream, notSentConnection int
-	warmupSent, warmupFailed, warmupNotSent       int
-	latency                                       *metrics.Latencies
+	notSentGenerator, notSentStream, notSentConnection int
+	warmupSent, warmupFailed, warmupNotSent            int
+	latency                                            *metrics.Latencies
 	// served is latency with each call's client-side waits taken out: start
 	// lag, the wait for a connection and for a stream.
 	served *metrics.Latencies
@@ -474,14 +474,14 @@ func (s *Stats) Record(r Result) {
 		gen, conn, stream = false, false, false
 		switch notSentCause(r) {
 		case BlockedOnGenerator:
-			s.notSentLate++
-			method.notSentLate++
+			s.notSentGenerator++
+			method.notSentGenerator++
 			gen = true
 		case BlockedOnStream:
 			s.notSentStream++
 			method.notSentStream++
 			stream = true
-		default:
+		case BlockedOnConnection:
 			s.notSentConnection++
 			method.notSentConnection++
 			conn = true
@@ -769,7 +769,7 @@ func (s *Stats) Report() Report {
 	s.mu.Lock()
 	aborted, warmup, notSent := s.aborted, s.warmup, s.notSent
 	warmupSent, warmupFailed, warmupNotSent := s.warmupSent, s.warmupFailed, s.warmupNotSent
-	late, stream, connection := s.notSentLate, s.notSentStream, s.notSentConnection
+	late, stream, connection := s.notSentGenerator, s.notSentStream, s.notSentConnection
 	waited := s.waited
 	timelines := make(map[string]MethodReport, len(s.byMethod))
 	for name, method := range s.byMethod {
@@ -783,7 +783,7 @@ func (s *Stats) Report() Report {
 
 			Aborted:           method.aborted,
 			NotSent:           method.unsentOut,
-			NotSentLate:       method.notSentLate,
+			NotSentGenerator:  method.notSentGenerator,
 			NotSentStream:     method.notSentStream,
 			NotSentConnection: method.notSentConnection,
 			WarmupSent:        method.warmupSent,
@@ -820,7 +820,7 @@ func (s *Stats) Report() Report {
 		StartLagMax:   startLagMax,
 		LateCancelMax: lateCancelMax,
 
-		NotSentLate:          late,
+		NotSentGenerator:     late,
 		NotSentStream:        stream,
 		NotSentConnection:    connection,
 		StreamWaited:         int(streamWait.Count()),
@@ -867,7 +867,7 @@ func (s *Stats) Report() Report {
 
 			Aborted:           timelines[v.name].Aborted,
 			NotSent:           timelines[v.name].NotSent,
-			NotSentLate:       timelines[v.name].NotSentLate,
+			NotSentGenerator:  timelines[v.name].NotSentGenerator,
 			NotSentStream:     timelines[v.name].NotSentStream,
 			NotSentConnection: timelines[v.name].NotSentConnection,
 			WarmupSent:        timelines[v.name].WarmupSent,

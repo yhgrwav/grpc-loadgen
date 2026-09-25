@@ -301,13 +301,16 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 	if !req.Deadline.IsZero() && !time.Now().Before(req.Deadline) {
 		now := time.Now()
 
+		// Nothing on the connection's side had a chance to hold it: the
+		// generator handed it over too late.
 		return engine.Outcome{
-			SentAt:   now,
-			NotSent:  true,
-			DoneAt:   now,
-			Category: engine.CategoryTimeout,
-			Code:     codes.DeadlineExceeded.String(),
-			Err:      context.DeadlineExceeded,
+			SentAt:    now,
+			NotSent:   true,
+			NotSentOn: engine.BlockedOnGenerator,
+			DoneAt:    now,
+			Category:  engine.CategoryTimeout,
+			Code:      codes.DeadlineExceeded.String(),
+			Err:       context.DeadlineExceeded,
 		}, nil
 	}
 
