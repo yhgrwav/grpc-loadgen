@@ -45,6 +45,8 @@ unclear error message is as much a defect as a wrong number.
 $ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
+Requires Go 1.26 or newer.
+
 ## Config
 
 ```yaml

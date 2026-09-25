@@ -33,7 +33,7 @@ You sign once, and the signature covers your future contributions.
 
 ## Working on a change
 
-Requirements: Go 1.25 or newer, and [golangci-lint](https://golangci-lint.run)
+Requirements: Go 1.26 or newer, and [golangci-lint](https://golangci-lint.run)
 v2 for linting.
 
 ```console
@@ -41,7 +41,7 @@ $ go test ./...
 $ golangci-lint run ./...
 ```
 
-Both must pass before you open a pull request; CI runs them on Go 1.25 and on
+Both must pass before you open a pull request; CI runs them on Go 1.26 and on
 the latest release.
 
 Dependencies are restricted to permissive licenses (Apache-2.0, MIT, BSD, ISC).
@@ -108,7 +108,7 @@ $ go test ./...
 $ golangci-lint run ./...
 ```
 
-Both run in CI on Go 1.25 and on the latest release. Run them before pushing — it is faster than
+Both run in CI on Go 1.26 and on the latest release. Run them before pushing — it is faster than
 waiting for the pipeline.
 
 ### The CLA comes first

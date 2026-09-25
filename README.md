@@ -41,6 +41,8 @@
 $ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
+Нужен Go 1.26 или новее.
+
 ## Конфиг
 
 ```yaml

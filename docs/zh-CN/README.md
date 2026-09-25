@@ -40,6 +40,8 @@
 $ go install github.com/yhgrwav/leettest/cmd/leettest@latest
 ```
 
+需要 Go 1.26 或更高版本。
+
 ## 配置
 
 ```yaml
