@@ -140,7 +140,7 @@ func TestOutcome_MatchesTheExitCode(t *testing.T) {
 
 // flatten records every key path of a decoded JSON value, "[]" for an array's
 // elements (the first one stands for all), and which paths held null.
-func flatten(v any, path string, paths map[string]bool, nulls map[string]bool) {
+func flatten(v any, path string, paths, nulls map[string]bool) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, child := range x {
