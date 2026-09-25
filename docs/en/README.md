@@ -81,7 +81,7 @@ from the service itself through gRPC server reflection, so there is no `.proto` 
 | `app.server_name` | The name to check the service's certificate against when it does not name the address in `target`. Needs TLS |
 | `app.metadata` | Headers of every call: `authorization`, `x-api-key` and so on. `${NAME}` is taken from an environment variable |
 | `app.max_response_size` | The largest reply a call accepts: `16MiB`, `512KB`. The unit is required (`MB` = 10⁶ bytes, `MiB` = 2²⁰), below 2 GiB. Left out — 4 MiB, as in gRPC. A larger reply is a rejected request, not an overloaded target |
-| `load.warmup` | The first N seconds stay out of the percentiles and of `sent`: cold caches spoil them. Warm-up calls do reach the target; the report prints them on a line `warm-up N sent (M failed), excluded from stats` — `sent` plus that line is every call that went out. The target got all of them except those counted as unreachable; `cut off` and timed-out ones may not have fully reached it: a target that does not open its HTTP/2 window (flow control) gets the headers only, and its counters may not see the call. Counts toward `duration`, shorter than any call |
+| `load.warmup` | The first N seconds stay out of the percentiles and of `sent`: cold caches spoil them. Warm-up calls do reach the target; the report prints them on a line `warm-up N sent (M failed), excluded from stats` — `sent` plus that line is every call the generator attempted. The target got all of them except those counted as unreachable or client error; `cut off` and timed-out ones may not have fully reached it: a target that does not open its HTTP/2 window (flow control) gets the headers only, and its counters may not see the call. Counts toward `duration`, shorter than any call |
 | `load.calls[].method` | The full method name |
 | `load.calls[].rps` | Requests per second for this method |
 | `load.calls[].duration` | How long to load it: `30s`, `5m`, `1h` |
@@ -246,24 +246,52 @@ failures but stay out of the percentiles. A request that went out but got no sta
 end reset the stream or dropped the connection — is counted separately, as `cut off`: the target
 or a proxy may have processed it, which for a write is a reason to check for duplicates.
 
-Failures are split: the `error status` row is how many times an error status came back
-(`RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `INTERNAL` and others) and how long it took. The status may
-have come not from the target itself but from a proxy in front of it: nginx without a live backend
-answers `UNAVAILABLE`, and the client cannot tell one from the other. The `rejected` row is how many
-times a call would have failed at any rate: a wrong request (no such method, a bad argument, a
-body that does not match the schema) or a message that did not fit — a reply rejected whole by the
-client's limit (`app.max_response_size`, 4 MiB by default; nothing of the reply arrives; the
-note under the report names the run's limit), or a request the target or a proxy in front of it
-found too large (their limit is unknown to us). The latter does not depend on the load: such a
-call fails at any RPS. If every measured call of a method is rejected, the run is declared invalid
-and the verdict names that method: with one typo in three methods the run's share would be 33%,
-and no verdict at all.
+Answers other than a success are split into rows, each with its own percentiles. The status may
+have come from a proxy in front of the target rather than from the target itself: nginx without a
+live backend answers `UNAVAILABLE`, and the client cannot tell one from the other.
+
+- `request error`: the call would fail at any rate. A wrong request (no such method, a bad
+  argument, a body that does not match the schema), or a request the target or a proxy in front of
+  it found too large (their limit is unknown to us).
+- `overload`: the status says overloaded or unavailable, `RESOURCE_EXHAUSTED` or `UNAVAILABLE`.
+  These are the status's words, not a diagnosis of the target: a proxy with no live backend sends
+  the same `UNAVAILABLE`.
+- `failure`: the status says the call broke: `INTERNAL`, `UNKNOWN`, `DATA_LOSS`, `CANCELLED` from
+  the other end, and `ABORTED`. `ABORTED` is a conflict between concurrent changes (a rolled-back
+  transaction, a failed optimistic lock), not a lack of capacity: load makes it more frequent, but
+  on two identical rows it happens at any rate.
+- `bad response`: a reply came and the client did not accept it. Either it was over the client's
+  limit (`app.max_response_size`, 4 MiB by default; nothing of the reply arrives), or it was
+  compressed with an encoding the client did not announce. The latter breaks the protocol on the
+  other side: gRPC lets a server compress only with an encoding the client listed in
+  `grpc-accept-encoding`.
+- `client error`: the client itself refused to send. The request did not encode, or a codec or an
+  interceptor failed. The call never reached the target.
+
+A request too large is recognised by grpc-go's error text. A target on another implementation
+(Envoy, Java) words it otherwise, and its refusal lands on `overload` instead of `request error`.
+
+If every measured call of a method is a `request error`, a `client error` or a `bad response`, the
+run is declared invalid (exit code 2), and the note names the method, the cause and what to do:
+with one typo in three methods the run's share would be 33%, and no verdict at all.
+
+| Code | Status came over the wire | Code set by the client, request went out | Code set by the client, request did not go out |
+|---|---|---|---|
+| `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `FAILED_PRECONDITION`, `OUT_OF_RANGE`, `UNIMPLEMENTED` | `request error` | `cut off` | `client error` |
+| `RESOURCE_EXHAUSTED` | `overload`; grpc-go's "larger than max" is a `request error` | `cut off`; a reply over our limit is a `bad response` | `client error` |
+| `UNAVAILABLE` | `overload` | `cut off` | `unreachable` |
+| `CANCELLED`, `UNKNOWN`, `INTERNAL`, `DATA_LOSS`, `ABORTED` | `failure` | `cut off`; a reply that did not decompress is a `bad response` | `client error` |
+| `DEADLINE_EXCEEDED` | timeout | timeout | timeout, not sent |
+
+A call cut off by our own stop (Ctrl+C, SIGTERM) is `aborted` whatever its code: not the target's
+refusal.
 
 Below the report, each method's failed calls are broken down by gRPC code, commonest first, on two
 lines. "sent by the target" — the status came over the wire: from the target or from a proxy in
-front of it, the client cannot tell which. "set by the client, no status came back" — there was no
-status, the client set the code itself: nobody answered, the other end reset the stream, our
-deadline ran out. The same code can appear on both lines. `DeadlineExceeded` from the target is
+front of it, the client cannot tell which. "set by the client" — the client set the code itself:
+nobody answered, the other end reset the stream, our deadline ran out, or the client refused a
+reply that came (then an OK status from the target may have arrived, but the final code is the
+client's). The same code can appear on both lines. `DeadlineExceeded` from the target is
 usually our own deadline: it goes to the target in the `grpc-timeout` header, and the target may
 end the call before our timer does. The category says whose fault it is, the code says what to
 look for in the target's logs.

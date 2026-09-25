@@ -22,8 +22,8 @@ import "time"
 type Second struct {
 	Begun     int
 	Succeeded int
-	// TargetFailed is error statuses that came back: server faults and
-	// overload, from the target or a proxy in front of it.
+	// TargetFailed is error statuses that came back, Overload plus Failure:
+	// from the target or a proxy in front of it.
 	TargetFailed int
 	// Overload and Failure split TargetFailed by what the status says;
 	// ClientError and BadResponse are the client refusing to send or to accept.
@@ -67,7 +67,8 @@ type Second struct {
 }
 
 type second struct {
-	begun, succeeded, targetFailed, timedOut, requestFailed int64
+	begun, succeeded, timedOut, requestFailed   int64
+	overload, failure, clientError, badResponse int64
 	// planned, answered and plannedTimedOut count calls by the second they
 	// were scheduled for: how many, how many got a success or a status from
 	// the target, how many went out and got nothing within their timeout.
@@ -126,7 +127,7 @@ func (t *timeline) record(start time.Time, r Result) {
 	p := &t.secs[scheduled]
 	p.planned++
 	switch r.Category {
-	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault:
+	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault, CategoryBadResponse:
 		p.answered++
 	case CategoryTimeout:
 		if !r.NotSent {
@@ -158,6 +159,12 @@ func (t *timeline) record(start time.Time, r Result) {
 		s.succeeded++
 	case CategoryClientFault:
 		s.requestFailed++
+	case CategoryClientError:
+		s.clientError++
+	case CategoryBadResponse:
+		s.badResponse++
+	case CategoryOverload:
+		s.overload++
 	case CategoryUnreachable:
 		s.unanswered++
 	case CategoryCutOff:
@@ -181,8 +188,10 @@ func (t *timeline) record(start time.Time, r Result) {
 		default:
 			s.unknown++
 		}
+	case CategoryServerFault:
+		s.failure++
 	default:
-		s.targetFailed++
+		s.unknown++
 	}
 }
 
@@ -226,12 +235,17 @@ func (t *timeline) export() []Second {
 
 	for i := range t.secs[:t.used] {
 		s := &t.secs[i]
-		inFlight += s.begun - s.succeeded - s.targetFailed - s.timedOut - s.requestFailed - s.notSentGenerator -
+		inFlight += s.begun - s.succeeded - s.overload - s.failure - s.clientError - s.badResponse - s.timedOut -
+			s.requestFailed - s.notSentGenerator -
 			s.notSentStream - s.notSentConnection - s.unanswered - s.cutOff - s.aborted - s.unknown
 		out[i] = Second{
 			Begun:             int(s.begun),
 			Succeeded:         int(s.succeeded),
-			TargetFailed:      int(s.targetFailed),
+			TargetFailed:      int(s.overload + s.failure),
+			Overload:          int(s.overload),
+			Failure:           int(s.failure),
+			ClientError:       int(s.clientError),
+			BadResponse:       int(s.badResponse),
 			TimedOut:          int(s.timedOut),
 			RequestFailed:     int(s.requestFailed),
 			NotSentGenerator:  int(s.notSentGenerator),

@@ -24,12 +24,12 @@ func TestCategoryString(t *testing.T) {
 		want string
 	}{
 		{"success", CategorySuccess, "success"},
-		{"client fault", CategoryClientFault, "client fault"},
-		{"server fault", CategoryServerFault, "server fault"},
-		{"timeout", CategoryTimeout, "timeout"},
+		{"request error", CategoryClientFault, "request error"},
+		{"failure", CategoryServerFault, "failure"},
+		{"timed out", CategoryTimeout, "timed out"},
 		{"overload", CategoryOverload, "overload"},
-		{"unknown zero value", CategoryUnknown, "unknown"},
-		{"unrecognized value", Category(99), "unknown"},
+		{"unclassified zero value", CategoryUnknown, "unclassified"},
+		{"unrecognized value", Category(99), "unclassified"},
 	}
 
 	for _, tt := range tests {

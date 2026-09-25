@@ -53,8 +53,8 @@ func TestStats_RefusalsHaveTheirOwnLatency(t *testing.T) {
 	if m.Latencies != 10 {
 		t.Errorf("service latencies = %d, want 10", m.Latencies)
 	}
-	if got := m.Refusal.P99; m.Refusal.Count != 990 || !got.Exact || got.Value > 3*time.Millisecond {
-		t.Errorf("refusals = %d, p99 %+v; want 990 at 2ms", m.Refusal.Count, got)
+	if got := m.Overload.P99; m.Overload.Count != 990 || !got.Exact || got.Value > 3*time.Millisecond {
+		t.Errorf("overload = %d, p99 %+v; want 990 at 2ms", m.Overload.Count, got)
 	}
 	if m.Failed != 990 {
 		t.Errorf("failed = %d, want 990", m.Failed)
@@ -76,9 +76,9 @@ func TestStats_ARefusalUnderLoadIsNotARejectedRequest(t *testing.T) {
 	stats.Record(answered(start, CategorySuccess, 100*time.Millisecond))
 
 	m := stats.Report().Methods[0]
-	if m.Refusal.Count != 2 || m.Rejected.Count != 1 || m.Latencies != 1 {
-		t.Errorf("refusals %d, rejected %d, service latencies %d; want 2, 1 and 1",
-			m.Refusal.Count, m.Rejected.Count, m.Latencies)
+	if m.Overload.Count != 1 || m.Failure.Count != 1 || m.Rejected.Count != 1 || m.Latencies != 1 {
+		t.Errorf("overload %d, failure %d, rejected %d, service latencies %d; want 1, 1, 1 and 1",
+			m.Overload.Count, m.Failure.Count, m.Rejected.Count, m.Latencies)
 	}
 	if m.Failed != 3 {
 		t.Errorf("failed = %d, want 3: a rejected request is still a call that failed", m.Failed)
@@ -123,8 +123,8 @@ func TestStats_TimeoutsStayInTheServiceTime(t *testing.T) {
 	if got := m.P99; got.Exact || got.Value < time.Second {
 		t.Errorf("service p99 = %+v, want \"> 1s\", not the survivors' 900ms", got)
 	}
-	if m.Refusal.Count != 0 {
-		t.Errorf("refusals = %d, want 0: a timeout is not a refusal", m.Refusal.Count)
+	if m.Overload.Count+m.Failure.Count != 0 {
+		t.Errorf("refusals = %d, want 0: a timeout is not a refusal", m.Overload.Count+m.Failure.Count)
 	}
 }
 

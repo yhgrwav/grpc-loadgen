@@ -122,9 +122,9 @@ type MethodReport struct {
 	// target's logs call it. A call whose transport gives no code is not listed.
 	FailureCodes []CodeCount
 	// The percentiles above are the service time: successes, with timeouts and
-	// aborted calls as lower bounds of it. Refusals — the target answering it
+	// aborted calls as lower bounds of it. Refusals — the other end answering it
 	// will not serve — are a different quantity, often far faster, and are in
-	// Refusal instead.
+	// Overload, Failure, Rejected and BadResponse instead.
 	//
 	// Latencies counts the observations behind the percentiles, Censored how
 	// many of them only have a lower bound, and Invalid how many were rejected
@@ -152,14 +152,14 @@ type MethodReport struct {
 	WarmupSent        int
 	WarmupFailed      int
 	WarmupNotSent     int
-	Refusal           RefusalLatency
 	// Rejected is the target answering that the request itself is wrong —
 	// no such method, bad argument, a message over a size limit. Such a call
 	// says nothing about the load: it would fail the same way at any rate.
 	Rejected RefusalLatency
 	// ClientError counts calls the client stack refused to send.
 	ClientError int
-	// Overload and Failure split Refusal by what the status says.
+	// Overload and Failure are statuses from the target or a proxy in front of
+	// it, split by what they say: out of capacity or unavailable, or broken.
 	Overload RefusalLatency
 	Failure  RefusalLatency
 	// BadResponse is how long until a reply came that the client refused.
@@ -348,10 +348,15 @@ type methodStats struct {
 	// waited is the latency of the calls that waited over StreamWaitFloor for
 	// each cause — generator, connection, stream — to count them in the tail;
 	// nil until one does.
-	waited   [3]*metrics.Latencies
-	refusal  *metrics.Latencies
-	rejected *metrics.Latencies
-	timeline timeline
+	waited [3]*metrics.Latencies
+	// overload, failure, rejected and badResponse time the answers that were
+	// not a success, each apart: a fast refusal is not a fast service.
+	overload    *metrics.Latencies
+	failure     *metrics.Latencies
+	rejected    *metrics.Latencies
+	badResponse *metrics.Latencies
+	clientError int
+	timeline    timeline
 	// codes counts failed calls by the transport's code and its source; nil
 	// until one fails.
 	codes map[codeKey]int
@@ -386,12 +391,14 @@ func (s *Stats) Reserve(span time.Duration, methods ...string) {
 
 func (s *Stats) newMethod() *methodStats {
 	return &methodStats{
-		latency:    metrics.NewLatencies(),
-		served:     metrics.NewLatencies(),
-		refusal:    metrics.NewUncensoredLatencies(),
-		rejected:   metrics.NewUncensoredLatencies(),
-		lastAnswer: -1,
-		timeline:   newTimeline(s.reserve),
+		latency:     metrics.NewLatencies(),
+		served:      metrics.NewLatencies(),
+		overload:    metrics.NewUncensoredLatencies(),
+		failure:     metrics.NewUncensoredLatencies(),
+		badResponse: metrics.NewUncensoredLatencies(),
+		rejected:    metrics.NewUncensoredLatencies(),
+		lastAnswer:  -1,
+		timeline:    newTimeline(s.reserve),
 	}
 }
 
@@ -441,7 +448,7 @@ func (s *Stats) Record(r Result) {
 	method.timeline.record(s.startedAt, r)
 
 	switch r.Category {
-	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault:
+	case CategorySuccess, CategoryServerFault, CategoryOverload, CategoryClientFault, CategoryBadResponse:
 		method.lastAnswer = max(method.lastAnswer, r.ScheduledAt.Sub(s.startedAt))
 	}
 
@@ -536,12 +543,15 @@ func (s *Stats) Record(r Result) {
 	// connection comes back in microseconds and would pull both the median and
 	// the tail down while the target is in fact unreachable. A cut-off call has
 	// no status to time either.
-	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable || r.Category == CategoryCutOff
+	unanswered := r.Category == CategoryUnknown || r.Category == CategoryUnreachable || r.Category == CategoryCutOff ||
+		r.Category == CategoryClientError
 	switch r.Category {
 	case CategoryUnreachable:
 		method.unanswered++
 	case CategoryCutOff:
 		method.cutOff++
+	case CategoryClientError:
+		method.clientError++
 	case CategoryUnknown:
 		method.unknown++
 	}
@@ -597,8 +607,12 @@ func (s *Stats) Record(r Result) {
 	case CategorySuccess:
 		method.latency.Record(r.Latency())
 		method.served.Record(max(0, r.Latency()-clientWait))
-	case CategoryServerFault, CategoryOverload:
-		method.refusal.Record(r.Latency())
+	case CategoryOverload:
+		method.overload.Record(r.Latency())
+	case CategoryServerFault:
+		method.failure.Record(r.Latency())
+	case CategoryBadResponse:
+		method.badResponse.Record(r.Latency())
 	case CategoryClientFault:
 		method.rejected.Record(r.Latency())
 	}
@@ -608,19 +622,22 @@ func (s *Stats) Record(r Result) {
 // snapshot of its distribution, so percentiles can be computed without holding
 // anything.
 type methodView struct {
-	name       string
-	sent       int
-	failed     int
-	unanswered int
-	cutOff     int
-	unknown    int
-	lastAnswer time.Duration
-	dist       *metrics.Snapshot
-	served     *metrics.Snapshot
-	refusal    *metrics.Snapshot
-	rejected   *metrics.Snapshot
-	waited     [3]*metrics.Snapshot
-	codes      []CodeCount
+	name        string
+	sent        int
+	failed      int
+	unanswered  int
+	cutOff      int
+	unknown     int
+	lastAnswer  time.Duration
+	dist        *metrics.Snapshot
+	served      *metrics.Snapshot
+	overload    *metrics.Snapshot
+	failure     *metrics.Snapshot
+	badResponse *metrics.Snapshot
+	clientError int
+	rejected    *metrics.Snapshot
+	waited      [3]*metrics.Snapshot
+	codes       []CodeCount
 }
 
 // views copies the counters under the lock and takes each distribution's
@@ -640,7 +657,8 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for name, method := range s.byMethod {
 		out = append(out, methodView{
 			name: name, sent: method.sent, failed: method.failed, unanswered: method.unanswered, cutOff: method.cutOff,
-			unknown: method.unknown, lastAnswer: method.lastAnswer, codes: failureCodes(method.codes),
+			unknown: method.unknown, clientError: method.clientError, lastAnswer: method.lastAnswer,
+			codes: failureCodes(method.codes),
 		})
 		sources = append(sources, method)
 	}
@@ -649,7 +667,9 @@ func (s *Stats) views() (elapsed, measured time.Duration, sent, failed int, out 
 	for i, src := range sources {
 		out[i].dist = src.latency.Snapshot()
 		out[i].served = src.served.Snapshot()
-		out[i].refusal = src.refusal.Snapshot()
+		out[i].overload = src.overload.Snapshot()
+		out[i].failure = src.failure.Snapshot()
+		out[i].badResponse = src.badResponse.Snapshot()
 		out[i].rejected = src.rejected.Snapshot()
 		for c, w := range src.waited {
 			if w != nil {
@@ -840,7 +860,10 @@ func (s *Stats) Report() Report {
 	var tail [3]int
 	for i := range views {
 		v := &views[i]
-		if v.sent > 0 && int(v.rejected.Count()) == v.sent {
+		// Nothing about load was measured: every call failed the same way it
+		// would at any rate — a wrong request, one the client could not send,
+		// or replies the client would not accept.
+		if v.sent > 0 && int(v.rejected.Count())+v.clientError+int(v.badResponse.Count()) == v.sent {
 			report.RequestRejected = true
 		}
 		entry := MethodReport{
@@ -862,7 +885,10 @@ func (s *Stats) Report() Report {
 
 			P99WithoutClientWaits: v.served.Percentile(0.99),
 			FailureCodes:          v.codes,
-			Refusal:               refusalOf(v.refusal),
+			Overload:              refusalOf(v.overload),
+			Failure:               refusalOf(v.failure),
+			BadResponse:           refusalOf(v.badResponse),
+			ClientError:           v.clientError,
 			Rejected:              refusalOf(v.rejected),
 
 			Seconds:           timelines[v.name].Seconds,

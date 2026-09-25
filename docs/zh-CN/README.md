@@ -76,7 +76,7 @@ load:
 | `app.server_name` | 当服务证书不包含 `target` 中的地址时，用于校验证书的名称。需要 TLS |
 | `app.metadata` | 每次调用的请求头：`authorization`、`x-api-key` 等。`${NAME}` 取自环境变量 |
 | `app.max_response_size` | 一次调用接受的最大响应：`16MiB`、`512KB`。必须带单位（`MB` = 10⁶ 字节，`MiB` = 2²⁰），小于 2 GiB。省略时为 4 MiB，与 gRPC 相同。更大的响应算作被拒绝的请求，而不是目标过载 |
-| `load.warmup` | 前 N 秒不计入百分位和 `sent`：冷缓存会扭曲它们。预热期间的调用确实会发往目标；报告将其打印为一行 `warm-up N sent (M failed), excluded from stats`——`sent` 加上这一行等于所有发出的调用。除计为 unreachable 的调用外，目标都收到了；`cut off` 和超时的调用可能只有一部分到达了目标：不打开 HTTP/2 窗口（flow control）的目标只会收到请求头，它的计数器可能看不到这次调用。计入 `duration`，必须短于每个调用 |
+| `load.warmup` | 前 N 秒不计入百分位和 `sent`：冷缓存会扭曲它们。预热期间的调用确实会发往目标；报告将其打印为一行 `warm-up N sent (M failed), excluded from stats`——`sent` 加上这一行等于压测机尝试发送的所有调用。除计为 unreachable 和 client error 的调用外，目标都收到了；`cut off` 和超时的调用可能只有一部分到达了目标：不打开 HTTP/2 窗口（flow control）的目标只会收到请求头，它的计数器可能看不到这次调用。计入 `duration`，必须短于每个调用 |
 | `load.calls[].method` | 方法全名 |
 | `load.calls[].rps` | 该方法每秒请求数 |
 | `load.calls[].duration` | 对它施压多久：`30s`、`5m`、`1h` |
@@ -218,19 +218,43 @@ Docker 的网络，而不是目标。
 请求——对端重置了流或断开了连接——单独计为 `cut off`：目标或代理可能已经处理了它，对于写操作
 这是检查重复数据的理由。
 
-失败被分开统计：`error status` 行表示返回错误状态的次数（`RESOURCE_EXHAUSTED`、`UNAVAILABLE`、
-`INTERNAL` 等）以及耗时。状态可能不是目标本身发来的，而是它前面的代理：没有存活后端的 nginx
-会回复 `UNAVAILABLE`，客户端无法区分两者。`rejected` 行表示在任何速率下都会失败的调用次数：
-错误的请求（没有该方法、参数错误、请求体不符合 schema），或放不下的消息——被客户端限制整体
-拒绝的响应（`app.max_response_size`，默认 4 MiB；响应内容一点也不会到达；报告下方的提示会写明
-本次运行的限制），或者被目标或其前面的代理认为过大的请求（它们的限制我们无从得知）。后者与
-负载无关：这样的调用在任何 RPS 下都会失败。如果某个方法所有被测量的调用都被拒绝，本次运行
-被宣布无效，判定会指出该方法：三个方法中有一个拼写错误时，按整次运行算的占比只有 33%，
-根本不会有判定。
+成功以外的响应按行分开，每行有自己的百分位。状态可能不是目标本身发来的，而是它前面的代理：
+没有存活后端的 nginx 会回复 `UNAVAILABLE`，客户端无法区分两者。
+
+- `request error`：在任何速率下都会失败的调用。错误的请求（没有该方法、参数错误、请求体不符合
+  schema），或者被目标或其前面的代理认为过大的请求（它们的限制我们无从得知）。
+- `overload`：状态表示“过载或不可用”，即 `RESOURCE_EXHAUSTED` 或 `UNAVAILABLE`。这是状态本身的
+  说法，而不是对目标的诊断：没有存活后端的代理也会发出同样的 `UNAVAILABLE`。
+- `failure`：状态表示调用出错：`INTERNAL`、`UNKNOWN`、`DATA_LOSS`、对端发来的 `CANCELLED`，以及
+  `ABORTED`。`ABORTED` 是并发修改之间的冲突（事务回滚、乐观锁失败），而不是容量不足：负载会让它
+  更频繁，但在两行相同的数据上，任何速率下都会出现。
+- `bad response`：响应到达了，但客户端没有接受。要么超过了客户端的限制（`app.max_response_size`，
+  默认 4 MiB；响应内容一点也不会到达），要么用客户端没有声明的编码压缩。后者是对端违反了协议：
+  gRPC 只允许服务器使用客户端在 `grpc-accept-encoding` 中列出的编码进行压缩。
+- `client error`：客户端自己拒绝发送。请求无法编码，或者编解码器、拦截器出错。这个调用从未到达
+  目标。
+
+过大的请求是通过 grpc-go 的错误文本识别的。其他实现上的目标（Envoy、Java）措辞不同，它的拒绝会
+被归入 `overload`，而不是 `request error`。
+
+如果某个方法所有被测量的调用都是 `request error`、`client error` 或 `bad response`，本次运行被宣布
+无效（退出码 2），提示会写明方法、原因以及该怎么做：三个方法中有一个拼写错误时，按整次运行算的
+占比只有 33%，根本不会有判定。
+
+| 状态码 | 状态经网络传回 | 客户端设置的状态码，请求已发出 | 客户端设置的状态码，请求未发出 |
+|---|---|---|---|
+| `INVALID_ARGUMENT`、`NOT_FOUND`、`ALREADY_EXISTS`、`PERMISSION_DENIED`、`UNAUTHENTICATED`、`FAILED_PRECONDITION`、`OUT_OF_RANGE`、`UNIMPLEMENTED` | `request error` | `cut off` | `client error` |
+| `RESOURCE_EXHAUSTED` | `overload`；grpc-go 的 “larger than max” 为 `request error` | `cut off`；超过我们限制的响应为 `bad response` | `client error` |
+| `UNAVAILABLE` | `overload` | `cut off` | `unreachable` |
+| `CANCELLED`、`UNKNOWN`、`INTERNAL`、`DATA_LOSS`、`ABORTED` | `failure` | `cut off`；无法解压的响应为 `bad response` | `client error` |
+| `DEADLINE_EXCEEDED` | 超时 | 超时 | 超时，未发出 |
+
+被我们自己的停止（Ctrl+C、SIGTERM）中断的调用，无论状态码是什么，都是 `aborted`：不是目标的拒绝。
 
 报告下方按 gRPC 状态码列出每个方法的失败调用，从多到少，分两行。「sent by the target」——
-状态经网络传回：来自目标或它前面的代理，客户端无法区分。「set by the client, no status came
-back」——没有状态，状态码由客户端自己设置：无人响应、对端重置了流、我们的截止时间已到。
+状态经网络传回：来自目标或它前面的代理，客户端无法区分。「set by the client」——状态码由客户端
+自己设置：无人响应、对端重置了流、我们的截止时间已到，或者客户端没有接受已到达的响应（这时目标的
+OK 状态可能已经到达，但最终的状态码是客户端的）。
 同一个状态码可能同时出现在两行中。来自目标的 `DeadlineExceeded` 通常就是我们自己的截止时间：
 它通过 `grpc-timeout` 请求头发给目标，目标可能在我们的计时器之前结束调用。类别说明是谁的
 过错，状态码说明该在目标日志中找什么。

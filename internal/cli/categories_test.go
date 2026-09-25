@@ -94,3 +94,29 @@ func TestNotes_EveryCallTheClientCouldNotSend(t *testing.T) {
 		t.Errorf("no note that the client sent nothing:\n%s", text)
 	}
 }
+
+// Replies the client could not decompress: the note says what the other end
+// did wrong and where the rule is, since raising any limit would not help.
+func TestNotes_EveryResponseCameWithAnEncodingTheClientRefuses(t *testing.T) {
+	report := engine.Report{
+		Duration: time.Second, Sent: 10, Failed: 10, RequestRejected: true,
+		Methods: []engine.MethodReport{{
+			Method: "a.B/One", Sent: 10, Failed: 10,
+			BadResponse:  refusals(10, time.Millisecond),
+			FailureCodes: []engine.CodeCount{{Code: "Internal", Count: 10}},
+		}},
+	}
+
+	text := strings.Join(strings.Fields(strings.Join(reportNotes(report, ""), " ")), " ")
+	for _, want := range []string{
+		"invalid run: responses of a.B/One came compressed with an encoding the client does not accept",
+		"grpc-accept-encoding",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "max_response_size") {
+		t.Errorf("the note points at the size limit, which would not help:\n%s", text)
+	}
+}

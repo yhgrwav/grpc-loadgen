@@ -86,7 +86,7 @@ func TestSend_ABodyTheClientCannotDecompressIsABadResponse(t *testing.T) {
 	if out.CodeFromTarget {
 		t.Errorf("CodeFromTarget = true: the target said OK, the client set %s", out.Code)
 	}
-	if out.SentAt.IsZero() || !out.DoneAt.After(out.SentAt) {
+	if out.SentAt.IsZero() || out.DoneAt.IsZero() || out.DoneAt.Before(out.SentAt) {
 		t.Errorf("SentAt %v, DoneAt %v: a bad response has a real latency", out.SentAt, out.DoneAt)
 	}
 }

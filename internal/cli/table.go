@@ -55,13 +55,7 @@ func screenRows(report engine.Report) []tableRow {
 				formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99)},
 			bad: m.Failed > 0,
 		})
-		for _, sub := range []struct {
-			label string
-			r     engine.RefusalLatency
-		}{{"rejected", m.Rejected}, {"error status", m.Refusal}} {
-			if sub.r.Count == 0 {
-				continue
-			}
+		for _, sub := range answerRows(m) {
 			rows = append(rows, tableRow{
 				label: sub.label, sub: true,
 				cells: [tableColumns]string{"", countCell(sub.r.Count), "",

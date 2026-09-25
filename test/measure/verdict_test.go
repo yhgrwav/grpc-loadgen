@@ -524,8 +524,8 @@ func TestReport_ATargetThatRejectsEveryRequestInvalidatesTheRun(t *testing.T) {
 	if m.Rejected.Count != m.Sent || m.Sent == 0 {
 		t.Errorf("rejected %d of %d, want all", m.Rejected.Count, m.Sent)
 	}
-	if m.Refusal.Count != 0 {
-		t.Errorf("refused %d, want none: a bad request is not the target shedding load", m.Refusal.Count)
+	if m.Overload.Count+m.Failure.Count != 0 {
+		t.Errorf("refused %d, want none: a bad request is not the target shedding load", m.Overload.Count+m.Failure.Count)
 	}
 	if !report.RequestRejected {
 		t.Error("run not marked as one whose requests the target rejected")
@@ -545,7 +545,7 @@ func TestReport_ARejectedMethodAloneDoesNotInvalidateTheRun(t *testing.T) {
 	if report.RequestRejected {
 		t.Error("an overloaded target was read as a bad request")
 	}
-	if got := report.Methods[0].Refusal.Count; got == 0 {
+	if got := report.Methods[0].Overload.Count; got == 0 {
 		t.Error("refusals not counted")
 	}
 }

@@ -355,7 +355,7 @@ func (s *Sender) Send(ctx context.Context, req engine.Request) (engine.Outcome, 
 		Code:       status.Code(err).String(),
 		Err:        err,
 
-		CodeFromTarget: times.answered,
+		CodeFromTarget: times.answered && !refusedReply(err, times.answered),
 	}
 	if notSent {
 		outcome.NotSentOn = s.blocker(conn, times)

@@ -118,7 +118,7 @@ func widestReport() engine.Report {
 		Method: "/wallet.v1.WalletService/GetBalanceWithAVeryLongNameIndeed",
 		Sent:   widestCount, Failed: widestCount, RPS: 99_999_999,
 		P50: widestBound, P90: widestBound, P95: widestBound, P99: widestBound,
-		Refusal: engine.RefusalLatency{Count: widestCount,
+		Overload: engine.RefusalLatency{Count: widestCount,
 			P50: widestBound, P90: widestBound, P95: widestBound, P99: widestBound},
 	}
 

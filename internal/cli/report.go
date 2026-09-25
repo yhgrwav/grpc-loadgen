@@ -60,13 +60,9 @@ func PrintReport(w io.Writer, target string, run RunReport) {
 			displayMethod(m.Method), m.Sent, m.Failed, m.RPS,
 			formatQuantile(m.P50), formatQuantile(m.P90), formatQuantile(m.P95), formatQuantile(m.P99))
 
-		if r := m.Rejected; r.Count > 0 {
-			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  rejected", "", r.Count, "",
-				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
-		}
-
-		if r := m.Refusal; r.Count > 0 {
-			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  error status", "", r.Count, "",
+		for _, sub := range answerRows(m) {
+			r := sub.r
+			fmt.Fprintf(w, "%-44s %8s %8d %9s %9s %9s %9s %9s\n", "  "+sub.label, "", r.Count, "",
 				formatQuantile(r.P50), formatQuantile(r.P90), formatQuantile(r.P95), formatQuantile(r.P99))
 		}
 	}
@@ -233,4 +229,24 @@ func fixed(v int64, dec int) string {
 	}
 
 	return fmt.Sprintf("%d.%0*d", v/k, dec, v%k)
+}
+
+type answerRow struct {
+	label string
+	r     engine.RefusalLatency
+}
+
+// answerRows are a method's answers other than a success, each timed apart,
+// in a fixed order and only when there are any.
+func answerRows(m *engine.MethodReport) []answerRow {
+	var rows []answerRow
+	for _, row := range []answerRow{
+		{"request error", m.Rejected}, {"overload", m.Overload}, {"failure", m.Failure}, {"bad response", m.BadResponse},
+	} {
+		if row.r.Count > 0 {
+			rows = append(rows, row)
+		}
+	}
+
+	return rows
 }

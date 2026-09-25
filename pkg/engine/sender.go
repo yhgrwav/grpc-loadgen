@@ -16,6 +16,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -60,29 +61,6 @@ const (
 	// The target answered, so the latency is real; the call is not a success.
 	CategoryBadResponse
 )
-
-func (c Category) String() string {
-	switch c {
-	case CategorySuccess:
-		return "success"
-	case CategoryClientFault:
-		return "client fault"
-	case CategoryServerFault:
-		return "server fault"
-	case CategoryTimeout:
-		return "timeout"
-	case CategoryOverload:
-		return "overload"
-	case CategoryUnreachable:
-		return "unreachable"
-	case CategoryAborted:
-		return "aborted"
-	case CategoryCutOff:
-		return "cut off"
-	default:
-		return "unknown"
-	}
-}
 
 type Outcome struct {
 	// SentAt is when the request actually went out on the wire, after the
@@ -200,5 +178,33 @@ type ConnectionReporter interface {
 // Name is the category's name in machine-readable output. The set is a
 // contract: a rename breaks scripts that read it.
 func (c Category) Name() string {
-	return ""
+	switch c {
+	case CategorySuccess:
+		return "success"
+	case CategoryClientFault:
+		return "request_error"
+	case CategoryOverload:
+		return "overload"
+	case CategoryServerFault:
+		return "failure"
+	case CategoryTimeout:
+		return "timed_out"
+	case CategoryCutOff:
+		return "cut_off"
+	case CategoryUnreachable:
+		return "unreachable"
+	case CategoryClientError:
+		return "client_error"
+	case CategoryBadResponse:
+		return "bad_response"
+	case CategoryAborted:
+		return "aborted"
+	default:
+		return "unclassified"
+	}
+}
+
+// String is Name for people: words instead of underscores.
+func (c Category) String() string {
+	return strings.ReplaceAll(c.Name(), "_", " ")
 }

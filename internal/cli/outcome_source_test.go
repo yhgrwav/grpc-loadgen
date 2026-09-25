@@ -30,7 +30,7 @@ func TestPrintReport_AnErrorStatusIsNotPinnedOnTheTarget(t *testing.T) {
 		Duration: time.Second, Sent: 100, Failed: 100,
 		Methods: []engine.MethodReport{{
 			Method: "a.B/One", Sent: 100, Failed: 100, RPS: 100,
-			Refusal:      engine.RefusalLatency{Count: 100, P50: exact(1), P99: exact(2)},
+			Overload:     engine.RefusalLatency{Count: 100, P50: exact(1), P99: exact(2)},
 			FailureCodes: []engine.CodeCount{{Code: "Unavailable", Count: 100, FromTarget: true}},
 		}},
 	}})
@@ -39,7 +39,7 @@ func TestPrintReport_AnErrorStatusIsNotPinnedOnTheTarget(t *testing.T) {
 	if strings.Contains(text, "refused") || strings.Contains(text, "the target took to say no") {
 		t.Errorf("an error status reads as the target's refusal:\n%s", text)
 	}
-	for _, want := range []string{"error status", "from the target or a proxy in front of it"} {
+	for _, want := range []string{"overload", "from the target or a proxy in front of it"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
