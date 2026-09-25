@@ -19,8 +19,8 @@
 > das russische.
 
 > **Frühe Phase.** Funktioniert bereits: Unary-Last gegen einen echten Dienst, mehrere Methoden
-> mit eigener RPS in einem Lauf, Request-Body aus der Konfiguration, Bericht in der Konsole. Noch
-> nicht: Hochfahren der Last, Pass/Fail-Schwellen für CI, JSON-Bericht, Metrik-Export. Alles
+> mit eigener RPS in einem Lauf, Request-Body aus der Konfiguration, Bericht in der Konsole und JSON für Skripte. Noch
+> nicht: Hochfahren der Last, Pass/Fail-Schwellen für CI, Metrik-Export. Alles
 > Folgende beschreibt nur, was schon funktioniert.
 
 Das Werkzeug beantwortet die Frage, mit der man zu einem Lasttest kommt: **ab welcher Last hält
@@ -236,6 +236,7 @@ wurde das Docker-Netz gemessen, nicht das Ziel.
 | `-fake` | Einen eingebauten Stub statt des Dienstes aus der Konfiguration belasten — um das Werkzeug ohne Dienst anzusehen. Der Bericht ist mit `fake target` markiert |
 | `-fake-delay`, `-fake-jitter`, `-fake-fail-ratio` | Verhalten des Stubs. Nur zusammen mit `-fake` |
 | `-version` | Version drucken und beenden. Ein Build aus den Quellen druckt den Commit |
+| `-output` | Berichtsformat auf stdout: `text` (Standard) oder `json` für Skripte und CI |
 
 Im Terminal läuft der Lauf im Vollbild: RPS, laufende Anfragen, Fehler und Perzentile live, `q`
 hält an. Ohne Terminal (in CI, bei umgeleiteter Ausgabe) — eine Fortschrittszeile pro Sekunde:
@@ -357,14 +358,47 @@ das einen Bericht gedruckt hat, immer `3`.
 |---|---|
 | `0` | Plan ausgeführt, Bericht vollständig |
 | `1` | Der Lauf fand nicht statt: Flags, Konfiguration, Verbindung. Kein Bericht |
-| `2` | Der Lauf ist ungültig: Er stieß an die In-Flight-Obergrenze, oder das Ziel wies alle Aufrufe einer Methode als falsche Anfrage ab. Es gibt einen Bericht, aber seine Zahlen handeln nicht vom Ziel |
+| `2` | Der Lauf ist ungültig: Er stieß an die In-Flight-Obergrenze, oder jeder gemessene Aufruf einer Methode ist ein `request error`, ein `client error` oder eine `bad response`. Es gibt einen Bericht, aber seine Zahlen handeln nicht von der Last |
 | `3` | Der Lauf wurde vor dem Plan angehalten. Es gibt einen Bericht, und er deckt nur ab, was durchkam |
 | `130` | Notausstieg ohne Bericht nach Ctrl+C |
 | `143` | Notausstieg ohne Bericht nach SIGTERM |
 
+Code `4` ist für Schwellen reserviert.
+
+**JSON für Skripte und CI.** Mit `-output json` bekommt stdout genau ein JSON-Objekt und einen
+Zeilenumbruch: Fortschritt, Live-Ansicht, Warnungen und Fehler gehen nach stderr, stdout kann also
+direkt an `jq`. Das Objekt wird nur für einen Lauf gedruckt, der stattgefunden hat (Codes `0`, `2`,
+`3`); bei `1`, `130` und `143` bleibt stdout leer. Das Feld `outcome` (`complete`, `invalid` oder
+`incomplete`) stimmt immer mit dem Exit-Code überein.
+
+Das Schema wird über `schema_version` versioniert, derzeit `1`, und ist ein Vertrag; der Text auf
+dem Bildschirm ist es nicht und kann sich vor 1.0 ändern: Lesen Sie das JSON, nicht den Bildschirm.
+Die Regeln:
+
+- ein neues Feld kommt ohne Versionswechsel hinzu; Umbenennen, Entfernen oder ein anderer Typ eines
+  Feldes erhöht `schema_version`;
+- die Werte einer Aufzählung (`outcome`, `unchecked[].reason`, die Codes in `failure_codes`) können
+  ohne Versionswechsel wachsen;
+- ein Verbraucher muss unbekannte Felder überspringen und einen unbekannten Aufzählungswert
+  behandeln, ohne abzustürzen.
+
+Die Einheit steht im Feldnamen: `_us` sind ganze Mikrosekunden, `_s` ganze Sekunden; die Rate `rps`
+ist die einzige Kommazahl. Ein Wert, den der Lauf nicht geliefert hat, ist `null`, nicht `0`: ein
+Perzentil ohne Beobachtungen, die Rate einer Methode ohne Aufrufe, ein Stream-Limit, das das Ziel
+nicht angekündigt hat. Ein Perzentil ist ein Objekt `{"us": 1234, "lower_bound": false}`: Mit
+`lower_bound: true` ist es eine untere Schranke (der Tail lief über den Timeout, `>5.00s` auf dem
+Bildschirm), kein Wert. Latenzen sind auf 3 signifikante Stellen gerundet, wie das Histogramm sie
+hält; Zähler sind exakt. Zeiten zählen ab `started_at` (RFC 3339, UTC), dem Beginn des Plans,
+Aufwärmen eingeschlossen; auch `duration_us` schließt das Aufwärmen ein. `in_flight` in einer Sekunde
+ist, wie viele Aufrufe an ihrem Ende unterwegs waren. Die Codes in `failure_codes` sind kanonische
+Namen (`UNAVAILABLE`). `unchecked[].error` ist Text für Menschen und ändert sich mit grpc-go; für
+Skripte gibt es `reason`. Zum Abgleich: Die Summen des Laufs sind die Summe der Methoden, und über
+die Sekunden einer Methode ergibt `Σ begun` plus `outside_timeline` alle ihre Aufrufe, Aufwärmen
+eingeschlossen.
+
 ## Noch nicht vorhanden
 
-Hochfahren von null auf die Ziel-RPS, Pass/Fail-Schwellen und JSON-Bericht für CI, Export nach
+Hochfahren von null auf die Ziel-RPS, Pass/Fail-Schwellen für CI, Export nach
 Prometheus.
 
 ## Mehr erfahren

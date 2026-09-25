@@ -200,6 +200,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		fakeJitter     = flags.Duration("fake-jitter", 10*time.Millisecond, "random spread added to the fake latency, with -fake")
 		fakeFail       = flags.Float64("fake-fail-ratio", 0, "share of fake replies that fail, 0 to 1, with -fake")
 		showVersion    = flags.Bool("version", false, "print the version and exit")
+		output         = flags.String("output", "text", "report format on stdout: text, or json for scripts")
 	)
 
 	if err := flags.Parse(args); err != nil {
@@ -215,6 +216,9 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		flags.Usage()
 
 		return errors.New("no config given, use -c")
+	}
+	if *output != "text" && *output != "json" {
+		return fmt.Errorf("-output %q: want text or json", *output)
 	}
 	if err := checkFakeFlags(flags, *fake); err != nil {
 		return err
@@ -362,10 +366,40 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	}
 
 	report := reportOf()
-	cli.PrintReport(stdout, target, report)
+	result := runResult(report.Report, runErr)
+	if *output == "json" {
+		// Only a run that happened has a report: on exit 1 stdout stays empty,
+		// and a script reads the exit code first.
+		if outcome, ok := outcomeOf(result); ok {
+			info, _ := debug.ReadBuildInfo()
+			if err := cli.WriteJSON(stdout, cli.JSONRun{
+				Target: target, Version: versionString(version, info), Outcome: outcome,
+				StartedAt: report.StartedAt, Run: report,
+			}); err != nil {
+				return fmt.Errorf("write the JSON report: %w", err)
+			}
+		}
+	} else {
+		cli.PrintReport(stdout, target, report)
+	}
 	s.Finish()
 
-	return runResult(report.Report, runErr)
+	return result
+}
+
+// outcomeOf names a run's result in the JSON report, the same as its exit code
+// says: 0 complete, 2 invalid, 3 incomplete. Any other error has no report.
+func outcomeOf(result error) (string, bool) {
+	switch exitCode(result) {
+	case 0:
+		return cli.OutcomeComplete, true
+	case 2:
+		return cli.OutcomeInvalid, true
+	case 3:
+		return cli.OutcomeIncomplete, true
+	default:
+		return "", false
+	}
 }
 
 // checkFakeFlags rejects tuning of the fake target when it is not in use: the

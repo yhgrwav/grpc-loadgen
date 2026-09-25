@@ -189,6 +189,7 @@ func (e *Engine) Report() Report {
 	report := e.stats.Report()
 	report.Incomplete = e.incomplete.Load()
 	report.Planned = e.plannedDuration()
+	report.StartedAt = e.startedAt
 
 	if r, ok := e.opts.Sender.(ConnectionReporter); ok {
 		if conns, known := r.Connections(); known {
