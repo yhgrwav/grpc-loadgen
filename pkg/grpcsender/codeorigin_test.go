@@ -197,13 +197,24 @@ func TestSend_TellsACodeThatCameBackFromOneTheClientSet(t *testing.T) {
 		// As the state in #75, the last attempt decides: the first was refused
 		// unprocessed and retried transparently, the retry got a status.
 		{"refused, retried, answered", func(t *testing.T) engine.Outcome {
-			return sendWithin(t, rawTarget(t, func(fr *http2.Framer, id uint32, n int) {
-				if n == 1 {
-					_ = fr.WriteRSTStream(id, http2.ErrCodeRefusedStream)
+			// The retry is answered after its DATA: answered on HEADERS, the
+			// status can beat the client's write of the body, and grpc-go then
+			// returns a bare io.EOF instead of it.
+			var refused, answered uint32
+			return sendWithin(t, rawSender(t, func(conn net.Conn) {
+				serveRawData(conn, func(fr *http2.Framer, id uint32, n int) {
+					if n == 1 {
+						refused = id
+						_ = fr.WriteRSTStream(id, http2.ErrCodeRefusedStream)
+					}
+				}, func(fr *http2.Framer, id uint32) bool {
+					if id != refused && id != answered {
+						answered = id
+						trailersOnly(fr, id, codes.NotFound)
+					}
 
-					return
-				}
-				trailersOnly(fr, id, codes.NotFound)
+					return false
+				})
 			}), 2*time.Second)
 		}, codes.NotFound, true},
 	}

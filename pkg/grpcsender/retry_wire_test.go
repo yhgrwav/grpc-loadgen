@@ -32,7 +32,9 @@ import (
 
 // refusingOnce is a raw HTTP/2 target: it refuses the first stream with
 // RST_STREAM REFUSED_STREAM and answers every later one trailers-only with
-// NOT_FOUND. RFC 9113 §8.7: a refused stream was not processed.
+// NOT_FOUND once its DATA has arrived. RFC 9113 §8.7: a refused stream was not
+// processed. Answered on HEADERS, the status could beat the client's write of
+// the retry's body, and grpc-go then returns a bare io.EOF instead of it.
 func refusingOnce(t *testing.T, conn net.Conn) {
 	t.Helper()
 
@@ -48,6 +50,7 @@ func refusingOnce(t *testing.T, conn net.Conn) {
 		return
 	}
 
+	var refusedID uint32
 	refused := false
 	for {
 		f, err := fr.ReadFrame()
@@ -66,9 +69,11 @@ func refusingOnce(t *testing.T, conn net.Conn) {
 			}
 		case *http2.HeadersFrame:
 			if !refused {
-				refused = true
+				refused, refusedID = true, f.StreamID
 				_ = fr.WriteRSTStream(f.StreamID, http2.ErrCodeRefusedStream)
-
+			}
+		case *http2.DataFrame:
+			if f.StreamID == refusedID || !f.StreamEnded() {
 				continue
 			}
 
