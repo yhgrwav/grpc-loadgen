@@ -48,10 +48,14 @@ import (
 //
 // resolveSlack covers a whole connection made after the address arrives —
 // dial, handshake, the balancer's pick — which is waiting for a connection
-// too: max 5.1 ms.
+// too. Its excess: max 5.8 ms in docker at one CPU; 10.43 ms on a GitHub
+// runner; 53 ms with the CPU oversubscribed fivefold, where the scheduler
+// throttles in steps of about 25 ms. It is half of resolveHold, so a wait
+// counted twice still clears it by resolveHold/2.
 const (
 	handshakeSlack = 15 * time.Millisecond
-	resolveSlack   = 10 * time.Millisecond
+	resolveHold    = 200 * time.Millisecond
+	resolveSlack   = resolveHold / 2
 )
 
 // feed plays events into a call as grpc-go would, with the handler's clock at
@@ -411,7 +415,7 @@ func (nopResolver) Close()                                {}
 // newClientStream before the first Begin (stream.go:338); a wait counted from
 // BeginTime misses it.
 func TestSend_ConnWaitCoversNameResolution(t *testing.T) {
-	const hold = 50 * time.Millisecond
+	const hold = resolveHold
 
 	lis := bufconn.Listen(1024 * 1024)
 	srv := grpc.NewServer()
