@@ -27,6 +27,9 @@ import (
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
+// badReplyDelay is how long the gzip stand waits before its reply.
+const badReplyDelay = 20 * time.Millisecond
+
 func replyHeaders(fr *http2.Framer, stream uint32, extra ...[2]string) {
 	var block bytes.Buffer
 	enc := hpack.NewEncoder(&block)
@@ -67,6 +70,8 @@ func TestSend_HeadersThenAResetIsCutOffNotABadResponse(t *testing.T) {
 func TestSend_ABodyTheClientCannotDecompressIsABadResponse(t *testing.T) {
 	out := sendWithin(t, rawSender(t, func(conn net.Conn) {
 		serveRawData(conn, func(*http2.Framer, uint32, int) {}, func(fr *http2.Framer, id uint32) bool {
+			// The stand takes its time, so a latency of zero cannot pass for one.
+			time.Sleep(badReplyDelay)
 			replyHeaders(fr, id, [2]string{"grpc-encoding", "gzip"})
 			junk := []byte("not gzip at all")
 			frame := make([]byte, 5, 5+len(junk))
@@ -86,7 +91,7 @@ func TestSend_ABodyTheClientCannotDecompressIsABadResponse(t *testing.T) {
 	if out.CodeFromTarget {
 		t.Errorf("CodeFromTarget = true: the target said OK, the client set %s", out.Code)
 	}
-	if out.SentAt.IsZero() || out.DoneAt.IsZero() || out.DoneAt.Before(out.SentAt) {
-		t.Errorf("SentAt %v, DoneAt %v: a bad response has a real latency", out.SentAt, out.DoneAt)
+	if out.SentAt.IsZero() || out.DoneAt.Sub(out.SentAt) < badReplyDelay {
+		t.Errorf("SentAt %v, DoneAt %v: want at least the stand's %v, a bad response has a real latency", out.SentAt, out.DoneAt, badReplyDelay)
 	}
 }

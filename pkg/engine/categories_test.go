@@ -118,8 +118,9 @@ func TestCategory_ABadResponseHasItsOwnLatency(t *testing.T) {
 	if m.BadResponse.Count != 1 || !m.BadResponse.P50.Defined {
 		t.Errorf("bad response latency: count %d, p50 defined %v; want 1 and defined", m.BadResponse.Count, m.BadResponse.P50.Defined)
 	}
-	if m.Latencies != 0 {
-		t.Errorf("%d observations in the service time, want none: a reply the client refused is not a served call", m.Latencies)
+	if m.Latencies != 0 || m.Overload.Count != 0 || m.Failure.Count != 0 || m.Rejected.Count != 0 {
+		t.Errorf("service time %d, overload %d, failure %d, request error %d; want none: a reply the client refused is its own group",
+			m.Latencies, m.Overload.Count, m.Failure.Count, m.Rejected.Count)
 	}
 }
 
