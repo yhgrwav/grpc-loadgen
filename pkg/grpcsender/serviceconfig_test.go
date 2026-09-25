@@ -160,9 +160,12 @@ func TestServiceConfig_FromTheResolverDoesNotHoldCallsOnAFailedConnection(t *tes
 	// pick_first rests in IDLE after losing its connection; asking it to
 	// connect to a target that is down puts it in TRANSIENT_FAILURE.
 	conn := r.sender.conn
-	for conn.GetState() != connectivity.TransientFailure {
+	// The state is read once per turn, before Connect: read after it, it could
+	// already be TRANSIENT_FAILURE, and the wait for a change away from it would
+	// run out the deadline (1 in 20 in the nightly stress run, go1.25).
+	for s := conn.GetState(); s != connectivity.TransientFailure; s = conn.GetState() {
 		conn.Connect()
-		if !conn.WaitForStateChange(bounded(t), conn.GetState()) {
+		if !conn.WaitForStateChange(bounded(t), s) {
 			t.Fatal("the connection never failed")
 		}
 	}
