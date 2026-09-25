@@ -58,7 +58,7 @@ func TestPrintReport_SeparatesTheTargetsCodesFromTheClients(t *testing.T) {
 
 	for _, want := range []string{
 		"a.B/One codes sent by the target: Unavailable 12",
-		"a.B/One codes set by the client, no status came back: DeadlineExceeded 3",
+		"a.B/One codes set by the client: DeadlineExceeded 3",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
@@ -73,7 +73,7 @@ func TestPrintReport_OnlyClientCodesClaimNothingOfTheTarget(t *testing.T) {
 	if strings.Contains(text, "sent by the target") {
 		t.Errorf("a target line for codes the client made:\n%s", text)
 	}
-	if !strings.Contains(text, "set by the client, no status came back: DeadlineExceeded 3") {
+	if !strings.Contains(text, "set by the client: DeadlineExceeded 3") {
 		t.Errorf("no client line:\n%s", text)
 	}
 }

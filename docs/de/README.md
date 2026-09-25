@@ -82,7 +82,7 @@ werden.
 | `app.server_name` | Name, gegen den das Zertifikat des Dienstes geprüft wird, wenn es die Adresse aus `target` nicht nennt. Braucht TLS |
 | `app.metadata` | Header jedes Aufrufs: `authorization`, `x-api-key` usw. `${NAME}` wird aus einer Umgebungsvariable genommen |
 | `app.max_response_size` | Die größte Antwort, die ein Aufruf annimmt: `16MiB`, `512KB`. Die Einheit ist Pflicht (`MB` = 10⁶ Bytes, `MiB` = 2²⁰), unter 2 GiB. Fehlt es — 4 MiB, wie bei gRPC. Eine größere Antwort ist eine abgewiesene Anfrage, keine Überlastung des Ziels |
-| `load.warmup` | Die ersten N Sekunden bleiben aus den Perzentilen und aus `sent`: kalte Caches verzerren sie. Die Aufrufe der Aufwärmphase gehen an das Ziel; der Bericht druckt sie als Zeile `warm-up N sent (M failed), excluded from stats` — `sent` plus diese Zeile ergeben alle ausgegangenen Aufrufe. Das Ziel hat sie alle erhalten, außer den als unreachable gezählten; `cut off` und Aufrufe mit Timeout haben es womöglich nur teilweise erreicht: Ein Ziel, das sein HTTP/2-Fenster (Flow Control) nicht öffnet, bekommt nur die Header, und seine Zähler sehen den Aufruf womöglich nicht. Zählt zu `duration`, kürzer als jeder Aufruf |
+| `load.warmup` | Die ersten N Sekunden bleiben aus den Perzentilen und aus `sent`: kalte Caches verzerren sie. Die Aufrufe der Aufwärmphase gehen an das Ziel; der Bericht druckt sie als Zeile `warm-up N sent (M failed), excluded from stats` — `sent` plus diese Zeile ergeben alle Aufrufe, die der Generator zu senden versucht hat. Das Ziel hat sie alle erhalten, außer den als unreachable und client error gezählten; `cut off` und Aufrufe mit Timeout haben es womöglich nur teilweise erreicht: Ein Ziel, das sein HTTP/2-Fenster (Flow Control) nicht öffnet, bekommt nur die Header, und seine Zähler sehen den Aufruf womöglich nicht. Zählt zu `duration`, kürzer als jeder Aufruf |
 | `load.calls[].method` | Vollständiger Methodenname |
 | `load.calls[].rps` | Anfragen pro Sekunde für diese Methode |
 | `load.calls[].duration` | Wie lange sie belastet wird: `30s`, `5m`, `1h` |
@@ -255,25 +255,55 @@ zurückgesetzt oder die Verbindung abgebrochen —, wird getrennt gezählt, als 
 ein Proxy könnte sie verarbeitet haben; bei einem Schreibvorgang ist das ein Anlass, nach Dubletten
 zu suchen.
 
-Fehler werden getrennt: Die Zeile `error status` zeigt, wie oft ein Fehlerstatus zurückkam
-(`RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `INTERNAL` und andere) und nach welcher Zeit. Den Status kann
-statt des Ziels ein Proxy davor geschickt haben: nginx ohne lebendes Backend antwortet
-`UNAVAILABLE`, und der Client kann das eine nicht vom anderen unterscheiden. Die Zeile `rejected`
-zeigt, wie oft ein Aufruf bei jedem Tempo gescheitert wäre: eine falsche Anfrage (keine solche
-Methode, falsches Argument, Body passt nicht zum Schema) oder eine Nachricht, die nicht passte —
-eine Antwort, die das Limit des Clients vollständig abgewiesen hat (`app.max_response_size`,
-standardmäßig 4 MiB; von der Antwort kommt nichts an; ein Hinweis unter dem Bericht nennt das
-Limit des Laufs), oder eine Anfrage, die das Ziel oder ein Proxy davor zu groß fand (deren Limit
-kennen wir nicht). Letzteres hängt nicht von der Last ab: Ein solcher Aufruf scheitert bei jeder
-RPS. Sind alle gemessenen Aufrufe einer Methode abgewiesen, wird der Lauf für ungültig erklärt, und
-das Urteil nennt diese Methode: Bei einem Tippfehler in einer von drei Methoden läge der Anteil am
+Antworten außer einem Erfolg werden auf Zeilen verteilt, jede mit eigenen Perzentilen. Den Status
+kann statt des Ziels ein Proxy davor geschickt haben: nginx ohne lebendes Backend antwortet
+`UNAVAILABLE`, und der Client kann das eine nicht vom anderen unterscheiden.
+
+- `request error`: Der Aufruf wäre bei jedem Tempo gescheitert. Eine falsche Anfrage (keine solche
+  Methode, falsches Argument, Body passt nicht zum Schema) oder eine Anfrage, die das Ziel oder ein
+  Proxy davor zu groß fand (deren Limit kennen wir nicht).
+- `overload`: Der Status sagt „überlastet oder nicht verfügbar", `RESOURCE_EXHAUSTED` oder
+  `UNAVAILABLE`. Das sind die Worte des Status, keine Diagnose des Ziels: Ein Proxy ohne lebendes
+  Backend schickt dasselbe `UNAVAILABLE`.
+- `failure`: Der Status sagt, dass der Aufruf kaputtging: `INTERNAL`, `UNKNOWN`, `DATA_LOSS`,
+  `CANCELLED` von der Gegenseite und `ABORTED`. `ABORTED` ist ein Konflikt gleichzeitiger Änderungen
+  (zurückgerollte Transaktion, gescheiterte optimistische Sperre), kein Mangel an Kapazität: Last
+  macht ihn häufiger, aber auf zwei gleichen Zeilen tritt er bei jedem Tempo auf.
+- `bad response`: Eine Antwort kam, und der Client hat sie nicht angenommen. Entweder lag sie über
+  dem Limit des Clients (`app.max_response_size`, standardmäßig 4 MiB; von der Antwort kommt nichts
+  an), oder sie war mit einer Kodierung komprimiert, die der Client nicht angekündigt hat. Letzteres
+  bricht das Protokoll auf der Gegenseite: gRPC erlaubt einem Server nur Kodierungen, die der Client
+  in `grpc-accept-encoding` aufgeführt hat.
+- `client error`: Der Client hat das Senden selbst verweigert. Die Anfrage ließ sich nicht kodieren,
+  oder ein Codec oder Interceptor ist gescheitert. Der Aufruf hat das Ziel nie erreicht.
+
+Eine zu große Anfrage wird am Fehlertext von grpc-go erkannt. Ein Ziel auf einer anderen
+Implementierung (Envoy, Java) formuliert ihn anders, und seine Ablehnung landet in `overload` statt
+in `request error`.
+
+Ist jeder gemessene Aufruf einer Methode ein `request error`, ein `client error` oder eine
+`bad response`, wird der Lauf für ungültig erklärt (Exit-Code 2), und der Hinweis nennt die Methode,
+die Ursache und was zu tun ist: Bei einem Tippfehler in einer von drei Methoden läge der Anteil am
 Lauf bei 33 %, und es gäbe gar kein Urteil.
+
+| Code | Status kam über das Netz | Code vom Client gesetzt, Anfrage ging raus | Code vom Client gesetzt, Anfrage ging nicht raus |
+|---|---|---|---|
+| `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `FAILED_PRECONDITION`, `OUT_OF_RANGE`, `UNIMPLEMENTED` | `request error` | `cut off` | `client error` |
+| `RESOURCE_EXHAUSTED` | `overload`; „larger than max" von grpc-go ist ein `request error` | `cut off`; eine Antwort über unserem Limit ist eine `bad response` | `client error` |
+| `UNAVAILABLE` | `overload` | `cut off` | `unreachable` |
+| `CANCELLED`, `UNKNOWN`, `INTERNAL`, `DATA_LOSS`, `ABORTED` | `failure` | `cut off`; eine nicht entpackbare Antwort ist eine `bad response` | `client error` |
+| `DEADLINE_EXCEEDED` | Timeout | Timeout | Timeout, nicht gesendet |
+
+Ein Aufruf, den unser eigener Stopp abgebrochen hat (Ctrl+C, SIGTERM), ist `aborted`, gleich mit
+welchem Code: keine Ablehnung durch das Ziel.
 
 Unter dem Bericht werden die gescheiterten Aufrufe jeder Methode nach gRPC-Code aufgeschlüsselt,
 vom häufigsten zum seltensten, in zwei Zeilen. „sent by the target" — der Status kam über das Netz:
-vom Ziel oder von einem Proxy davor, der Client kann das nicht unterscheiden. „set by the client,
-no status came back" — es gab keinen Status, der Client hat den Code selbst gesetzt: niemand hat
-geantwortet, die Gegenseite hat den Stream zurückgesetzt, unsere Deadline ist abgelaufen. Derselbe
+vom Ziel oder von einem Proxy davor, der Client kann das nicht unterscheiden. „set by the client"
+— der Client hat den Code selbst gesetzt: niemand hat geantwortet, die Gegenseite hat den Stream
+zurückgesetzt, unsere Deadline ist abgelaufen, oder der Client hat eine angekommene Antwort nicht
+angenommen (dann kann ein OK-Status vom Ziel angekommen sein, der endgültige Code ist aber der des
+Clients). Derselbe
 Code kann in beiden Zeilen stehen. `DeadlineExceeded` vom Ziel ist meist unsere eigene Deadline:
 Sie geht im Header `grpc-timeout` an das Ziel, und es kann den Aufruf vor unserem Timer beenden.
 Die Kategorie sagt, wessen Schuld es ist, der Code, wonach man in den Logs des Ziels sucht.

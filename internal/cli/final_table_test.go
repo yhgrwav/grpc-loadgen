@@ -48,7 +48,7 @@ func tableReport() engine.Report {
 			Method: "pkg.Svc/One", Sent: 1000, Failed: 150, RPS: 97,
 			P50: exact(11), P90: exact(12),
 			P95: exact(13), P99: exact(14),
-			Refusal: engine.RefusalLatency{Count: 100,
+			Overload: engine.RefusalLatency{Count: 100,
 				P50: exact(21), P90: exact(22),
 				P95: exact(23), P99: exact(24)},
 			Rejected: engine.RefusalLatency{Count: 50,
@@ -447,6 +447,21 @@ func verdictCases() []struct {
 		}},
 		{"three methods rejected", "invalid run: every call of 3 methods was rejected", "fix the request", func(m *model) {
 			rejectAll(m, 3)
+		}},
+		{"one method never sent", "invalid run: every call of .../Bad0 failed to send", "Nothing reached the target", func(m *model) {
+			m.report.Methods = append(m.report.Methods, engine.MethodReport{
+				Method: "pkg.Svc/Bad0", Sent: 20, Failed: 20, ClientError: 20,
+			})
+			m.report.RequestRejected = true
+		}},
+		{"one method's replies refused", "invalid run: every call of ...Bad0 got bad replies", "raise it", func(m *model) {
+			m.report.Methods = append(m.report.Methods, engine.MethodReport{
+				Method: "pkg.Svc/Bad0", Sent: 20, Failed: 20,
+				BadResponse:  engine.RefusalLatency{Count: 20, P50: exact(1), P90: exact(1), P95: exact(1), P99: exact(1)},
+				FailureCodes: []engine.CodeCount{{Code: "ResourceExhausted", Count: 20}},
+			})
+			m.maxResponse = "1MiB"
+			m.report.RequestRejected = true
 		}},
 		{"incomplete", "incomplete: ran 12.0s of the planned 20.0s", "do not compare", func(m *model) {
 			m.report.Incomplete, m.report.Planned = true, 20*time.Second

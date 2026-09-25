@@ -114,7 +114,7 @@ func TestTimeline_FastRefusalsAreFailuresNotServedCalls(t *testing.T) {
 
 	got := seconds(t, stats)
 	for i := range 2 {
-		if got[i].Succeeded != 0 || got[i].TargetFailed < 998 {
+		if got[i].Succeeded != 0 || (got[i].Overload+got[i].Failure) < 998 {
 			t.Errorf("second %d = %+v, want only failures", i, got[i])
 		}
 		if got[i].InFlight > 2 {
@@ -139,7 +139,7 @@ func TestTimeline_OutcomesAreSplit(t *testing.T) {
 
 	got := seconds(t, stats)[0]
 	want := Second{
-		Begun: 10, Succeeded: 1, TargetFailed: 2, TimedOut: 1, RequestFailed: 1, NotSentConnection: 1, NotSentGenerator: 1,
+		Begun: 10, Succeeded: 1, Overload: 1, Failure: 1, TimedOut: 1, RequestFailed: 1, NotSentConnection: 1, NotSentGenerator: 1,
 		Unanswered: 1, Aborted: 1, Unclassified: 1,
 	}
 	got.LagSum, got.LagMax, got.LagCalls = 0, 0, 0
@@ -174,7 +174,7 @@ func unsentAfterLag(start time.Time, lag, wait time.Duration) Result {
 }
 
 // A config that sends the same entity every time gets AlreadyExists from the
-// second call on. The target copes fine; the verdict reads TargetFailed, so
+// second call on. The target copes fine; the verdict reads Overload and Failure, so
 // these must not land there.
 // Ground: contract — whose fault an outcome is.
 func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
@@ -187,8 +187,8 @@ func TestTimeline_RequestFaultsAreNotTheTargets(t *testing.T) {
 	}
 
 	got := seconds(t, stats)[0]
-	if got.RequestFailed != 100 || got.TargetFailed != 0 {
-		t.Errorf("request failed %d, target failed %d; want 100 and 0", got.RequestFailed, got.TargetFailed)
+	if got.RequestFailed != 100 || (got.Overload+got.Failure) != 0 {
+		t.Errorf("request failed %d, target failed %d; want 100 and 0", got.RequestFailed, (got.Overload + got.Failure))
 	}
 }
 
@@ -221,9 +221,9 @@ func TestTimeline_UnsentSplitsByWhoseFault(t *testing.T) {
 	stats.Record(blamed)
 
 	got := seconds(t, stats)[0]
-	if got.NotSentConnection != 4 || got.NotSentGenerator != 8 || got.TargetFailed != 0 {
+	if got.NotSentConnection != 4 || got.NotSentGenerator != 8 || (got.Overload+got.Failure) != 0 {
 		t.Errorf("connection %d, generator %d, target failed %d; want 4, 8 and 0",
-			got.NotSentConnection, got.NotSentGenerator, got.TargetFailed)
+			got.NotSentConnection, got.NotSentGenerator, (got.Overload + got.Failure))
 	}
 }
 
@@ -420,7 +420,7 @@ func TestTimeline_WarmupIsOnTheTimelineButNotInTheTotals(t *testing.T) {
 	}
 
 	got := report.Methods[0].Seconds
-	if got[0].TargetFailed != 1 || got[2].Succeeded != 1 {
+	if (got[0].Overload+got[0].Failure) != 1 || got[2].Succeeded != 1 {
 		t.Errorf("seconds = %+v, want the warmup failure in 0 and the success in 2", got)
 	}
 }

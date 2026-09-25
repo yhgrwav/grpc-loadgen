@@ -16,6 +16,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -51,30 +52,15 @@ const (
 	// connection. It may have been processed. There is no status to time, so
 	// it carries no latency, and it does not count as an answer.
 	CategoryCutOff
+	// CategoryClientError means the client stack refused to send: a request it
+	// could not encode, a codec or interceptor that failed. Nothing reached the
+	// target, and the same call will fail again.
+	CategoryClientError
+	// CategoryBadResponse means a reply reached the client and the client did
+	// not accept it: over its size limit, or a body it could not decompress.
+	// The target answered, so the latency is real; the call is not a success.
+	CategoryBadResponse
 )
-
-func (c Category) String() string {
-	switch c {
-	case CategorySuccess:
-		return "success"
-	case CategoryClientFault:
-		return "client fault"
-	case CategoryServerFault:
-		return "server fault"
-	case CategoryTimeout:
-		return "timeout"
-	case CategoryOverload:
-		return "overload"
-	case CategoryUnreachable:
-		return "unreachable"
-	case CategoryAborted:
-		return "aborted"
-	case CategoryCutOff:
-		return "cut off"
-	default:
-		return "unknown"
-	}
-}
 
 type Outcome struct {
 	// SentAt is when the request actually went out on the wire, after the
@@ -187,4 +173,38 @@ type Connections struct {
 // it can vouch for, and the report then says nothing about connections.
 type ConnectionReporter interface {
 	Connections() (Connections, bool)
+}
+
+// Name is the category's name in machine-readable output. The set is a
+// contract: a rename breaks scripts that read it.
+func (c Category) Name() string {
+	switch c {
+	case CategorySuccess:
+		return "success"
+	case CategoryClientFault:
+		return "request_error"
+	case CategoryOverload:
+		return "overload"
+	case CategoryServerFault:
+		return "failure"
+	case CategoryTimeout:
+		return "timed_out"
+	case CategoryCutOff:
+		return "cut_off"
+	case CategoryUnreachable:
+		return "unreachable"
+	case CategoryClientError:
+		return "client_error"
+	case CategoryBadResponse:
+		return "bad_response"
+	case CategoryAborted:
+		return "aborted"
+	default:
+		return "unclassified"
+	}
+}
+
+// String is Name for people: words instead of underscores.
+func (c Category) String() string {
+	return strings.ReplaceAll(c.Name(), "_", " ")
 }

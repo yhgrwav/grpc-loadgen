@@ -253,3 +253,20 @@ func TestSend_RefusedOnTheLastAttemptIsCutOff(t *testing.T) {
 		t.Errorf("category = %v (code %s, %v), want cut off", out.Category, out.Code, out.Err)
 	}
 }
+
+// The cell #85 lacked: a trailer came over the wire, it said OK, and the code
+// in the error is one our client set on the reply it refused. The category is
+// the client's, and so is the code's source.
+func TestCategorize_ATrailerSayingOKWithAReplyTheClientRefused(t *testing.T) {
+	for _, err := range []error{
+		status.Error(codes.Internal, `grpc: Decompressor is not installed for grpc-encoding "gzip"`),
+		status.Error(codes.Internal, "grpc: failed to decompress the received message: gzip: invalid header"),
+	} {
+		if got := categorize(err, true, true); got != engine.CategoryBadResponse {
+			t.Errorf("%v with a trailer: category %v, want a bad response", err, got)
+		}
+		if !refusedReply(err, true) {
+			t.Errorf("%v with a trailer: not seen as the client's, so the code would read as the target's", err)
+		}
+	}
+}

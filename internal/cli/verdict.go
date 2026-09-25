@@ -20,6 +20,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/yhgrwav/leettest/pkg/engine"
 )
 
 // shortVerdicts are the final screen's verdicts in one phrase each, in the
@@ -32,21 +34,29 @@ func (m *model) shortVerdicts(width int) []string {
 	var out []string
 	if report.RequestRejected {
 		var outright []string
+		tail := ""
 		for i := range report.Methods {
 			r := &report.Methods[i]
-			if r.Rejected.Count > 0 && r.Rejected.Count == r.Sent {
-				outright = append(outright, displayMethod(r.Method))
+			if invalidNote(r, "") == "" {
+				continue
+			}
+			outright = append(outright, displayMethod(r.Method))
+			// One tail for all of them, or the generic one when they differ.
+			if t := invalidTail(r); tail == "" || tail == t {
+				tail = t
+			} else {
+				tail = " failed at any rate"
 			}
 		}
 		switch {
 		case len(outright) == 1 && isASCII(outright[0]):
-			const head, tail = "invalid run: every call of ", " was rejected"
+			const head = "invalid run: every call of "
 			// One line: at 60x16 a second one would take the table's only row.
 			out = append(out, head+truncateLeft(outright[0], room-len(head)-len(tail))+tail)
 		case len(outright) == 1:
-			out = append(out, "invalid run: every call of 1 method was rejected")
+			out = append(out, "invalid run: every call of 1 method"+tail)
 		default:
-			out = append(out, fmt.Sprintf("invalid run: every call of %d methods was rejected", len(outright)))
+			out = append(out, fmt.Sprintf("invalid run: every call of %d methods%s", len(outright), tail))
 		}
 	}
 	if hit := report.CapHit; hit != nil {
@@ -106,4 +116,18 @@ func isASCII(s string) bool {
 	}
 
 	return true
+}
+
+// invalidTail ends the short verdict for a method invalidNote speaks of.
+func invalidTail(m *engine.MethodReport) string {
+	switch m.Sent {
+	case m.Rejected.Count:
+		return " was rejected"
+	case m.ClientError:
+		return " failed to send"
+	case m.BadResponse.Count:
+		return " got bad replies"
+	default:
+		return " failed at any rate"
+	}
 }

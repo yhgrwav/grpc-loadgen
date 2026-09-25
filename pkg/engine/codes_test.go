@@ -233,8 +233,8 @@ func TestReport_CutOffIsAFailureOfItsOwn(t *testing.T) {
 	if m.Unanswered != 0 {
 		t.Errorf("unanswered %d: a cut-off call reached the other end", m.Unanswered)
 	}
-	if m.Refusal.Count != 0 || m.Rejected.Count != 0 {
-		t.Errorf("refusal %d, rejected %d: no status came back to time", m.Refusal.Count, m.Rejected.Count)
+	if m.Overload.Count+m.Failure.Count != 0 || m.Rejected.Count != 0 {
+		t.Errorf("overload %d, failure %d, rejected %d: no status came back to time", m.Overload.Count, m.Failure.Count, m.Rejected.Count)
 	}
 	if want := []CodeCount{{Code: "Internal", Count: 4}}; !slices.Equal(m.FailureCodes, want) {
 		t.Errorf("codes %+v, want %+v", m.FailureCodes, want)
@@ -264,7 +264,7 @@ func TestReport_CutOffIsNotAnAnswer(t *testing.T) {
 	if m.LastAnswerAt == nil || *m.LastAnswerAt != 100*time.Millisecond {
 		t.Errorf("last answer at %v, want 100ms: the cut-off call at 1.5s got no status", m.LastAnswerAt)
 	}
-	if len(m.Seconds) < 2 || m.Seconds[1].CutOff != 1 || m.Seconds[1].TargetFailed != 0 {
-		t.Errorf("seconds %+v: want the cut-off call in second 1 as CutOff, not TargetFailed", m.Seconds)
+	if len(m.Seconds) < 2 || m.Seconds[1].CutOff != 1 || m.Seconds[1].Overload+m.Seconds[1].Failure != 0 {
+		t.Errorf("seconds %+v: want the cut-off call in second 1 as CutOff, not an error status", m.Seconds)
 	}
 }

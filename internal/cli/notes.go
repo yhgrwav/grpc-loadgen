@@ -41,9 +41,8 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 		add("warm-up %d sent%s, excluded from stats", report.WarmupSent, failed)
 	}
 
-	censored, unanswered, cutOff, unclassified, outside, invalid, refused := 0, 0, 0, 0, 0, 0, 0
+	censored, unanswered, cutOff, unclassified, outside, invalid := 0, 0, 0, 0, 0, 0
 	rejected := make([]string, 0, len(report.Methods))
-	outright := make([]string, 0, len(report.Methods))
 	for i := range report.Methods {
 		m := &report.Methods[i]
 		censored += m.Censored
@@ -52,12 +51,8 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 		cutOff += m.CutOff
 		unclassified += m.Unclassified
 		outside += m.OutsideTimeline
-		refused += m.Refusal.Count
-		if r := m.Rejected; r.Count > 0 {
+		if m.Rejected.Count > 0 {
 			rejected = append(rejected, displayMethod(m.Method))
-			if r.Count == m.Sent {
-				outright = append(outright, displayMethod(m.Method))
-			}
 		}
 	}
 
@@ -112,7 +107,7 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 		for _, group := range []struct {
 			fromTarget bool
 			label      string
-		}{{true, "codes sent by the target"}, {false, "codes set by the client, no status came back"}} {
+		}{{true, "codes sent by the target"}, {false, "codes set by the client"}} {
 			var codes []string
 			for _, c := range m.FailureCodes {
 				if c.FromTarget == group.fromTarget {
@@ -143,27 +138,43 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 	}
 
 	if len(rejected) > 0 {
-		limit := "4MiB (the gRPC default; app.max_response_size sets another)"
-		if maxResponse != "" {
-			limit = maxResponse + " (app.max_response_size)"
-		}
-		add("The \"rejected\" rows are calls that fail the same way at any rate. Either the\n"+
-			"request is wrong — no such method, a bad argument, a body that does not match\n"+
-			"the schema — or a message did not fit: a reply over the client's limit, %s,\n"+
-			"or a request refused as larger than accepted, by the target or a proxy in front of it.\n"+
-			"Check the config for %s.", limit, strings.Join(rejected, ", "))
+		add("The \"request error\" rows are calls that fail the same way at any rate. Either\n"+
+			"the request is wrong — no such method, a bad argument, a body that does not match\n"+
+			"the schema — or\n"+
+			"a request refused as larger than accepted, by the target or a proxy in front of it.\n"+
+			"Check the config for %s.", strings.Join(rejected, ", "))
 	}
 
 	if report.RequestRejected {
-		add("invalid run: every measured call of %s came back as a request that will not\n"+
-			"be served, by the target or a proxy in front of it. Nothing about the load was\n"+
-			"tested there; fix the request and run again.", strings.Join(outright, ", "))
+		for i := range report.Methods {
+			if note := invalidNote(&report.Methods[i], maxResponse); note != "" {
+				add("%s", note)
+			}
+		}
 	}
 
-	if refused > 0 {
-		add("A method's percentiles are the time to serve a call: successes, and timeouts\n" +
-			"as lower bounds. The \"error status\" rows are how long until an error status\n" +
-			"came back, from the target or a proxy in front of it.")
+	var overload, failure, bad int
+	for i := range report.Methods {
+		overload += report.Methods[i].Overload.Count
+		failure += report.Methods[i].Failure.Count
+		bad += report.Methods[i].BadResponse.Count
+	}
+	if overload+failure+bad > 0 {
+		rows := []string{"A method's percentiles are the time to serve a call: successes, and timeouts\n" +
+			"as lower bounds. The rows under it time the other answers:"}
+		if overload > 0 {
+			rows = append(rows, "\"overload\": the status says overloaded or unavailable (RESOURCE_EXHAUSTED,\n"+
+				"UNAVAILABLE), from the target or a proxy in front of it; a proxy with no live\n"+
+				"backend says the same;")
+		}
+		if failure > 0 {
+			rows = append(rows, "\"failure\": the status says the call broke (INTERNAL, UNKNOWN, ABORTED and\n"+
+				"others), from the target or a proxy in front of it;")
+		}
+		if bad > 0 {
+			rows = append(rows, "\"bad response\": a reply came and the client did not accept it.")
+		}
+		notes = append(notes, strings.Join(rows, "\n"))
 	}
 
 	// Aborted calls are censored too, but raising the timeout would not show
@@ -232,4 +243,50 @@ func share(part, whole int) float64 {
 	}
 
 	return float64(part) / float64(whole) * 100
+}
+
+// invalidNote says why a method measured nothing about load and what to do,
+// or "" when it did. Every sent call failed the same way at any rate: the
+// request was wrong, the client could not send it, or the client refused the
+// replies. Bad responses are told apart by the code the client set.
+func invalidNote(m *engine.MethodReport, maxResponse string) string {
+	bad := m.BadResponse.Count
+	if m.Sent == 0 || m.Rejected.Count+m.ClientError+bad != m.Sent {
+		return ""
+	}
+	name := displayMethod(m.Method)
+
+	switch m.Sent {
+	case m.Rejected.Count:
+		return fmt.Sprintf("invalid run: every measured call of %s came back as a request that will not\n"+
+			"be served, by the target or a proxy in front of it. Nothing about the load was\n"+
+			"tested there; fix the request and run again.", name)
+	case m.ClientError:
+		return fmt.Sprintf("invalid run: the client could not send any call of %s: the request did not\n"+
+			"encode, or the client's own stack refused it; see the codes set by the client.\n"+
+			"Nothing reached the target.", name)
+	case bad:
+		oversized := 0
+		for _, c := range m.FailureCodes {
+			if !c.FromTarget && c.Code == "ResourceExhausted" {
+				oversized += c.Count
+			}
+		}
+		switch {
+		case oversized == bad && maxResponse != "":
+			return fmt.Sprintf("invalid run: every response of %s was larger than max_response_size (%s):\n"+
+				"raise it.", name, maxResponse)
+		case oversized == bad:
+			return fmt.Sprintf("invalid run: every response of %s was larger than 4MiB, the gRPC default:\n"+
+				"set app.max_response_size above it.", name)
+		case oversized == 0:
+			return fmt.Sprintf("invalid run: responses of %s came compressed with an encoding the client does\n"+
+				"not accept. gRPC lets a server compress only with an encoding the client\n"+
+				"announced in grpc-accept-encoding: the target or a proxy in front of it breaks that.", name)
+		}
+	}
+
+	return fmt.Sprintf("invalid run: every measured call of %s failed the same way at any rate:\n"+
+		"request error %d, client error %d, bad response %d. Nothing about the load was\n"+
+		"tested there.", name, m.Rejected.Count, m.ClientError, bad)
 }

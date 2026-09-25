@@ -554,9 +554,10 @@ func TestSend_MapsStatusCodesToCategories(t *testing.T) {
 		{codes.ResourceExhausted, engine.CategoryOverload},
 		// A served UNAVAILABLE is a reply, unlike a refused connection.
 		{codes.Unavailable, engine.CategoryOverload},
-		// ABORTED means a concurrency conflict, which is what load produces:
-		// blaming the caller for it would turn a load signal into a config error.
-		{codes.Aborted, engine.CategoryOverload},
+		// ABORTED means a conflict between concurrent changes: load makes it
+		// more frequent, but it is not a lack of capacity. A ledger moving
+		// money between the same two rows gets it at any rate.
+		{codes.Aborted, engine.CategoryServerFault},
 	}
 
 	for _, tt := range tests {
