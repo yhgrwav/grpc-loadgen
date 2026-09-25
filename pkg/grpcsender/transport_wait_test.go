@@ -157,6 +157,14 @@ func TestTimestamps_WhereAnUnsentTimeoutStops(t *testing.T) {
 		{"no stream: quota wait, nothing is service", callTimes{doneAt: end}, engine.CategoryTimeout, end, true},
 		{"unreachable: left as is", callTimes{doneAt: end}, engine.CategoryUnreachable, time.Time{}, false},
 		{"success: unchanged", callTimes{headerAt: header, sentAt: payload, doneAt: end}, engine.CategorySuccess, payload, false},
+		// The target answered before the body was written: grpc-go's Write
+		// failed on the finished stream and reported no OutPayload
+		// (stream.go:1253–1257, v1.84.0). The headers are the last sign of
+		// the call going out, for any outcome.
+		{"success before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategorySuccess, header, false},
+		{"error status before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryServerFault, header, false},
+		{"cut off before the body: from the header", callTimes{headerAt: header, doneAt: end}, engine.CategoryCutOff, header, false},
+		{"unreachable with headers: still no SentAt", callTimes{headerAt: header, doneAt: end}, engine.CategoryUnreachable, time.Time{}, false},
 	}
 
 	for _, tt := range tests {
