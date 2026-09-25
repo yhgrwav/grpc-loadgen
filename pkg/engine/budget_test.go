@@ -17,6 +17,7 @@ package engine
 import (
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +56,56 @@ func TestNew_RejectsCallsThatOutgrowTheCapWhenTheTargetHangs(t *testing.T) {
 	// slot release.
 	if budget.Need != 20_101 || budget.Cap != 5000 || budget.PeakRPS != 1000 {
 		t.Errorf("budget = %+v, want Need 20101, Cap 5000, PeakRPS 1000", *budget)
+	}
+}
+
+// Ground: contract — InFlightBudgetError is public and its text is what a library caller shows:
+// the reserve it names (101 here) holds the edge slot as well as the late release, and the text
+// must say both or the number reads as late release alone.
+func TestInFlightBudgetError_NamesBothPartsOfTheReserve(t *testing.T) {
+	err := newWithCap(5000, budgetCall("a", 1000, 20*time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	text := err.Error()
+	for _, want := range []string{
+		"up to 20101 requests",
+		"rps × timeout = 20000",
+		"plus 100 for calls released up to 100ms past their deadline",
+		"plus 1 for the call on the window's edge",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q lacks %q", text, want)
+		}
+	}
+}
+
+// Ground: contract — with several calls the edge part counts one slot per call and says so.
+func TestInFlightBudgetError_OneEdgeSlotPerCall(t *testing.T) {
+	err := newWithCap(1, budgetCall("a", 10, time.Second), budgetCall("b", 10, time.Second), budgetCall("c", 10, time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	if want := "plus 3, one per configured call for the call on its window's edge)"; !strings.Contains(err.Error(), want) {
+		t.Errorf("%q lacks %q", err, want)
+	}
+}
+
+// Ground: contract — the parts come from the check's own numbers, not from text: another rate and
+// timeout give other parts that still add up to Need.
+func TestInFlightBudgetError_PartsFollowTheCall(t *testing.T) {
+	err := newWithCap(2000, budgetCall("a", 1000, 2*time.Second))
+	if err == nil {
+		t.Fatal("err = nil, want the budget refused")
+	}
+
+	text := err.Error()
+	for _, want := range []string{"up to 2101 requests", "rps × timeout = 2000,", "plus 100 for calls", "plus 1 for the call"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q lacks %q", text, want)
+		}
 	}
 }
 

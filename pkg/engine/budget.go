@@ -58,9 +58,17 @@ func (e *InFlightBudgetError) Error() string {
 			"stops answering, past any in-flight cap", ErrInFlightBudget, strings.Join(e.Unbounded, ", "))
 	}
 
+	// Reserved is one edge slot per call plus the late release: Calls of it
+	// are the edge.
+	edge := " for the call on the window's edge"
+	if e.Calls > 1 {
+		edge = ", one per configured call for the call on its window's edge"
+	}
+
 	return fmt.Sprintf("%v: a target that stops answering could hold up to %d requests in flight "+
-		"(rps × timeout, plus %d kept for calls released up to %v past their deadline), and the cap is %d",
-		ErrInFlightBudget, e.Need, e.Reserved, ReleaseMargin, e.Cap)
+		"(rps × timeout = %d, plus %d for calls released up to %v past their deadline, plus %d%s), "+
+		"and the cap is %d",
+		ErrInFlightBudget, e.Need, e.Need-e.Reserved, e.Reserved-e.Calls, ReleaseMargin, e.Calls, edge, e.Cap)
 }
 
 func (e *InFlightBudgetError) Unwrap() error { return ErrInFlightBudget }
