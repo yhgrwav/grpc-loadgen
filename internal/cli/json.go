@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -52,10 +53,15 @@ type JSONRun struct {
 // thing that may be null: a value the run did not produce, never a zero that
 // could pass for a measurement. Durations are whole microseconds.
 type JSONReport struct {
-	SchemaVersion     int             `json:"schema_version"`
-	LeetTestVersion   string          `json:"leettest_version"`
-	Target            string          `json:"target"`
-	Outcome           string          `json:"outcome"`
+	SchemaVersion   int    `json:"schema_version"`
+	LeetTestVersion string `json:"leettest_version"`
+	Target          string `json:"target"`
+	Outcome         string `json:"outcome"`
+	// InvalidReasons are why the run is invalid: in_flight_cap, nothing_measured.
+	InvalidReasons []string `json:"invalid_reasons"`
+	// LimitedBy is the client-side wait that set the tail: generator, stream
+	// or connection; null without that verdict.
+	LimitedBy         *string         `json:"limited_by"`
 	StartedAt         string          `json:"started_at"`
 	DurationUS        int64           `json:"duration_us"`
 	PlannedUS         int64           `json:"planned_us"`
@@ -73,8 +79,11 @@ type JSONReport struct {
 	CapHit            *jsonCapHit     `json:"cap_hit"`
 	StartLag          jsonStartLag    `json:"start_lag"`
 	Connections       *jsonConns      `json:"connections"`
+	ClientWaits       jsonClientWaits `json:"client_waits"`
 	Methods           []jsonMethod    `json:"methods"`
 	Unchecked         []jsonUnchecked `json:"unchecked"`
+	// Notes are the text report's notes: for people, and reworded freely.
+	Notes []string `json:"notes"`
 }
 
 type jsonQuantile struct {
@@ -126,7 +135,10 @@ type jsonCode struct {
 }
 
 type jsonMethod struct {
-	Method                string        `json:"method"`
+	Method string `json:"method"`
+	// InvalidReason says the method measured nothing about load: request_error,
+	// client_error, bad_response or mixed; null when it did.
+	InvalidReason         *string       `json:"invalid_reason"`
 	Sent                  int           `json:"sent"`
 	Failed                int           `json:"failed"`
 	Aborted               int           `json:"aborted"`
@@ -256,8 +268,15 @@ func NewJSONReport(run JSONRun) JSONReport {
 		WarmupFailed:      r.WarmupFailed,
 		WarmupNotSent:     r.WarmupNotSent,
 		StartLag:          jsonStartLag{P99: quantile(r.StartLagP99)},
-		Methods:           make([]jsonMethod, 0, len(r.Methods)),
-		Unchecked:         make([]jsonUnchecked, 0, len(run.Run.Unchecked)),
+		InvalidReasons:    make([]string, 0, 2),
+		LimitedBy:         limitedBy(*r),
+		ClientWaits: jsonClientWaits{
+			GeneratorCalls: r.GeneratorCauseCalls, StreamCalls: r.StreamCauseCalls, ConnectionCalls: r.ConnectionCauseCalls,
+			GeneratorTailCalls: r.GeneratorTailCalls, StreamTailCalls: r.StreamTailCalls, ConnectionTailCalls: r.ConnectionTailCalls,
+		},
+		Notes:     reportNotes(*r, run.Run.MaxResponse),
+		Methods:   make([]jsonMethod, 0, len(r.Methods)),
+		Unchecked: make([]jsonUnchecked, 0, len(run.Run.Unchecked)),
 	}
 	// The maximum is exact, but there is none without a call.
 	if r.StartLagP99.Defined {
@@ -281,6 +300,19 @@ func NewJSONReport(run JSONRun) JSONReport {
 	for i := range r.Methods {
 		out.Methods = append(out.Methods, jsonMethodOf(&r.Methods[i], r.Warmup))
 	}
+	if note := uncheckedNote(run.Run.Unchecked); note != "" {
+		out.Notes = append(out.Notes, note)
+	}
+	if r.CapHit != nil {
+		out.InvalidReasons = append(out.InvalidReasons, "in_flight_cap")
+	}
+	for i := range out.Methods {
+		if out.Methods[i].InvalidReason != nil {
+			out.InvalidReasons = append(out.InvalidReasons, "nothing_measured")
+
+			break
+		}
+	}
 	for _, u := range run.Run.Unchecked {
 		reason := "reflection_failed"
 		if errors.Is(u.Err, descriptor.ErrReflectionUnsupported) {
@@ -298,7 +330,7 @@ func NewJSONReport(run JSONRun) JSONReport {
 
 func jsonMethodOf(m *engine.MethodReport, warmup time.Duration) jsonMethod {
 	out := jsonMethod{
-		Method: m.Method, Sent: m.Sent, Failed: m.Failed, Aborted: m.Aborted,
+		Method: m.Method, InvalidReason: invalidReason(m), Sent: m.Sent, Failed: m.Failed, Aborted: m.Aborted,
 		NotSent: m.NotSent, NotSentGenerator: m.NotSentGenerator, NotSentStream: m.NotSentStream,
 		NotSentConnection: m.NotSentConnection,
 		WarmupSent:        m.WarmupSent, WarmupFailed: m.WarmupFailed, WarmupNotSent: m.WarmupNotSent,
@@ -318,8 +350,9 @@ func jsonMethodOf(m *engine.MethodReport, warmup time.Duration) jsonMethod {
 		SilentFromS:  m.SilentFrom,
 		Seconds:      make([]jsonSecond, 0, len(m.Seconds)),
 	}
-	// No call, no rate: a zero would read as a target that took none.
-	if m.Sent > 0 {
+	// No call, no rate: a zero would read as a target that took none. NaN or
+	// Inf would fail the whole encoding and leave stdout empty.
+	if m.Sent > 0 && !math.IsNaN(m.RPS) && !math.IsInf(m.RPS, 0) {
 		rps := m.RPS
 		out.RPS = &rps
 	}
@@ -358,4 +391,46 @@ func WriteJSON(w io.Writer, run JSONRun) error {
 	enc.SetEscapeHTML(false)
 
 	return enc.Encode(NewJSONReport(run))
+}
+
+// jsonClientWaits count the calls that waited over the floor for each cause,
+// in all and among those that set each method's p99: the numbers limited_by
+// ranks.
+type jsonClientWaits struct {
+	GeneratorCalls      int `json:"generator_calls"`
+	StreamCalls         int `json:"stream_calls"`
+	ConnectionCalls     int `json:"connection_calls"`
+	GeneratorTailCalls  int `json:"generator_tail_calls"`
+	StreamTailCalls     int `json:"stream_tail_calls"`
+	ConnectionTailCalls int `json:"connection_tail_calls"`
+}
+
+// limitedBy names verdictCause the way JSON does.
+func limitedBy(report engine.Report) *string {
+	c, ok := verdictCause(report)
+	if !ok {
+		return nil
+	}
+	name := map[string]string{causeGenerator: "generator", causeStream: "stream", causeConnection: "connection"}[c.what]
+
+	return &name
+}
+
+// invalidReason is why a method measured nothing about load, by the rule of
+// invalidNote, or nil when it did.
+func invalidReason(m *engine.MethodReport) *string {
+	if invalidNote(m, "") == "" {
+		return nil
+	}
+	reason := "mixed"
+	switch m.Sent {
+	case m.Rejected.Count:
+		reason = "request_error"
+	case m.ClientError:
+		reason = "client_error"
+	case m.BadResponse.Count:
+		reason = "bad_response"
+	}
+
+	return &reason
 }

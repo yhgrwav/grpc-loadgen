@@ -317,12 +317,18 @@ SIGTERM（`docker stop`、Kubernetes、取消 CI 任务）会立即中断在途�
 单位写在字段名中：`_us` 为整数微秒，`_s` 为整数秒；速率 `rps` 是唯一的小数。运行没有产生的值是
 `null`，而不是 `0`：没有观测值的百分位、没有调用的方法的速率、目标没有声明的流上限。百分位是一个
 对象 `{"us": 1234, "lower_bound": false}`：`lower_bound: true` 时它是下界（尾部超过了超时时间，
-屏幕上显示为 `>5.00s`），而不是一个值。延迟按直方图的存储方式保留 3 位有效数字；计数是精确的。
+屏幕上显示为 `>5.00s`），而不是一个值。延迟是直方图的值，以整数微秒给出，不做屏幕上的舍入；
+直方图保留 3 位有效数字（相对误差不超过 0.1%）。计数是精确的。
 时间从 `started_at`（RFC 3339，UTC）即计划开始时刻算起，包含预热；`duration_us` 也包含预热。
 某一秒中的 `in_flight` 表示该秒结束时在途的调用数。`failure_codes` 中的状态码使用规范名称
 （`UNAVAILABLE`）。`unchecked[].error` 是给人看的文字，会随 grpc-go 变化；脚本请使用 `reason`。
 核对方法：运行的总数等于各方法总数之和；在一个方法的各秒中，`Σ begun` 加上 `outside_timeline`
 等于该方法的全部调用，包括预热。
+
+决策以字段给出，而不是文字：`invalid_reasons`（`in_flight_cap`、`nothing_measured`）、
+`methods[].invalid_reason`（`request_error`、`client_error`、`bad_response`、`mixed` 或 `null`）、
+`limited_by`（`generator`、`stream`、`connection` 或 `null`，与屏幕上的判定规则相同），以及
+`client_waits` 中按原因的数字。`notes` 是给人看的提示文字：措辞会随意调整，请不要解析它。
 
 ## 尚未实现
 

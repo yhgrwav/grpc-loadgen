@@ -387,14 +387,21 @@ ist die einzige Kommazahl. Ein Wert, den der Lauf nicht geliefert hat, ist `null
 Perzentil ohne Beobachtungen, die Rate einer Methode ohne Aufrufe, ein Stream-Limit, das das Ziel
 nicht angekündigt hat. Ein Perzentil ist ein Objekt `{"us": 1234, "lower_bound": false}`: Mit
 `lower_bound: true` ist es eine untere Schranke (der Tail lief über den Timeout, `>5.00s` auf dem
-Bildschirm), kein Wert. Latenzen sind auf 3 signifikante Stellen gerundet, wie das Histogramm sie
-hält; Zähler sind exakt. Zeiten zählen ab `started_at` (RFC 3339, UTC), dem Beginn des Plans,
+Bildschirm), kein Wert. Latenzen sind die Werte des Histogramms in ganzen Mikrosekunden, ohne die
+Rundung des Bildschirms; das Histogramm hält 3 signifikante Stellen (relativer Fehler bis 0,1 %).
+Zähler sind exakt. Zeiten zählen ab `started_at` (RFC 3339, UTC), dem Beginn des Plans,
 Aufwärmen eingeschlossen; auch `duration_us` schließt das Aufwärmen ein. `in_flight` in einer Sekunde
 ist, wie viele Aufrufe an ihrem Ende unterwegs waren. Die Codes in `failure_codes` sind kanonische
 Namen (`UNAVAILABLE`). `unchecked[].error` ist Text für Menschen und ändert sich mit grpc-go; für
 Skripte gibt es `reason`. Zum Abgleich: Die Summen des Laufs sind die Summe der Methoden, und über
 die Sekunden einer Methode ergibt `Σ begun` plus `outside_timeline` alle ihre Aufrufe, Aufwärmen
 eingeschlossen.
+
+Entscheidungen sind Felder, kein Text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+`methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` oder `null`),
+`limited_by` (`generator`, `stream`, `connection` oder `null`, nach derselben Regel wie das Urteil
+auf dem Bildschirm) und die Zahlen je Ursache in `client_waits`. `notes` ist der Text der Hinweise
+für Menschen: Er wird frei umformuliert, parsen Sie ihn nicht.
 
 ## Noch nicht vorhanden
 

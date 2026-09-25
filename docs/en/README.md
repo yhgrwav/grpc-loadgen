@@ -369,13 +369,20 @@ The unit is in the field's name: `_us` is whole microseconds, `_s` whole seconds
 the only fractional number. A value the run did not produce is `null`, not `0`: a percentile with no
 observations, the rate of a method with no calls, a stream limit the target did not announce. A
 percentile is an object `{"us": 1234, "lower_bound": false}`: with `lower_bound: true` it is a lower
-bound (the tail ran past the timeout, `>5.00s` on screen), not a value. Latencies are rounded to 3
-significant figures, as the histogram keeps them; counts are exact. Times count from `started_at`
+bound (the tail ran past the timeout, `>5.00s` on screen), not a value. Latencies are the histogram's values in
+whole microseconds, without the screen's rounding; the histogram keeps 3 significant figures (a
+relative error of up to 0.1%). Counts are exact. Times count from `started_at`
 (RFC 3339, UTC), the start of the schedule, warm-up included; `duration_us` includes warm-up too.
 `in_flight` in a second is how many calls were in flight at its end. The codes in `failure_codes`
 are canonical names (`UNAVAILABLE`). `unchecked[].error` is text for people and changes with
 grpc-go; scripts have `reason`. To reconcile: the run's totals are the sum of the methods', and over
 a method's seconds `Σ begun` plus `outside_timeline` is every call of the method, warm-up included.
+
+Decisions are fields, not text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+`methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` or `null`),
+`limited_by` (`generator`, `stream`, `connection` or `null`, by the same rule as the screen's
+verdict) and the numbers per cause in `client_waits`. `notes` is the notes' text for people: it is
+reworded freely, do not parse it.
 
 ## Not yet
 

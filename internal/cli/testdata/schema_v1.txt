@@ -2,6 +2,8 @@ schema_version int
 leettest_version string
 target string
 outcome string
+invalid_reasons []string
+limited_by string?
 started_at string
 duration_us int
 planned_us int
@@ -33,8 +35,16 @@ connections.reconnects int
 connections.first_limit int?
 connections.last_limit int?
 connections.limit_changes int
+client_waits object
+client_waits.generator_calls int
+client_waits.stream_calls int
+client_waits.connection_calls int
+client_waits.generator_tail_calls int
+client_waits.stream_tail_calls int
+client_waits.connection_tail_calls int
 methods []object
 methods[].method string
+methods[].invalid_reason string?
 methods[].sent int
 methods[].failed int
 methods[].aborted int
@@ -184,3 +194,4 @@ unchecked []object
 unchecked[].method string
 unchecked[].reason string
 unchecked[].error string
+notes []string

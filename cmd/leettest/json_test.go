@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,76 @@ func TestOutcome_MatchesTheExitCode(t *testing.T) {
 		got, ok := outcomeOf(c.err)
 		if exitCode(c.err) != c.code || got != c.want || ok != c.ok {
 			t.Errorf("%v: exit %d, outcome %q (%v); want exit %d, %q (%v)", c.err, exitCode(c.err), got, ok, c.code, c.want, c.ok)
+		}
+	}
+}
+
+// flatten records every key path of a decoded JSON value, "[]" for an array's
+// elements (the first one stands for all), and which paths held null.
+func flatten(v any, path string, paths map[string]bool, nulls map[string]bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			p := k
+			if path != "" {
+				p = path + "." + k
+			}
+			paths[p] = true
+			if child == nil {
+				nulls[p] = true
+			}
+			flatten(child, p, paths, nulls)
+		}
+	case []any:
+		if len(x) > 0 {
+			paths[path+"[]"] = true
+			flatten(x[0], path+"[]", paths, nulls)
+		}
+	}
+}
+
+// The schema test reads the Go types; this reads what a real run writes to
+// stdout. Every key of schema v1 whose parent is there is there, nothing else
+// is, and null appears only where the schema allows it.
+func TestRun_JSONKeysAreSchemaV1(t *testing.T) {
+	golden, err := os.ReadFile("../../internal/cli/testdata/schema_v1.txt")
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	schema, nullable := map[string]bool{}, map[string]bool{}
+	for line := range strings.Lines(string(golden)) {
+		path, typ, _ := strings.Cut(strings.TrimSpace(line), " ")
+		schema[path] = true
+		nullable[path] = strings.HasSuffix(typ, "?")
+	}
+
+	res := runCLI(t.Context(), t, 10*time.Second,
+		"-fake", "-fake-fail-ratio", "0.3", "-output", "json", "-c", writeConfig(t, closedPort(t), checkMethod, plaintext))
+	if res.err != nil {
+		t.Fatalf("run: %v", res.err)
+	}
+	paths, nulls := map[string]bool{}, map[string]bool{}
+	flatten(decodeOnly(t, res.stdout), "", paths, nulls)
+
+	for p := range paths {
+		if strings.HasSuffix(p, "[]") {
+			continue
+		}
+		if !schema[p] {
+			t.Errorf("output has %q, which schema v1 does not", p)
+		}
+		if nulls[p] && !nullable[p] {
+			t.Errorf("%q is null, which schema v1 does not allow", p)
+		}
+	}
+	for p := range schema {
+		parent := ""
+		if i := strings.LastIndex(p, "."); i >= 0 {
+			parent = p[:i]
+		}
+		present := parent == "" || (paths[parent] && !nulls[parent])
+		if present && !paths[p] {
+			t.Errorf("output lacks %q", p)
 		}
 	}
 }

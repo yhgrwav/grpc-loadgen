@@ -17,6 +17,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"reflect"
 	"strings"
@@ -326,5 +327,116 @@ func TestJSON_SecondsCountEveryCategoryByItsName(t *testing.T) {
 		if !keys[c.Name()] {
 			t.Errorf("seconds have no %q key for category %d", c.Name(), c)
 		}
+	}
+}
+
+// Verdicts a script decides on are fields, not English: a rewording of a note
+// must not break a pipeline.
+func TestJSON_VerdictsAreFields(t *testing.T) {
+	q := metrics.Quantile{Value: time.Millisecond, Exact: true, Defined: true}
+
+	none := writeJSON(t, jsonRun(engine.Report{Methods: []engine.MethodReport{{Method: "/pkg.S/M", Sent: 10}}}))
+	if v := field(t, none, "invalid_reasons").([]any); len(v) != 0 {
+		t.Errorf("invalid_reasons = %v, want [] for a valid run", v)
+	}
+	if v := field(t, none, "limited_by"); v != nil {
+		t.Errorf("limited_by = %v, want null without a verdict", v)
+	}
+	if v := field(t, field(t, none, "methods").([]any)[0], "invalid_reason"); v != nil {
+		t.Errorf("invalid_reason = %v, want null for a method that measured load", v)
+	}
+
+	bad := writeJSON(t, jsonRun(engine.Report{
+		CapHit: &engine.CapHit{At: time.Second, Unsent: 1}, RequestRejected: true,
+		Methods: []engine.MethodReport{
+			{Method: "/pkg.S/A", Sent: 5, Failed: 5, ClientError: 5},
+			{Method: "/pkg.S/B", Sent: 5, Failed: 5, Rejected: engine.RefusalLatency{Count: 3, P50: q}, BadResponse: engine.RefusalLatency{Count: 2, P50: q}},
+			{Method: "/pkg.S/C", Sent: 5, Failed: 5, Rejected: engine.RefusalLatency{Count: 5, P50: q}},
+			{Method: "/pkg.S/D", Sent: 5, Failed: 5, BadResponse: engine.RefusalLatency{Count: 5, P50: q}},
+		},
+	}))
+	reasons := field(t, bad, "invalid_reasons").([]any)
+	if len(reasons) != 2 || reasons[0] != "in_flight_cap" || reasons[1] != "nothing_measured" {
+		t.Errorf("invalid_reasons = %v, want [in_flight_cap nothing_measured]", reasons)
+	}
+	for i, want := range []string{"client_error", "mixed", "request_error", "bad_response"} {
+		if got := field(t, field(t, bad, "methods").([]any)[i], "invalid_reason"); got != want {
+			t.Errorf("methods[%d].invalid_reason = %v, want %q", i, got, want)
+		}
+	}
+
+	limited := engine.Report{
+		StreamWaited: 900, StreamCauseCalls: 900, StreamTailCalls: 900, StreamWaitP99: q,
+		GeneratorCauseCalls: 7, GeneratorTailCalls: 3,
+		Methods: []engine.MethodReport{{
+			Method: "/pkg.S/M", Sent: 1000, P99: metrics.Quantile{Value: 50 * time.Millisecond, Exact: true, Defined: true},
+			P99WithoutClientWaits: q,
+		}},
+	}
+	out := writeJSON(t, jsonRun(limited))
+	if v := field(t, out, "limited_by"); v != "stream" {
+		t.Errorf("limited_by = %v, want stream", v)
+	}
+	for name, want := range map[string]float64{"stream_calls": 900, "stream_tail_calls": 900, "generator_calls": 7, "generator_tail_calls": 3} {
+		if v := field(t, out, "client_waits", name); v != want {
+			t.Errorf("client_waits.%s = %v, want %v", name, v, want)
+		}
+	}
+	if notes := field(t, out, "notes").([]any); len(notes) == 0 {
+		t.Error("notes is empty: the text notes go along, marked unstable")
+	}
+}
+
+// A rate that is not a number would make encoding/json fail and leave stdout
+// empty: it is null instead.
+func TestJSON_ARateThatIsNotANumberIsNull(t *testing.T) {
+	for _, rps := range []float64{math.NaN(), math.Inf(1)} {
+		out := writeJSON(t, jsonRun(engine.Report{Methods: []engine.MethodReport{{Method: "/pkg.S/M", Sent: 1, RPS: rps}}}))
+		if v := field(t, field(t, out, "methods").([]any)[0], "rps"); v != nil {
+			t.Errorf("rps %v written as %v, want null", rps, v)
+		}
+	}
+}
+
+// A key that omitempty or a MarshalJSON drops would vanish from the output
+// without the schema test seeing it: neither is allowed in the JSON types.
+func TestJSON_NoKeyCanBeDroppedFromTheOutput(t *testing.T) {
+	marshaler := reflect.TypeFor[json.Marshaler]()
+	seen := map[reflect.Type]bool{}
+	var check func(rt reflect.Type)
+	check = func(rt reflect.Type) {
+		for rt.Kind() == reflect.Pointer || rt.Kind() == reflect.Slice {
+			rt = rt.Elem()
+		}
+		if rt.Kind() != reflect.Struct || seen[rt] {
+			return
+		}
+		seen[rt] = true
+		if rt.Implements(marshaler) || reflect.PointerTo(rt).Implements(marshaler) {
+			t.Errorf("%s has its own MarshalJSON", rt)
+		}
+		for i := range rt.NumField() {
+			f := rt.Field(i)
+			if strings.Contains(f.Tag.Get("json"), "omitempty") || strings.Contains(f.Tag.Get("json"), "omitzero") {
+				t.Errorf("%s.%s may be dropped: %q", rt, f.Name, f.Tag.Get("json"))
+			}
+			check(f.Type)
+		}
+	}
+	check(reflect.TypeFor[JSONReport]())
+}
+
+// The screen rounds for reading; JSON does not: two runs 0.1 ms apart at
+// 12 ms stay apart, which comparing runs needs.
+func TestJSON_LatenciesAreNotRoundedForTheScreen(t *testing.T) {
+	out := writeJSON(t, jsonRun(engine.Report{Methods: []engine.MethodReport{{
+		Method: "/pkg.S/M",
+		P50:    metrics.Quantile{Value: 12_344 * time.Microsecond, Exact: true, Defined: true},
+		P99:    metrics.Quantile{Value: 12_444 * time.Microsecond, Exact: true, Defined: true},
+	}}}))
+
+	lat := field(t, field(t, out, "methods").([]any)[0], "latency")
+	if p50, p99 := field(t, lat, "p50", "us"), field(t, lat, "p99", "us"); p50 != 12344.0 || p99 != 12444.0 {
+		t.Errorf("p50 %v, p99 %v; want 12344 and 12444, not the screen's 12.3ms", p50, p99)
 	}
 }
