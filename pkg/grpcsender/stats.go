@@ -162,9 +162,11 @@ func (h handler) HandleRPC(ctx context.Context, rpc stats.RPCStats) {
 			h.streams.opened(now)
 		}
 	case *stats.OutPayload:
-		// SentTime is when the request went out on the wire, after the transport
-		// granted stream quota. Taking it here rather than with time.Now() in the
-		// worker keeps the Go scheduler's delay out of the measurement.
+		// SentTime is when the transport took the request, after the stream was
+		// granted — not when it reached the wire: against a flow window of 0 the
+		// body waits in the transport and the call still counts as sent.
+		// Taking it here rather than with time.Now() in the worker keeps the Go
+		// scheduler's delay out of the measurement.
 		call.times.sentAt = v.SentTime
 	case *stats.InTrailer:
 		call.times.answered = true
