@@ -368,7 +368,7 @@ SIGTERM (`docker stop`, Kubernetes, отмена джоба в CI) сразу о
 
 Решения — полями, а не текстом: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` или `null`),
-`limited_by` (`generator`, `stream`, `connection` или `null` — то же правило, что у вердикта на
+`tail_wait_cause` (`generator`, `stream`, `connection` или `null` — то же правило, что у вердикта на
 экране) и числа по причинам в `client_waits`. `notes` — текст заметок для человека: он меняется
 свободно, не разбирайте его.
 
