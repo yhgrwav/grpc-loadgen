@@ -220,6 +220,12 @@ time. On our stand at 1000 RPS, the generator on the host through Docker Desktop
 showed p99 38 ms, and inside the Docker network 2 ms: the same target, and the first time we
 measured Docker's network, not it.
 
+**Clock.** On Windows time moves in steps of the system timer: 0.5–1 ms, or 15.6 ms when nothing
+raised it. For the run the tool asks the system for its finest step, measures it before and after
+the run and prints it: `clock step 502us on this host: every latency and wait is ± 502us`. A step
+over a quarter of any method's p50 makes the run invalid (exit 2): at p50 = 2 ms a step of up to
+0.5 ms is allowed. On Linux and macOS the step is tens of nanoseconds and there is no line.
+
 | Flag | What it does |
 |---|---|
 | `-c` | Path to the config |
@@ -378,7 +384,7 @@ are canonical names (`UNAVAILABLE`). `unchecked[].error` is text for people and 
 grpc-go; scripts have `reason`. To reconcile: the run's totals are the sum of the methods', and over
 a method's seconds `Σ begun` plus `outside_timeline` is every call of the method, warm-up included.
 
-Decisions are fields, not text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+Decisions are fields, not text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`, `clock_step`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` or `null`),
 `tail_wait_cause` (`generator`, `stream`, `connection` or `null`, by the same rule as the screen's
 verdict) and the numbers per cause in `client_waits`. `notes` is the notes' text for people: it is

@@ -44,6 +44,8 @@ type Options struct {
 	Sender      Sender
 	MaxInFlight int
 	Warmup      time.Duration
+	// WaitFloor replaces StreamWaitFloor when set: see WaitFloorFor.
+	WaitFloor time.Duration
 }
 
 type Engine struct {
@@ -99,6 +101,9 @@ func New(opts Options) (*Engine, error) {
 		stats:   NewStats(),
 		pool:    NewWorkerPool(opts.Sender, opts.MaxInFlight),
 		stopped: make(chan struct{}),
+	}
+	if opts.WaitFloor > 0 {
+		e.stats.SetWaitFloor(opts.WaitFloor)
 	}
 	e.targets = e.targetRates()
 

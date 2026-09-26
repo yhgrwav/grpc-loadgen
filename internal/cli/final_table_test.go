@@ -460,7 +460,7 @@ func verdictCases() []struct {
 				BadResponse:  engine.RefusalLatency{Count: 20, P50: exact(1), P90: exact(1), P95: exact(1), P99: exact(1)},
 				FailureCodes: []engine.CodeCount{{Code: "ResourceExhausted", Count: 20}},
 			})
-			m.maxResponse = "1MiB"
+			m.finished.MaxResponse = "1MiB"
 			m.report.RequestRejected = true
 		}},
 		{"incomplete", "incomplete: ran 12.0s of the planned 20.0s", "do not compare", func(m *model) {

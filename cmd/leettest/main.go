@@ -38,6 +38,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yhgrwav/leettest/internal/cli"
+	"github.com/yhgrwav/leettest/pkg/clock"
 	"github.com/yhgrwav/leettest/pkg/config"
 	"github.com/yhgrwav/leettest/pkg/descriptor"
 	"github.com/yhgrwav/leettest/pkg/engine"
@@ -248,11 +249,18 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		sender = grpcSender
 	}
 
+	// Raise, measure, run, measure, restore: the floor of "waited" is set by
+	// the step before the run, the report prints the larger of the two.
+	restoreTimer, timerRaised := clock.Raise()
+	defer restoreTimer()
+	stepBefore := clockStep()
+
 	opts := engine.Options{
 		Calls:       cli.CallsFromConfig(cfg),
 		Sender:      sender,
 		MaxInFlight: *maxInFlight,
 		Warmup:      cfg.Load.Warmup,
+		WaitFloor:   engine.WaitFloorFor(stepBefore),
 	}
 
 	// A config error does not wait for the network: checked before connecting.
@@ -343,7 +351,13 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	stopper.Store(s)
 	runStarting(eng)
 
-	start := func() error { return eng.Run(ctx) }
+	var stepAfter atomic.Int64
+	start := func() error {
+		err := eng.Run(ctx)
+		stepAfter.Store(int64(clockStep()))
+
+		return err
+	}
 
 	// One report for the final screen and for stdout.
 	var maxResponse string
@@ -351,7 +365,11 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		maxResponse = strings.TrimSpace(*raw)
 	}
 	reportOf := func() cli.RunReport {
-		return cli.RunReport{Report: eng.Report(), Unchecked: unchecked, MaxResponse: maxResponse}
+		return cli.RunReport{
+			Report: eng.Report(), Unchecked: unchecked, MaxResponse: maxResponse,
+			ClockStep: max(stepBefore, time.Duration(stepAfter.Load())), ClockStepBefore: stepBefore,
+			TimerNotRaised: !timerRaised,
+		}
 	}
 
 	var runErr error
@@ -366,7 +384,7 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	}
 
 	report := reportOf()
-	result := runResult(report.Report, runErr)
+	result := runResult(report, runErr)
 	if *output == "json" {
 		// Only a run that happened has a report: on exit 1 stdout stays empty,
 		// and a script reads the exit code first.
@@ -572,11 +590,12 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 
 // runResult is what run returns once the report is printed. A cap hit is not
 // an error: the report printed its verdict, and the run is incomplete.
-func runResult(report engine.Report, runErr error) error {
+func runResult(run cli.RunReport, runErr error) error {
+	report := run.Report
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, engine.ErrInFlightCapExceeded) {
 		return runErr
 	}
-	if report.CapHit != nil || report.RequestRejected {
+	if report.CapHit != nil || report.RequestRejected || cli.ClockTooCoarse(run) {
 		return ErrInvalidRun
 	}
 	if report.Incomplete {
@@ -585,3 +604,7 @@ func runResult(report engine.Report, runErr error) error {
 
 	return nil
 }
+
+// clockStep measures the host clock; the end-to-end tests fix it so that a
+// coarse developer clock does not turn the runs they check into invalid ones.
+var clockStep = func() time.Duration { return clock.StepOf(time.Now) }

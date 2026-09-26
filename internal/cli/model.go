@@ -110,7 +110,8 @@ type model struct {
 	percentilesAt time.Time
 	report        engine.Report
 	unchecked     []Unchecked
-	maxResponse   string
+	// finished is what the CLI knows of the finished run beside the engine report.
+	finished RunReport
 	// reportOf is the finished run's report, called once the run returns.
 	reportOf  func() RunReport
 	warmup    time.Duration
@@ -216,7 +217,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.engine.SnapshotInto(&m.snapshot, m.live, true)
 		run := m.reportOf()
-		m.report, m.unchecked, m.maxResponse = run.Report, run.Unchecked, run.MaxResponse
+		m.report, m.unchecked, m.finished = run.Report, run.Unchecked, run
 		m.done = true
 		m.err = msg.err
 

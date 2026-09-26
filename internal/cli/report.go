@@ -34,6 +34,20 @@ type RunReport struct {
 	engine.Report
 	Unchecked   []Unchecked
 	MaxResponse string
+	// ClockStep is the larger of the host clock's steps measured before and
+	// after the run.
+	ClockStep time.Duration
+	// ClockStepBefore is the step measured before the run, which set the
+	// engine's wait floor; 0 when not measured.
+	ClockStepBefore time.Duration
+	// TimerNotRaised says the host refused a finer timer: the step may have
+	// coarsened mid-run where neither measure saw it.
+	TimerNotRaised bool
+}
+
+// ClockTooCoarse says the clock step is over a quarter of some method's p50.
+func ClockTooCoarse(run RunReport) bool {
+	return coarseClockMethod(run) != nil || clockGrew(run)
 }
 
 // PrintReport writes the finished run to w as plain text.
@@ -67,7 +81,7 @@ func PrintReport(w io.Writer, target string, run RunReport) {
 		}
 	}
 
-	for _, note := range reportNotes(report, run.MaxResponse) {
+	for _, note := range runNotes(run) {
 		fmt.Fprintf(w, "\n%s\n", note)
 	}
 	if note := uncheckedNote(run.Unchecked); note != "" {

@@ -44,6 +44,7 @@ import (
 	"github.com/yhgrwav/leettest/pkg/config"
 	"github.com/yhgrwav/leettest/pkg/descriptor"
 	"github.com/yhgrwav/leettest/pkg/engine"
+	"github.com/yhgrwav/leettest/pkg/metrics"
 )
 
 const (
@@ -953,7 +954,7 @@ func TestRun_TerminateAbortsAtOnceWithTheReport(t *testing.T) {
 
 func TestRunResult_CapHitIsAnInvalidRunNotAnError(t *testing.T) {
 	report := engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}
-	err := runResult(report, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
+	err := runResult(cli.RunReport{Report: report}, fmt.Errorf("%w: 301", engine.ErrInFlightCapExceeded))
 
 	if !errors.Is(err, ErrInvalidRun) {
 		t.Errorf("err = %v, want ErrInvalidRun: the report and its verdict were printed", err)
@@ -963,9 +964,22 @@ func TestRunResult_CapHitIsAnInvalidRunNotAnError(t *testing.T) {
 	}
 }
 
+// A clock too coarse for the p50 it stamped is exit 2, like any invalid run.
+func TestRunResult_ACoarseClockIsAnInvalidRun(t *testing.T) {
+	run := cli.RunReport{
+		Report: engine.Report{Methods: []engine.MethodReport{{
+			Method: "/pkg.S/M", Sent: 10, P50: metrics.Quantile{Value: 2 * time.Millisecond, Exact: true, Defined: true},
+		}}},
+		ClockStep: 15625 * time.Microsecond,
+	}
+	if err := runResult(run, nil); !errors.Is(err, ErrInvalidRun) {
+		t.Errorf("err = %v, want ErrInvalidRun", err)
+	}
+}
+
 func TestRunResult_OtherFailuresStayErrors(t *testing.T) {
 	boom := errors.New("boom")
-	if err := runResult(engine.Report{}, boom); !errors.Is(err, boom) {
+	if err := runResult(cli.RunReport{}, boom); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want the failure itself", err)
 	}
 }
@@ -1075,7 +1089,7 @@ func TestExitCode_AnAbortedRunCarriesItsSignal(t *testing.T) {
 // ranked, not summed — an invalid run's numbers do not describe the target at
 // all, which is worse news than covering less of the plan.
 func TestRunResult_AnInvalidRunOutranksAnIncompleteOne(t *testing.T) {
-	err := runResult(engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}, engine.ErrInFlightCapExceeded)
+	err := runResult(cli.RunReport{Report: engine.Report{Incomplete: true, CapHit: &engine.CapHit{Unsent: 1}}}, engine.ErrInFlightCapExceeded)
 
 	if got := exitCode(err); got != 2 {
 		t.Errorf("exit code = %d, want 2: invalid outranks incomplete", got)
@@ -1151,7 +1165,7 @@ func TestRunResult_ARejectedMethodIsAnInvalidRun(t *testing.T) {
 		}}, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := runResult(tc.report, tc.runErr); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+			if err := runResult(cli.RunReport{Report: tc.report}, tc.runErr); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
 		})
@@ -1179,7 +1193,7 @@ func TestRunResult_CutOffCallsKeepTheExitCode(t *testing.T) {
 		{"all unreachable", engine.Report{Sent: 10, Failed: 10, Methods: []engine.MethodReport{{Method: "a", Sent: 10, Failed: 10, Unanswered: 10}}}},
 		{"all cut off", engine.Report{Sent: 10, Failed: 10, Methods: []engine.MethodReport{{Method: "a", Sent: 10, Failed: 10, CutOff: 10}}}},
 	} {
-		if err := runResult(c.report, nil); exitCode(err) != 0 {
+		if err := runResult(cli.RunReport{Report: c.report}, nil); exitCode(err) != 0 {
 			t.Errorf("%s: exit %d (%v), want 0", c.name, exitCode(err), err)
 		}
 	}

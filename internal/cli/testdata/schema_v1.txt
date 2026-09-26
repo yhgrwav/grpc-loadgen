@@ -4,6 +4,7 @@ target string
 outcome string
 invalid_reasons []string
 tail_wait_cause string?
+clock_step_ns int
 started_at string
 duration_us int
 planned_us int

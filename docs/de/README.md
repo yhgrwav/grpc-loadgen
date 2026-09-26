@@ -397,7 +397,7 @@ Skripte gibt es `reason`. Zum Abgleich: Die Summen des Laufs sind die Summe der 
 die Sekunden einer Methode ergibt `Σ begun` plus `outside_timeline` alle ihre Aufrufe, Aufwärmen
 eingeschlossen.
 
-Entscheidungen sind Felder, kein Text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+Entscheidungen sind Felder, kein Text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`, `clock_step`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` oder `null`),
 `tail_wait_cause` (`generator`, `stream`, `connection` oder `null`, nach derselben Regel wie das Urteil
 auf dem Bildschirm) und die Zahlen je Ursache in `client_waits`. `notes` ist der Text der Hinweise
