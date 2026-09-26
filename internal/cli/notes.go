@@ -243,6 +243,11 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 func runNotes(run RunReport) []string {
 	notes := reportNotes(run.Report, run.MaxResponse)
 
+	if clockGrew(run) {
+		notes = append(notes, fmt.Sprintf("invalid run: clock step changed during the run: %s before, %s after. The floor of\n"+
+			"\"waited\" was set from the step before, so the waits by cause are counted wrong.",
+			formatLatency(run.ClockStepBefore), formatLatency(run.ClockStep)))
+	}
 	if m := coarseClockMethod(run); m != nil {
 		notes = append(notes, fmt.Sprintf("invalid run: the clock step on this host (%s) is over a quarter of the p50 of\n"+
 			"%s (%s). Each latency is off by up to one step, so the percentiles are\n"+
@@ -253,7 +258,8 @@ func runNotes(run RunReport) []string {
 		line := fmt.Sprintf("clock step %s on this host: every latency and wait is ± %s",
 			formatLatency(run.ClockStep), formatLatency(run.ClockStep))
 		if run.WaitFloor > engine.StreamWaitFloor {
-			line += fmt.Sprintf("; a wait counts from %s, four steps", formatLatency(run.WaitFloor))
+			line += fmt.Sprintf("; a wait counts from %s, four steps of the %s before the run",
+				formatLatency(run.WaitFloor), formatLatency(run.ClockStepBefore))
 		}
 		notes = append(notes, line+".")
 	}
@@ -330,4 +336,10 @@ func invalidNote(m *engine.MethodReport, maxResponse string) string {
 	return fmt.Sprintf("invalid run: every measured call of %s failed the same way at any rate:\n"+
 		"request error %d, client error %d, bad response %d. Nothing about the load was\n"+
 		"tested there.", name, m.Rejected.Count, m.ClientError, bad)
+}
+
+// clockGrew says the step after the run is a quarter or more over the one
+// before, which set the wait floor.
+func clockGrew(run RunReport) bool {
+	return run.ClockStepBefore > 0 && 4*run.ClockStep >= 5*run.ClockStepBefore
 }

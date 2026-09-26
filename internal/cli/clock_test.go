@@ -50,6 +50,7 @@ func TestClockStep_TheNoteSaysPlusMinusAStep(t *testing.T) {
 func TestClockStep_TheNoteNamesARaisedWaitFloor(t *testing.T) {
 	run := clockRun(502*time.Microsecond, 10*time.Millisecond)
 	run.WaitFloor = 2008 * time.Microsecond
+	run.ClockStepBefore = 502 * time.Microsecond
 	want := "a wait counts from " + formatLatency(run.WaitFloor)
 	if out := printedRun(run); !strings.Contains(out, want) {
 		t.Errorf("no %q in:\n%s", want, out)
@@ -58,6 +59,41 @@ func TestClockStep_TheNoteNamesARaisedWaitFloor(t *testing.T) {
 	run.WaitFloor = engine.StreamWaitFloor
 	if out := printedRun(run); strings.Contains(out, "a wait counts from") {
 		t.Errorf("the default floor is named:\n%s", out)
+	}
+}
+
+// The floor was set from the step before the run: a step that grew by a
+// quarter or more left it too low, and nothing else in the report shows that.
+func TestClockStep_AStepThatGrewIsAnInvalidRun(t *testing.T) {
+	for _, tc := range []struct {
+		before, after time.Duration
+		invalid       bool
+	}{
+		{500 * time.Microsecond, 15625 * time.Microsecond, true},
+		{500 * time.Microsecond, 625 * time.Microsecond, true},
+		{500 * time.Microsecond, 521 * time.Microsecond, false},
+	} {
+		run := clockRun(max(tc.before, tc.after), 100*time.Millisecond)
+		run.ClockStepBefore = tc.before
+		name := fmt.Sprintf("%v → %v", tc.before, tc.after)
+
+		if got := ClockTooCoarse(run); got != tc.invalid {
+			t.Errorf("%s: ClockTooCoarse = %v, want %v", name, got, tc.invalid)
+		}
+		want := fmt.Sprintf("clock step changed during the run: %s before, %s after", formatLatency(tc.before), formatLatency(tc.after))
+		if got := strings.Contains(printedRun(run), want); got != tc.invalid {
+			t.Errorf("%s: %q printed = %v, want %v", name, want, got, tc.invalid)
+		}
+	}
+}
+
+func TestClockStep_TheFloorSaysWhichMeasureItCameFrom(t *testing.T) {
+	run := clockRun(521*time.Microsecond, 10*time.Millisecond)
+	run.ClockStepBefore = 500 * time.Microsecond
+	run.WaitFloor = 2 * time.Millisecond
+	want := "a wait counts from " + formatLatency(run.WaitFloor) + ", four steps of the " + formatLatency(run.ClockStepBefore) + " before the run"
+	if out := printedRun(run); !strings.Contains(out, want) {
+		t.Errorf("no %q in:\n%s", want, out)
 	}
 }
 

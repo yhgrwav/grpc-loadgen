@@ -367,7 +367,8 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 	reportOf := func() cli.RunReport {
 		return cli.RunReport{
 			Report: eng.Report(), Unchecked: unchecked, MaxResponse: maxResponse,
-			ClockStep: max(stepBefore, time.Duration(stepAfter.Load())), TimerNotRaised: !timerRaised,
+			ClockStep: max(stepBefore, time.Duration(stepAfter.Load())), ClockStepBefore: stepBefore,
+			TimerNotRaised: !timerRaised,
 		}
 	}
 
