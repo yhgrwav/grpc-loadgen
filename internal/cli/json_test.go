@@ -339,9 +339,6 @@ func TestJSON_VerdictsAreFields(t *testing.T) {
 	if v := field(t, none, "invalid_reasons").([]any); len(v) != 0 {
 		t.Errorf("invalid_reasons = %v, want [] for a valid run", v)
 	}
-	if v := field(t, none, "limited_by"); v != nil {
-		t.Errorf("limited_by = %v, want null without a verdict", v)
-	}
 	if v := field(t, field(t, none, "methods").([]any)[0], "invalid_reason"); v != nil {
 		t.Errorf("invalid_reason = %v, want null for a method that measured load", v)
 	}
@@ -374,9 +371,6 @@ func TestJSON_VerdictsAreFields(t *testing.T) {
 		}},
 	}
 	out := writeJSON(t, jsonRun(limited))
-	if v := field(t, out, "limited_by"); v != "stream" {
-		t.Errorf("limited_by = %v, want stream", v)
-	}
 	for name, want := range map[string]float64{"stream_calls": 900, "stream_tail_calls": 900, "generator_calls": 7, "generator_tail_calls": 3} {
 		if v := field(t, out, "client_waits", name); v != want {
 			t.Errorf("client_waits.%s = %v, want %v", name, v, want)
@@ -384,6 +378,63 @@ func TestJSON_VerdictsAreFields(t *testing.T) {
 	}
 	if notes := field(t, out, "notes").([]any); len(notes) == 0 {
 		t.Error("notes is empty: the text notes go along, marked unstable")
+	}
+}
+
+// tail_wait_cause names the screen's verdict and nothing else: the cause ranked
+// by the tail, null when the screen names none. Its value leads to its counts
+// in client_waits. The old key limited_by is gone from every output.
+func TestJSON_TailWaitCause(t *testing.T) {
+	q := metrics.Quantile{Value: time.Millisecond, Exact: true, Defined: true}
+	moved := []engine.MethodReport{{
+		Method: "/pkg.S/M", Sent: 1000, P99: metrics.Quantile{Value: 50 * time.Millisecond, Exact: true, Defined: true},
+		P99WithoutClientWaits: q,
+	}}
+	still := []engine.MethodReport{{Method: "/pkg.S/M", Sent: 1000, P99: q, P99WithoutClientWaits: q}}
+
+	for _, tc := range []struct {
+		name   string
+		report engine.Report
+		want   any
+	}{
+		{"generator", engine.Report{GeneratorCauseCalls: 5, GeneratorTailCalls: 5, Methods: moved}, "generator"},
+		{"stream", engine.Report{StreamCauseCalls: 5, StreamTailCalls: 5, Methods: moved}, "stream"},
+		{"connection", engine.Report{ConnectionCauseCalls: 5, ConnectionTailCalls: 5, Methods: moved}, "connection"},
+		{"ranked by the tail, not the whole run", engine.Report{
+			GeneratorCauseCalls: 900, GeneratorTailCalls: 1, StreamCauseCalls: 10, StreamTailCalls: 9, Methods: moved,
+		}, "stream"},
+		{"nothing moved", engine.Report{StreamCauseCalls: 5, StreamTailCalls: 5, Methods: still}, nil},
+		{"causes in the run but none in the tail", engine.Report{GeneratorCauseCalls: 500, StreamCauseCalls: 40, Methods: moved}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if verdict := streamVerdict(tc.report) != ""; verdict != (tc.want != nil) {
+				t.Fatalf("screen verdict = %v, want %v: the fixture does not test what it names", verdict, tc.want != nil)
+			}
+
+			var buf bytes.Buffer
+			if err := WriteJSON(&buf, jsonRun(tc.report)); err != nil {
+				t.Fatalf("WriteJSON: %v", err)
+			}
+			if bytes.Contains(buf.Bytes(), []byte(`"limited_by"`)) {
+				t.Errorf("the output still has limited_by:\n%s", buf.String())
+			}
+			var out map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+				t.Fatalf("output is not one JSON object: %v", err)
+			}
+
+			got := field(t, out, "tail_wait_cause")
+			if got != tc.want {
+				t.Fatalf("tail_wait_cause = %v, want %v", got, tc.want)
+			}
+			if s, ok := got.(string); ok {
+				for _, key := range []string{s + "_calls", s + "_tail_calls"} {
+					if _, ok := field(t, out, "client_waits").(map[string]any)[key]; !ok {
+						t.Errorf("client_waits has no %s for tail_wait_cause %q", key, s)
+					}
+				}
+			}
+		})
 	}
 }
 

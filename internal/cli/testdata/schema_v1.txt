@@ -3,7 +3,7 @@ leettest_version string
 target string
 outcome string
 invalid_reasons []string
-limited_by string?
+tail_wait_cause string?
 started_at string
 duration_us int
 planned_us int

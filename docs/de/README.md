@@ -399,7 +399,7 @@ eingeschlossen.
 
 Entscheidungen sind Felder, kein Text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` oder `null`),
-`limited_by` (`generator`, `stream`, `connection` oder `null`, nach derselben Regel wie das Urteil
+`tail_wait_cause` (`generator`, `stream`, `connection` oder `null`, nach derselben Regel wie das Urteil
 auf dem Bildschirm) und die Zahlen je Ursache in `client_waits`. `notes` ist der Text der Hinweise
 für Menschen: Er wird frei umformuliert, parsen Sie ihn nicht.
 

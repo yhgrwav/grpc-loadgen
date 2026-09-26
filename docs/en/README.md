@@ -380,7 +380,7 @@ a method's seconds `Σ begun` plus `outside_timeline` is every call of the metho
 
 Decisions are fields, not text: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` or `null`),
-`limited_by` (`generator`, `stream`, `connection` or `null`, by the same rule as the screen's
+`tail_wait_cause` (`generator`, `stream`, `connection` or `null`, by the same rule as the screen's
 verdict) and the numbers per cause in `client_waits`. `notes` is the notes' text for people: it is
 reworded freely, do not parse it.
 

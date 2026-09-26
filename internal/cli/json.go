@@ -59,9 +59,9 @@ type JSONReport struct {
 	Outcome         string `json:"outcome"`
 	// InvalidReasons are why the run is invalid: in_flight_cap, nothing_measured.
 	InvalidReasons []string `json:"invalid_reasons"`
-	// LimitedBy is the client-side wait that set the tail: generator, stream
+	// TailWaitCause is the client-side wait that set the tail: generator, stream
 	// or connection; null without that verdict.
-	LimitedBy         *string         `json:"limited_by"`
+	TailWaitCause     *string         `json:"tail_wait_cause"`
 	StartedAt         string          `json:"started_at"`
 	DurationUS        int64           `json:"duration_us"`
 	PlannedUS         int64           `json:"planned_us"`
@@ -269,7 +269,7 @@ func NewJSONReport(run JSONRun) JSONReport {
 		WarmupNotSent:     r.WarmupNotSent,
 		StartLag:          jsonStartLag{P99: quantile(r.StartLagP99)},
 		InvalidReasons:    make([]string, 0, 2),
-		LimitedBy:         limitedBy(*r),
+		TailWaitCause:     tailWaitCause(*r),
 		ClientWaits: jsonClientWaits{
 			GeneratorCalls: r.GeneratorCauseCalls, StreamCalls: r.StreamCauseCalls, ConnectionCalls: r.ConnectionCauseCalls,
 			GeneratorTailCalls: r.GeneratorTailCalls, StreamTailCalls: r.StreamTailCalls, ConnectionTailCalls: r.ConnectionTailCalls,
@@ -394,7 +394,7 @@ func WriteJSON(w io.Writer, run JSONRun) error {
 }
 
 // jsonClientWaits count the calls that waited over the floor for each cause,
-// in all and among those that set each method's p99: the numbers limited_by
+// in all and among those that set each method's p99: the numbers tail_wait_cause
 // ranks.
 type jsonClientWaits struct {
 	GeneratorCalls      int `json:"generator_calls"`
@@ -405,8 +405,8 @@ type jsonClientWaits struct {
 	ConnectionTailCalls int `json:"connection_tail_calls"`
 }
 
-// limitedBy names verdictCause the way JSON does.
-func limitedBy(report engine.Report) *string {
+// tailWaitCause names verdictCause the way JSON does.
+func tailWaitCause(report engine.Report) *string {
 	c, ok := verdictCause(report)
 	if !ok {
 		return nil

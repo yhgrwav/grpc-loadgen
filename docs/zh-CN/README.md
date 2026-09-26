@@ -327,7 +327,7 @@ SIGTERM（`docker stop`、Kubernetes、取消 CI 任务）会立即中断在途�
 
 决策以字段给出，而不是文字：`invalid_reasons`（`in_flight_cap`、`nothing_measured`）、
 `methods[].invalid_reason`（`request_error`、`client_error`、`bad_response`、`mixed` 或 `null`）、
-`limited_by`（`generator`、`stream`、`connection` 或 `null`，与屏幕上的判定规则相同），以及
+`tail_wait_cause`（`generator`、`stream`、`connection` 或 `null`，与屏幕上的判定规则相同），以及
 `client_waits` 中按原因的数字。`notes` 是给人看的提示文字：措辞会随意调整，请不要解析它。
 
 ## 尚未实现
