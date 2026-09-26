@@ -57,11 +57,14 @@ type JSONReport struct {
 	LeetTestVersion string `json:"leettest_version"`
 	Target          string `json:"target"`
 	Outcome         string `json:"outcome"`
-	// InvalidReasons are why the run is invalid: in_flight_cap, nothing_measured.
+	// InvalidReasons are why the run is invalid: in_flight_cap, nothing_measured,
+	// clock_step.
 	InvalidReasons []string `json:"invalid_reasons"`
 	// TailWaitCause is the client-side wait that set the tail: generator, stream
 	// or connection; null without that verdict.
-	TailWaitCause     *string         `json:"tail_wait_cause"`
+	TailWaitCause *string `json:"tail_wait_cause"`
+	// ClockStepNS is the host clock step: every latency and wait is ± it.
+	ClockStepNS       int64           `json:"clock_step_ns"`
 	StartedAt         string          `json:"started_at"`
 	DurationUS        int64           `json:"duration_us"`
 	PlannedUS         int64           `json:"planned_us"`
@@ -270,11 +273,12 @@ func NewJSONReport(run JSONRun) JSONReport {
 		StartLag:          jsonStartLag{P99: quantile(r.StartLagP99)},
 		InvalidReasons:    make([]string, 0, 2),
 		TailWaitCause:     tailWaitCause(*r),
+		ClockStepNS:       int64(run.Run.ClockStep),
 		ClientWaits: jsonClientWaits{
 			GeneratorCalls: r.GeneratorCauseCalls, StreamCalls: r.StreamCauseCalls, ConnectionCalls: r.ConnectionCauseCalls,
 			GeneratorTailCalls: r.GeneratorTailCalls, StreamTailCalls: r.StreamTailCalls, ConnectionTailCalls: r.ConnectionTailCalls,
 		},
-		Notes:     reportNotes(*r, run.Run.MaxResponse),
+		Notes:     runNotes(run.Run),
 		Methods:   make([]jsonMethod, 0, len(r.Methods)),
 		Unchecked: make([]jsonUnchecked, 0, len(run.Run.Unchecked)),
 	}
@@ -312,6 +316,9 @@ func NewJSONReport(run JSONRun) JSONReport {
 
 			break
 		}
+	}
+	if ClockTooCoarse(run.Run) {
+		out.InvalidReasons = append(out.InvalidReasons, "clock_step")
 	}
 	for _, u := range run.Run.Unchecked {
 		reason := "reflection_failed"

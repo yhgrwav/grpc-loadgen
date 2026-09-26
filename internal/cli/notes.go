@@ -17,6 +17,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/yhgrwav/leettest/pkg/engine"
 )
@@ -235,6 +236,46 @@ func reportNotes(report engine.Report, maxResponse string) []string {
 	}
 
 	return notes
+}
+
+// runNotes are reportNotes and what the CLI measured beside the engine: the
+// host clock.
+func runNotes(run RunReport) []string {
+	notes := reportNotes(run.Report, run.MaxResponse)
+
+	if m := coarseClockMethod(run); m != nil {
+		notes = append(notes, fmt.Sprintf("invalid run: the clock step on this host (%s) is over a quarter of the p50 of\n"+
+			"%s (%s). Each latency is off by up to one step, so the percentiles are\n"+
+			"off by over 25%%. Run on a host with a finer clock, such as Linux next to the target.",
+			formatLatency(run.ClockStep), strings.TrimPrefix(m.Method, "/"), formatLatency(m.P50.Value)))
+	}
+	if run.ClockStep >= time.Microsecond {
+		line := fmt.Sprintf("clock step %s on this host: every latency and wait is ± %s",
+			formatLatency(run.ClockStep), formatLatency(run.ClockStep))
+		if run.WaitFloor > engine.StreamWaitFloor {
+			line += fmt.Sprintf("; a wait counts from %s, four steps", formatLatency(run.WaitFloor))
+		}
+		notes = append(notes, line+".")
+	}
+	if run.TimerNotRaised {
+		notes = append(notes, "timer resolution not raised: the host refused a finer timer, and the clock step may\n"+
+			"have grown during the run where neither measure of it saw.")
+	}
+
+	return notes
+}
+
+// coarseClockMethod is the first method whose p50 the clock step is over a
+// quarter of, or nil.
+func coarseClockMethod(run RunReport) *engine.MethodReport {
+	for i := range run.Methods {
+		m := &run.Methods[i]
+		if m.P50.Defined && 4*run.ClockStep > m.P50.Value {
+			return m
+		}
+	}
+
+	return nil
 }
 
 func share(part, whole int) float64 {

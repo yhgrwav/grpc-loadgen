@@ -140,6 +140,37 @@ func TestStats_StreamWaitIsOverSentCallsAboveTheFloor(t *testing.T) {
 	}
 }
 
+// Ground: boundary — on a 0.502 ms clock a wait of 0.51 ms can read as two ticks, 1.004 ms,
+// and pass a 1 ms floor; the floor is four steps, 2.008 ms, and the report carries it.
+func TestStats_TheWaitFloorFollowsTheClockStep(t *testing.T) {
+	step := 502 * time.Microsecond
+	if got := WaitFloorFor(step); got != 2008*time.Microsecond {
+		t.Errorf("WaitFloorFor(%v) = %v, want 2.008ms", step, got)
+	}
+	if got := WaitFloorFor(40 * time.Nanosecond); got != StreamWaitFloor {
+		t.Errorf("WaitFloorFor(40ns) = %v, want %v on a fine clock", got, StreamWaitFloor)
+	}
+
+	stats := NewStats()
+	stats.SetWaitFloor(WaitFloorFor(step))
+	start := time.Now()
+	stats.Start(start, 0)
+	at := start.Add(time.Second)
+	sentAfter(stats, at, 1506*time.Microsecond, 10*time.Millisecond)
+	sentAfter(stats, at, 2510*time.Microsecond, 10*time.Millisecond)
+	stats.EndSending(start.Add(2 * time.Second))
+	stats.Finish(start.Add(2 * time.Second))
+
+	r := stats.Report()
+	if r.StreamWaited != 1 || r.StreamCauseCalls != 1 {
+		t.Errorf("waited %d, cause calls %d, want 1 and 1: 1.506ms is three ticks, under the floor",
+			r.StreamWaited, r.StreamCauseCalls)
+	}
+	if r.WaitFloor != 2008*time.Microsecond {
+		t.Errorf("report floor = %v, want 2.008ms", r.WaitFloor)
+	}
+}
+
 // Ground: contract — the p99 the target saw is the same calls with the wait taken out; the
 // verdict compares the two, so a wrong one shows a limit where there is none or hides one.
 func TestStats_P99WithoutStreamWaitTakesTheWaitOut(t *testing.T) {

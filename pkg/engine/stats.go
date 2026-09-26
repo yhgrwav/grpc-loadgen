@@ -277,6 +277,8 @@ type Report struct {
 	GeneratorCauseCalls  int
 	ConnectionCauseCalls int
 	StreamCauseCalls     int
+	// WaitFloor is the wait a call had to exceed to count as waiting.
+	WaitFloor time.Duration
 	// GeneratorTailCalls, ConnectionTailCalls and StreamTailCalls count the
 	// same, but only among the calls that set each method's printed p99 — at
 	// or above it — plus the unsent calls kept back by the cause. They say
@@ -297,7 +299,9 @@ type Report struct {
 }
 
 type Stats struct {
-	mu        sync.Mutex
+	mu sync.Mutex
+	// floor is the wait a call must exceed to count as waiting.
+	floor     time.Duration
 	startedAt time.Time
 	// sendingEndedAt is when the schedule stopped handing out calls: its
 	// planned end or an earlier stop. Zero until reported.
@@ -373,6 +377,7 @@ func NewStats() *Stats {
 		byMethod:   make(map[string]*methodStats),
 		startLag:   metrics.NewUncensoredLatencies(),
 		streamWait: metrics.NewUncensoredLatencies(),
+		floor:      StreamWaitFloor,
 	}
 }
 
@@ -483,7 +488,7 @@ func (s *Stats) Record(r Result) {
 
 	// A call that never went out tells nothing about the target: it is in
 	// none of the counts or distributions that are about it.
-	gen, conn, stream := r.QueueTime() > StreamWaitFloor, r.ConnWait > StreamWaitFloor, r.StreamWait > StreamWaitFloor
+	gen, conn, stream := r.QueueTime() > s.floor, r.ConnWait > s.floor, r.StreamWait > s.floor
 	if r.NotSent {
 		s.notSent++
 		method.unsentOut++
@@ -858,6 +863,7 @@ func (s *Stats) Report() Report {
 		GeneratorCauseCalls:  waited[0],
 		ConnectionCauseCalls: waited[1],
 		StreamCauseCalls:     waited[2],
+		WaitFloor:            s.floor,
 	}
 
 	var tail [3]int
@@ -984,3 +990,16 @@ func (s *Stats) countWaits(gen, conn, stream bool) {
 // waited — for a stream, and for the generator and the connection alike. A hypothesis: a stream granted at once still takes a few
 // microseconds between picking the connection and writing headers.
 const StreamWaitFloor = time.Millisecond
+
+// WaitFloorFor is the floor on a clock of this step: StreamWaitFloor, or four
+// steps when that is more, so a wait counted is off by at most 25%.
+func WaitFloorFor(step time.Duration) time.Duration {
+	return max(StreamWaitFloor, 4*step)
+}
+
+// SetWaitFloor replaces StreamWaitFloor for the calls recorded after it.
+func (s *Stats) SetWaitFloor(floor time.Duration) {
+	s.mu.Lock()
+	s.floor = floor
+	s.mu.Unlock()
+}

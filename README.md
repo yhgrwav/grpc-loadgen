@@ -211,6 +211,12 @@ $ leettest -c leettest.yaml
 при 1000 RPS генератор на хосте через проброс портов Docker Desktop показал p99 38 мс, а внутри
 сети Docker — 2 мс: цель одна и та же, в первом случае мерили сеть Docker, а не её.
 
+**Часы.** Время на Windows идёт шагами системного таймера: 0,5–1 мс, а если его никто не поднял,
+15,6 мс. На время прогона инструмент просит у системы самый мелкий шаг, меряет его до и после
+прогона и печатает: `clock step 502us on this host: every latency and wait is ± 502us`. Если шаг
+больше четверти p50 какого-либо метода, прогон недействителен (код 2): при p50 = 2 мс допустим шаг до
+0,5 мс. На Linux и macOS шаг — десятки наносекунд, строки нет.
+
 | Флаг | Что делает |
 |---|---|
 | `-c` | Путь к конфигу |
@@ -366,7 +372,7 @@ SIGTERM (`docker stop`, Kubernetes, отмена джоба в CI) сразу о
 Сверка: итоги прогона — сумма итогов методов, а по секундам метода `Σ begun` плюс
 `outside_timeline` — все его вызовы, включая прогрев.
 
-Решения — полями, а не текстом: `invalid_reasons` (`in_flight_cap`, `nothing_measured`),
+Решения — полями, а не текстом: `invalid_reasons` (`in_flight_cap`, `nothing_measured`, `clock_step`),
 `methods[].invalid_reason` (`request_error`, `client_error`, `bad_response`, `mixed` или `null`),
 `tail_wait_cause` (`generator`, `stream`, `connection` или `null` — то же правило, что у вердикта на
 экране) и числа по причинам в `client_waits`. `notes` — текст заметок для человека: он меняется
