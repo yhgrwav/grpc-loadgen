@@ -263,10 +263,6 @@ func runNotes(run RunReport) []string {
 		}
 		notes = append(notes, line+".")
 	}
-	if run.TimerNotRaised {
-		notes = append(notes, "timer resolution not raised: the host refused a finer timer, and the clock step may\n"+
-			"have grown during the run where neither measure of it saw.")
-	}
 
 	return notes
 }

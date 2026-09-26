@@ -249,10 +249,8 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		sender = grpcSender
 	}
 
-	// Raise, measure, run, measure, restore: the floor of "waited" is set by
-	// the step before the run, the report prints the larger of the two.
-	restoreTimer, timerRaised := clock.Raise()
-	defer restoreTimer()
+	// Measure, run, measure: the floor of "waited" is set by the step before
+	// the run, the report prints the larger of the two.
 	stepBefore := clockStep()
 
 	opts := engine.Options{
@@ -368,7 +366,6 @@ func run(ctx context.Context, stops, aborts <-chan struct{}, args []string, stdo
 		return cli.RunReport{
 			Report: eng.Report(), Unchecked: unchecked, MaxResponse: maxResponse,
 			ClockStep: max(stepBefore, time.Duration(stepAfter.Load())), ClockStepBefore: stepBefore,
-			TimerNotRaised: !timerRaised,
 		}
 	}
 
