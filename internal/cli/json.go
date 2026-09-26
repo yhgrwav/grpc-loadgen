@@ -63,7 +63,7 @@ type JSONReport struct {
 	// TailWaitCause is the client-side wait that set the tail: generator, stream
 	// or connection; null without that verdict.
 	TailWaitCause *string `json:"tail_wait_cause"`
-	// ClockStepNS is the host clock step: every latency and wait is ± it.
+	// ClockStepNS is the host clock step: every latency and wait is +/- it.
 	ClockStepNS       int64           `json:"clock_step_ns"`
 	StartedAt         string          `json:"started_at"`
 	DurationUS        int64           `json:"duration_us"`

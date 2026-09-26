@@ -31,7 +31,7 @@ func printedRun(run RunReport) string {
 // Every latency is a difference of two stamps, each off by up to one step.
 func TestClockStep_TheNoteSaysPlusMinusAStep(t *testing.T) {
 	step := 502 * time.Microsecond
-	want := fmt.Sprintf("clock step %s on this host: every latency and wait is ± %s", formatLatency(step), formatLatency(step))
+	want := fmt.Sprintf("clock step %s on this host: every latency and wait is +/- %s", formatLatency(step), formatLatency(step))
 	if out := printedRun(clockRun(step, 10*time.Millisecond)); !strings.Contains(out, want) {
 		t.Errorf("no %q in:\n%s", want, out)
 	}
@@ -94,6 +94,19 @@ func TestClockStep_TheFloorSaysWhichMeasureItCameFrom(t *testing.T) {
 	want := "a wait counts from " + formatLatency(run.WaitFloor) + ", four steps of the " + formatLatency(run.ClockStepBefore) + " before the run"
 	if out := printedRun(run); !strings.Contains(out, want) {
 		t.Errorf("no %q in:\n%s", want, out)
+	}
+}
+
+// cmd.exe in code page 866 prints a UTF-8 "±" as two garbage characters.
+func TestClockStep_NotesAreASCII(t *testing.T) {
+	run := clockRun(15625*time.Microsecond, 2*time.Millisecond)
+	run.ClockStepBefore = 500 * time.Microsecond
+	run.WaitFloor = 2 * time.Millisecond
+	run.TimerNotRaised = true
+	for _, note := range runNotes(run) {
+		if !isASCII(note) {
+			t.Errorf("not ASCII: %q", note)
+		}
 	}
 }
 
