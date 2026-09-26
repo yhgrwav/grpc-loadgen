@@ -255,7 +255,7 @@ func runNotes(run RunReport) []string {
 			formatLatency(run.ClockStep), strings.TrimPrefix(m.Method, "/"), formatLatency(m.P50.Value)))
 	}
 	if run.ClockStep >= time.Microsecond {
-		line := fmt.Sprintf("clock step %s on this host: every latency and wait is ± %s",
+		line := fmt.Sprintf("clock step %s on this host: every latency and wait is +/- %s",
 			formatLatency(run.ClockStep), formatLatency(run.ClockStep))
 		if run.WaitFloor > engine.StreamWaitFloor {
 			line += fmt.Sprintf("; a wait counts from %s, four steps of the %s before the run",
