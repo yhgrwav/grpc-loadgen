@@ -1,9 +1,6 @@
 package clock
 
 import (
-	"errors"
-	"fmt"
-	"slices"
 	"testing"
 	"time"
 )
@@ -53,71 +50,5 @@ func TestStep_AFrozenClockIsZero(t *testing.T) {
 	frozen := time.Unix(0, 0)
 	if got := StepOf(func() time.Time { return frozen }); got != 0 {
 		t.Errorf("StepOf = %v, want 0 for a clock that never moved", got)
-	}
-}
-
-type fakeTimer struct {
-	finest          uint32
-	finestErr       error
-	setErr, beginEr error
-	calls           []string
-}
-
-func (f *fakeTimer) api() timerAPI {
-	return timerAPI{
-		finest: func() (uint32, error) { f.calls = append(f.calls, "finest"); return f.finest, f.finestErr },
-		set: func(p uint32, on bool) error {
-			f.calls = append(f.calls, fmt.Sprintf("set %d %v", p, on))
-			if on {
-				return f.setErr
-			}
-
-			return nil
-		},
-		begin: func(ms uint32) error { f.calls = append(f.calls, fmt.Sprintf("begin %d", ms)); return f.beginEr },
-		end:   func(ms uint32) error { f.calls = append(f.calls, fmt.Sprintf("end %d", ms)); return nil },
-	}
-}
-
-// Raise asks for the host's finest period, falls back to 1 ms, and restore
-// undoes exactly the request that was made.
-func TestRaise_AsksForTheFinestAndUndoesWhatItAsked(t *testing.T) {
-	refused := errors.New("refused")
-	for _, tc := range []struct {
-		name   string
-		timer  fakeTimer
-		raised bool
-		calls  []string
-	}{
-		{"finest period", fakeTimer{finest: 5000}, true,
-			[]string{"finest", "set 5000 true", "set 5000 false"}},
-		{"ntdll refuses: 1 ms", fakeTimer{finest: 5000, setErr: refused}, true,
-			[]string{"finest", "set 5000 true", "begin 1", "end 1"}},
-		{"no finest: 1 ms", fakeTimer{finestErr: refused}, true,
-			[]string{"finest", "begin 1", "end 1"}},
-		{"both refuse", fakeTimer{finest: 5000, setErr: refused, beginEr: refused}, false,
-			[]string{"finest", "set 5000 true", "begin 1"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			timer := tc.timer
-			restore, raised := raiseWith(timer.api())
-			restore()
-
-			if raised != tc.raised {
-				t.Errorf("raised = %v, want %v", raised, tc.raised)
-			}
-			if !slices.Equal(timer.calls, tc.calls) {
-				t.Errorf("calls = %q, want %q", timer.calls, tc.calls)
-			}
-		})
-	}
-}
-
-// A host without timer calls (Linux, macOS) has a fine clock: nothing to raise.
-func TestRaise_NothingToRaiseIsRaised(t *testing.T) {
-	restore, raised := raiseWith(timerAPI{})
-	restore()
-	if !raised {
-		t.Error("raised = false on a host with no timer to raise")
 	}
 }

@@ -40,9 +40,6 @@ type RunReport struct {
 	// ClockStepBefore is the step measured before the run, which set the
 	// engine's wait floor; 0 when not measured.
 	ClockStepBefore time.Duration
-	// TimerNotRaised says the host refused a finer timer: the step may have
-	// coarsened mid-run where neither measure saw it.
-	TimerNotRaised bool
 }
 
 // ClockTooCoarse says the clock step is over a quarter of some method's p50.

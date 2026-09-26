@@ -102,22 +102,10 @@ func TestClockStep_NotesAreASCII(t *testing.T) {
 	run := clockRun(15625*time.Microsecond, 2*time.Millisecond)
 	run.ClockStepBefore = 500 * time.Microsecond
 	run.WaitFloor = 2 * time.Millisecond
-	run.TimerNotRaised = true
 	for _, note := range runNotes(run) {
 		if !isASCII(note) {
 			t.Errorf("not ASCII: %q", note)
 		}
-	}
-}
-
-func TestClockStep_ATimerNotRaisedIsNoted(t *testing.T) {
-	run := clockRun(502*time.Microsecond, 10*time.Millisecond)
-	run.TimerNotRaised = true
-	if out := printedRun(run); !strings.Contains(out, "timer resolution not raised") {
-		t.Errorf("no note on the timer:\n%s", out)
-	}
-	if out := printedRun(clockRun(502*time.Microsecond, 10*time.Millisecond)); strings.Contains(out, "timer resolution") {
-		t.Errorf("a raised timer is noted:\n%s", out)
 	}
 }
 
